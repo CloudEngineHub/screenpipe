@@ -261,11 +261,13 @@ pub async fn record_video(
             );
             if !video_capture.check_health() {
                 error!(
-                    "One or more VideoCapture tasks have terminated for monitor {}",
+                    "One or more VideoCapture tasks have terminated for monitor {}, triggering restart",
                     monitor_id
                 );
-                // Instead of immediately failing, log the error and continue
-                // This helps us diagnose which task is failing
+                return Err(anyhow::anyhow!(
+                    "VideoCapture task(s) terminated for monitor {}",
+                    monitor_id
+                ));
             }
         }
 
@@ -293,7 +295,7 @@ pub async fn record_video(
                 Some(info) => info.offset as i64,
                 None => {
                     video_capture.metrics.record_drop();
-                    debug!(
+                    warn!(
                         "Skipping frame {} - not written to video within 5s timeout",
                         frame.frame_number
                     );

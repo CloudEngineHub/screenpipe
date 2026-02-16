@@ -299,7 +299,7 @@ impl VideoCapture {
                         );
                         return false;
                     }
-                    debug!(
+                    warn!(
                         "{} queue was full, dropped oldest frame, new size: {}/{}",
                         queue_name,
                         queue.len(),
@@ -442,7 +442,7 @@ impl VideoCapture {
                         );
                         return false;
                     }
-                    debug!(
+                    warn!(
                         "{} queue was full, dropped oldest frame, new size: {}/{}",
                         queue_name,
                         queue.len(),
@@ -818,6 +818,19 @@ async fn save_frames_as_video(
             .await;
         }
 
+        // Detect FFmpeg write failure: process_frames sets current_stdin to None
+        // when writes fail. Kill the dead process so the outer loop starts a fresh chunk.
+        if current_stdin.is_none() && current_ffmpeg.is_some() {
+            if let Some(mut child) = current_ffmpeg.take() {
+                error!(
+                    "FFmpeg write failure detected for monitor {}, killing process to recover",
+                    monitor_id
+                );
+                let _ = child.kill().await;
+            }
+            // current_ffmpeg is now None → outer loop condition triggers chunk rotation
+        }
+
         // Update total frame count
         frames_total = frames_total.max(frame_count);
 
@@ -887,6 +900,8 @@ async fn process_frames(
             if let Some(stdin) = current_stdin.as_mut() {
                 if let Err(e) = write_frame_with_retry(stdin, &buffer).await {
                     error!("Failed to write frame to ffmpeg after max retries: {}", e);
+                    // Signal the outer loop that FFmpeg is broken by dropping stdin
+                    *current_stdin = None;
                     break;
                 }
 
@@ -1209,5 +1224,185 @@ mod tests {
 
         assert_eq!(width, 3840, "Expected width 3840, got {}", width);
         assert_eq!(height, 1440, "Expected height 1440, got {}", height);
+    }
+
+    // --- Reliability fix tests ---
+
+    /// Test that FrameWriteTracker returns None when frame was never written (timeout)
+    #[tokio::test]
+    async fn test_frame_write_tracker_timeout_returns_none() {
+        let tracker = FrameWriteTracker::new();
+        // Wait for a frame that was never recorded — should return None after timeout
+        let result = tracker
+            .wait_for_offset(42, Duration::from_millis(100))
+            .await;
+        assert!(
+            result.is_none(),
+            "Expected None for unwritten frame, got {:?}",
+            result
+        );
+    }
+
+    /// Test that FrameWriteTracker returns immediately for already-written frames
+    #[tokio::test]
+    async fn test_frame_write_tracker_immediate_return() {
+        let tracker = FrameWriteTracker::new();
+        tracker.record_write(7, 3, "/tmp/test.mp4".to_string());
+
+        let result = tracker
+            .wait_for_offset(7, Duration::from_secs(5))
+            .await;
+        assert!(result.is_some(), "Expected Some for written frame");
+        let info = result.unwrap();
+        assert_eq!(info.offset, 3);
+        assert_eq!(info.video_path, "/tmp/test.mp4");
+    }
+
+    /// Test that FrameWriteTracker wakes waiter when frame is recorded concurrently
+    #[tokio::test]
+    async fn test_frame_write_tracker_concurrent_notify() {
+        let tracker = Arc::new(FrameWriteTracker::new());
+        let tracker_writer = tracker.clone();
+
+        // Spawn a delayed write
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            tracker_writer.record_write(99, 5, "/tmp/test2.mp4".to_string());
+        });
+
+        // Wait should succeed well before the 5s timeout
+        let start = std::time::Instant::now();
+        let result = tracker
+            .wait_for_offset(99, Duration::from_secs(5))
+            .await;
+        let elapsed = start.elapsed();
+
+        assert!(result.is_some(), "Expected Some for concurrently written frame");
+        assert!(
+            elapsed < Duration::from_secs(1),
+            "Should have woken up quickly, took {:?}",
+            elapsed
+        );
+    }
+
+    /// Test that writing to a dead FFmpeg process returns an error
+    #[tokio::test]
+    async fn test_write_to_dead_ffmpeg_fails() {
+        let temp_dir = tempdir().expect("Failed to create temp dir");
+        let output_path = temp_dir.path().join("test_dead.mp4");
+        let output_str = output_path.to_str().unwrap();
+
+        let mut child = start_ffmpeg_process(output_str, 1.0, "balanced")
+            .await
+            .expect("Failed to start FFmpeg");
+        let mut stdin = child.stdin.take().expect("Failed to get stdin");
+
+        // Kill the process
+        child.kill().await.expect("Failed to kill FFmpeg");
+        let _ = child.wait().await;
+
+        // Write should fail — this is the trigger for our recovery path
+        let png_data = create_test_png(640, 480);
+        let result = write_frame_with_retry(&mut stdin, &png_data).await;
+        assert!(
+            result.is_err(),
+            "Expected error writing to dead FFmpeg, got Ok"
+        );
+    }
+
+    /// Test that queue overflow drops oldest frame and accepts new one
+    #[tokio::test]
+    async fn test_queue_overflow_drops_oldest() {
+        use crossbeam::queue::ArrayQueue;
+        use image::DynamicImage;
+
+        let queue: ArrayQueue<Arc<RawCaptureResult>> = ArrayQueue::new(2);
+
+        let make_frame = |n: u64| -> Arc<RawCaptureResult> {
+            Arc::new(RawCaptureResult {
+                image: DynamicImage::new_rgb8(1, 1),
+                window_images: vec![],
+                frame_number: n,
+                timestamp: std::time::Instant::now(),
+                captured_at: chrono::Utc::now(),
+            })
+        };
+
+        // Fill queue to capacity
+        assert!(queue.push(make_frame(1)).is_ok());
+        assert!(queue.push(make_frame(2)).is_ok());
+        assert_eq!(queue.len(), 2);
+
+        // Third push should fail
+        assert!(queue.push(make_frame(3)).is_err());
+
+        // Simulate push_to_raw_queue overflow logic: pop oldest, push new
+        queue.pop(); // drops frame 1
+        assert!(queue.push(make_frame(3)).is_ok());
+
+        // Queue should contain frames 2 and 3 (frame 1 was dropped)
+        let first = queue.pop().unwrap();
+        let second = queue.pop().unwrap();
+        assert_eq!(first.frame_number, 2, "Expected frame 2 (oldest surviving)");
+        assert_eq!(second.frame_number, 3, "Expected frame 3 (newest)");
+    }
+
+    /// Test FFmpeg recovery signal: process_frames sets stdin to None on write failure
+    #[tokio::test]
+    async fn test_process_frames_signals_broken_stdin() {
+        use crossbeam::queue::ArrayQueue;
+        use image::DynamicImage;
+
+        let temp_dir = tempdir().expect("Failed to create temp dir");
+        let output_path = temp_dir.path().join("test_signal.mp4");
+        let output_str = output_path.to_str().unwrap();
+
+        // Start and immediately kill FFmpeg to get a broken stdin
+        let mut child = start_ffmpeg_process(output_str, 1.0, "balanced")
+            .await
+            .expect("Failed to start FFmpeg");
+        let stdin = child.stdin.take().expect("Failed to get stdin");
+        child.kill().await.expect("Failed to kill FFmpeg");
+        let _ = child.wait().await;
+
+        let mut current_stdin: Option<ChildStdin> = Some(stdin);
+        let frame_queue: Arc<ArrayQueue<Arc<RawCaptureResult>>> = Arc::new(ArrayQueue::new(10));
+        let tracker = Arc::new(FrameWriteTracker::new());
+        let metrics = Arc::new(PipelineMetrics::new());
+
+        // Push a frame into the queue
+        assert!(frame_queue
+            .push(Arc::new(RawCaptureResult {
+                image: DynamicImage::new_rgb8(64, 64),
+                window_images: vec![],
+                frame_number: 0,
+                timestamp: std::time::Instant::now(),
+                captured_at: chrono::Utc::now(),
+            }))
+            .is_ok());
+
+        let mut frame_count = 0usize;
+        process_frames(
+            &frame_queue,
+            &mut current_stdin,
+            &mut frame_count,
+            100,
+            1.0,
+            &tracker,
+            output_str,
+            &metrics,
+        )
+        .await;
+
+        // Key assertion: stdin should be None, signaling the outer loop to recover
+        assert!(
+            current_stdin.is_none(),
+            "Expected stdin to be None after write failure — this signals FFmpeg recovery"
+        );
+        // Frame should NOT have been recorded in tracker
+        assert!(
+            tracker.get_offset(0).is_none(),
+            "Frame should not be in tracker after write failure"
+        );
     }
 }
