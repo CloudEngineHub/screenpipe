@@ -38,18 +38,9 @@ fn build_command_for_path(path: &str) -> Command {
 
 /// On Unix, pi's shebang is `#!/usr/bin/env node` but screenpipe only bundles
 /// bun. Run `bun <pi_path>` so it works without node installed.
-///
-/// NOTE: We prefer the user's system bun over the bundled bun for running Pi.
-/// The bundled bun (in the .app bundle) causes Pi to hang during startup due to
-/// Metal/GPU native module loading in the sandboxed app context. The system bun
-/// (installed at ~/.bun/bin/bun) does not have this issue.
 #[cfg(not(windows))]
 fn build_command_for_path(path: &str) -> Command {
-    if let Some(bun) = find_user_bun_executable() {
-        let mut cmd = Command::new(bun);
-        cmd.arg(path);
-        cmd
-    } else if let Some(bun) = find_bun_executable() {
+    if let Some(bun) = find_bun_executable() {
         let mut cmd = Command::new(bun);
         cmd.arg(path);
         cmd
@@ -74,11 +65,7 @@ fn build_async_command_for_path(path: &str) -> tokio::process::Command {
 /// bun. Run `bun <pi_path>` so it works without node installed.
 #[cfg(not(windows))]
 fn build_async_command_for_path(path: &str) -> tokio::process::Command {
-    if let Some(bun) = find_user_bun_executable() {
-        let mut cmd = tokio::process::Command::new(bun);
-        cmd.arg(path);
-        cmd
-    } else if let Some(bun) = find_bun_executable() {
+    if let Some(bun) = find_bun_executable() {
         let mut cmd = tokio::process::Command::new(bun);
         cmd.arg(path);
         cmd
@@ -661,6 +648,26 @@ pub async fn pi_start_inner(
         }
     }
 
+    // On macOS, isolate the child process from the parent Tauri app's Metal/GPU
+    // context. Without this, Pi's native modules (clipboard-darwin-universal) try
+    // to initialize Metal and deadlock on inherited Mach ports from the webview.
+    // setsid() creates a new session; closing FDs 3+ drops inherited Mach ports.
+    #[cfg(target_os = "macos")]
+    {
+        use std::os::unix::process::CommandExt;
+        unsafe {
+            cmd.pre_exec(|| {
+                libc::setsid();
+                let max_fd = libc::sysconf(libc::_SC_OPEN_MAX) as i32;
+                let max_fd = if max_fd > 0 { max_fd.min(4096) } else { 1024 };
+                for fd in 3..max_fd {
+                    libc::close(fd);
+                }
+                Ok(())
+            });
+        }
+    }
+
     // Spawn process
     let mut child = cmd.spawn()
         .map_err(|e| format!("Failed to spawn pi: {}", e))?;
@@ -709,7 +716,7 @@ pub async fn pi_start_inner(
                     let event_type = serde_json::from_str::<Value>(&line)
                         .ok()
                         .and_then(|v| v.get("type").and_then(|t| t.as_str()).map(|s| s.to_string()));
-                    info!("Pi stdout #{} (pid {}): type={}", line_count, pid,
+                    debug!("Pi stdout #{} (pid {}): type={}", line_count, pid,
                         event_type.as_deref().unwrap_or("non-json"));
 
                     // Try to parse as JSON and emit event
@@ -751,7 +758,7 @@ pub async fn pi_start_inner(
                         // Try to parse as JSON RPC event and forward like stdout
                         if let Ok(event) = serde_json::from_str::<Value>(&line) {
                             let event_type = event.get("type").and_then(|t| t.as_str()).unwrap_or("?");
-                            info!("Pi stderr JSON: type={}", event_type);
+                            debug!("Pi stderr JSON: type={}", event_type);
                             if let Err(e) = app_handle.emit("pi_event", &event) {
                                 error!("Failed to emit pi_event from stderr: {}", e);
                             }
@@ -760,7 +767,7 @@ pub async fn pi_start_inner(
                             }
                         } else {
                             // Not JSON — log as plain stderr
-                            info!("Pi stderr (non-JSON): {}", &line[..line.len().min(200)]);
+                            debug!("Pi stderr (non-JSON): {}", &line[..line.len().min(200)]);
                         }
                         let _ = app_handle.emit("pi_log", &line);
                     }
@@ -1025,35 +1032,6 @@ pub fn kill(pid: u32) -> Result<(), String> {
             .output();
     }
     Ok(())
-}
-
-/// Find the user's system-installed bun (skipping the bundled app bun).
-/// The bundled bun in the .app bundle causes Pi to hang on macOS due to
-/// Metal/GPU native module loading. Prefer the user's own bun for running Pi.
-fn find_user_bun_executable() -> Option<String> {
-    let home = dirs::home_dir()
-        .map(|h| h.to_string_lossy().to_string())
-        .unwrap_or_default();
-
-    #[cfg(unix)]
-    let paths = vec![
-        format!("{}/.bun/bin/bun", home),
-        "/opt/homebrew/bin/bun".to_string(),
-        "/usr/local/bin/bun".to_string(),
-    ];
-
-    #[cfg(windows)]
-    let paths = vec![
-        format!("{}\\.bun\\bin\\bun.exe", home),
-        format!("{}\\AppData\\Local\\bun\\bin\\bun.exe", home),
-    ];
-
-    for path in paths {
-        if std::path::Path::new(&path).exists() {
-            return Some(path);
-        }
-    }
-    None
 }
 
 /// Find bun executable (shared by pi_install and ensure_pi_installed_background)
