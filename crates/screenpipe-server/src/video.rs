@@ -178,7 +178,7 @@ impl VideoCapture {
         output_path: &str,
         fps: f64,
         video_chunk_duration: Duration,
-        new_chunk_callback: impl Fn(&str, f64) + Send + Sync + 'static,
+        new_chunk_callback: impl Fn(&str, f64) -> tokio::task::JoinHandle<()> + Send + Sync + 'static,
         ocr_engine: Arc<OcrEngine>,
         monitor_id: u32,
         ignore_list: &[String],
@@ -685,7 +685,7 @@ async fn save_frames_as_video(
     frame_queue: &Arc<ArrayQueue<Arc<RawCaptureResult>>>,
     output_path: &str,
     fps: f64,
-    new_chunk_callback: Arc<dyn Fn(&str, f64) + Send + Sync>,
+    new_chunk_callback: Arc<dyn Fn(&str, f64) -> tokio::task::JoinHandle<()> + Send + Sync>,
     monitor_id: u32,
     video_chunk_duration: Duration,
     frame_write_tracker: &Arc<FrameWriteTracker>,
@@ -763,9 +763,19 @@ async fn save_frames_as_video(
                     frame_count += 1;
                     frames_total += 1;
 
-                    // Register in DB only after first frame is written successfully
-                    // This ensures the file has valid headers and content before timeline can request it
-                    new_chunk_callback(&output_file, fps);
+                    // Register in DB only after first frame is written successfully.
+                    // This ensures the file has valid headers and content before timeline can request it.
+                    // IMPORTANT: We await the DB insert to guarantee the video_chunk row exists
+                    // before any frames try to reference it via insert_frames_with_ocr_batch.
+                    // Previously this was fire-and-forget (tokio::spawn without await), which
+                    // caused silent data loss when the insert failed or was slow.
+                    let chunk_handle = new_chunk_callback(&output_file, fps);
+                    if let Err(e) = chunk_handle.await {
+                        error!(
+                            "Video chunk registration panicked for monitor {}: {}",
+                            monitor_id, e
+                        );
+                    }
 
                     current_ffmpeg = Some(child);
                     current_stdin = Some(stdin);

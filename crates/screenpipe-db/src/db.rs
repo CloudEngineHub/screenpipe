@@ -831,6 +831,10 @@ impl DatabaseManager {
         let (video_chunk_id, file_path) = match video_chunk {
             Some((id, path)) => (id, path),
             None => {
+                tracing::warn!(
+                    "No video chunk found for device '{}' — frames will not be inserted",
+                    device_name
+                );
                 // tx will rollback automatically on drop
                 return Ok(vec![]);
             }

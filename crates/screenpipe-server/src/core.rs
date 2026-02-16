@@ -177,12 +177,11 @@ pub async fn record_video(
     let new_chunk_callback = {
         let db_clone = Arc::clone(&db);
         let device_name_clone = Arc::clone(&device_name);
-        move |file_path: &str, chunk_fps: f64| {
+        move |file_path: &str, chunk_fps: f64| -> tokio::task::JoinHandle<()> {
             let file_path = file_path.to_string();
             let db = Arc::clone(&db_clone);
             let device_name = Arc::clone(&device_name_clone);
 
-            // Just spawn the task directly
             tokio::spawn(async move {
                 debug!(
                     "Inserting new video chunk: {} (fps={})",
@@ -196,7 +195,7 @@ pub async fn record_video(
                 } else {
                     debug!("Successfully inserted video chunk: {}", file_path);
                 }
-            });
+            })
         }
     };
 
@@ -423,11 +422,14 @@ pub async fn record_video(
         // Check if we're seeing too many consecutive DB errors
         if consecutive_db_errors > MAX_CONSECUTIVE_DB_ERRORS {
             error!(
-                "Excessive consecutive database errors ({}), vision processing may be impaired",
-                consecutive_db_errors
+                "Excessive consecutive database errors ({}) for monitor {}, triggering restart",
+                consecutive_db_errors, monitor_id
             );
-            // Instead of failing, we'll continue but log the issue clearly
-            consecutive_db_errors = 0; // Reset to prevent continuous error logging
+            return Err(anyhow::anyhow!(
+                "Too many consecutive DB errors ({}) for monitor {}",
+                consecutive_db_errors,
+                monitor_id
+            ));
         }
     }
 }
