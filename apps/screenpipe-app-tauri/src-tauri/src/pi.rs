@@ -216,6 +216,19 @@ impl PiManager {
         }
 
         let cmd_str = serde_json::to_string(&cmd).map_err(|e| e.to_string())?;
+
+        // Log raw FD and child PID for pipe debugging
+        #[cfg(unix)]
+        {
+            use std::os::unix::io::AsRawFd;
+            let fd = stdin.as_raw_fd();
+            let child_pid = self.child.as_ref().map(|c| c.id());
+            info!("Sending to Pi (req_{}): type={}, stdin_fd={}, child_pid={:?}, bytes={}",
+                self.request_id,
+                cmd.get("type").and_then(|t| t.as_str()).unwrap_or("?"),
+                fd, child_pid, cmd_str.len() + 1);
+        }
+        #[cfg(not(unix))]
         info!("Sending to Pi (req_{}): type={}", self.request_id, cmd.get("type").and_then(|t| t.as_str()).unwrap_or("?"));
 
         writeln!(stdin, "{}", cmd_str).map_err(|e| format!("Failed to write to Pi stdin: {}", e))?;
@@ -572,7 +585,8 @@ pub async fn pi_start_inner(
     // Stop any existing instance
     if let Some(m) = manager_guard.as_mut() {
         if m.is_running() {
-            info!("Stopping existing pi instance");
+            let old_pid = m.child.as_ref().map(|c| c.id());
+            info!("Stopping existing pi instance (pid {:?}) to start new one", old_pid);
             m.stop();
         }
     }
@@ -595,7 +609,8 @@ pub async fn pi_start_inner(
         }
     };
 
-    info!("Starting pi from {} in dir: {} with provider: {} model: {}", pi_path, project_dir, pi_provider, pi_model);
+    let bun_path = find_bun_executable().unwrap_or_default();
+    info!("Starting pi from {} in dir: {} with provider: {} model: {} bun: {}", pi_path, project_dir, pi_provider, pi_model, bun_path);
 
     // Build command — use cmd.exe /C wrapper for .cmd files on Windows (Rust 1.77+ CVE fix)
     let mut cmd = build_command_for_path(&pi_path);

@@ -1726,6 +1726,15 @@ async fn main() {
                             let pi_state_clone = pi_state.inner().clone();
                             // Retry up to 3 times (Pi might still be installing)
                             for attempt in 1..=3u32 {
+                                // Skip if Pi was already started (e.g. by frontend preset change)
+                                {
+                                    let mut guard = pi_state_clone.0.lock().await;
+                                    if guard.as_mut().map(|m| m.is_running()).unwrap_or(false) {
+                                        info!("Pi already running, skipping auto-start");
+                                        break;
+                                    }
+                                }
+
                                 info!("Auto-starting Pi agent (attempt {}/3) with provider: {}, model: {}", attempt, provider_config.provider, provider_config.model);
 
                                 let result = pi::pi_start_inner(
