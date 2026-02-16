@@ -729,6 +729,8 @@ pub async fn pi_start_inner(
                     Ok(line) => {
                         // Try to parse as JSON RPC event and forward like stdout
                         if let Ok(event) = serde_json::from_str::<Value>(&line) {
+                            let event_type = event.get("type").and_then(|t| t.as_str()).unwrap_or("?");
+                            info!("Pi stderr JSON: type={}", event_type);
                             if let Err(e) = app_handle.emit("pi_event", &event) {
                                 error!("Failed to emit pi_event from stderr: {}", e);
                             }
@@ -737,7 +739,7 @@ pub async fn pi_start_inner(
                             }
                         } else {
                             // Not JSON — log as plain stderr
-                            debug!("Pi stderr: {}", line);
+                            info!("Pi stderr (non-JSON): {}", &line[..line.len().min(200)]);
                         }
                         let _ = app_handle.emit("pi_log", &line);
                     }
@@ -748,8 +750,9 @@ pub async fn pi_start_inner(
         });
     }
 
-    // Brief wait then check if process died immediately (e.g. bad config, missing deps)
-    tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+    // Wait for Pi to initialize before allowing prompts. Pi v0.51+ needs time
+    // to set up its RPC listener — sending prompts too early causes them to be lost.
+    tokio::time::sleep(tokio::time::Duration::from_millis(1500)).await;
     {
         let mut manager_guard = state.0.lock().await;
         if let Some(m) = manager_guard.as_mut() {
