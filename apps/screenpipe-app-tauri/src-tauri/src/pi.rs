@@ -717,6 +717,8 @@ pub async fn pi_start_inner(
     });
 
     // Spawn stderr reader thread
+    // NOTE: Pi (v0.51+) sends RPC JSON responses to stderr, not stdout.
+    // We must parse JSON from stderr and emit pi_event/pi_output just like stdout.
     if let Some(stderr) = stderr {
         let app_handle = app.clone();
         std::thread::spawn(move || {
@@ -725,7 +727,18 @@ pub async fn pi_start_inner(
             for line in reader.lines() {
                 match line {
                     Ok(line) => {
-                        info!("Pi stderr: {}", line);
+                        // Try to parse as JSON RPC event and forward like stdout
+                        if let Ok(event) = serde_json::from_str::<Value>(&line) {
+                            if let Err(e) = app_handle.emit("pi_event", &event) {
+                                error!("Failed to emit pi_event from stderr: {}", e);
+                            }
+                            if let Err(e) = app_handle.emit("pi_output", &line) {
+                                error!("Failed to emit pi_output from stderr: {}", e);
+                            }
+                        } else {
+                            // Not JSON — log as plain stderr
+                            debug!("Pi stderr: {}", line);
+                        }
                         let _ = app_handle.emit("pi_log", &line);
                     }
                     Err(_) => break,
