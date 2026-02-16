@@ -687,10 +687,18 @@ pub async fn pi_start_inner(
     let app_handle = app.clone();
     std::thread::spawn(move || {
         let reader = BufReader::new(stdout);
-        info!("Pi stdout reader started");
+        info!("Pi stdout reader started (pid: {})", pid);
+        let mut line_count = 0u64;
         for line in reader.lines() {
             match line {
                 Ok(line) => {
+                    line_count += 1;
+                    let event_type = serde_json::from_str::<Value>(&line)
+                        .ok()
+                        .and_then(|v| v.get("type").and_then(|t| t.as_str()).map(|s| s.to_string()));
+                    info!("Pi stdout #{} (pid {}): type={}", line_count, pid,
+                        event_type.as_deref().unwrap_or("non-json"));
+
                     // Try to parse as JSON and emit event
                     match serde_json::from_str::<Value>(&line) {
                         Ok(event) => {
@@ -712,7 +720,7 @@ pub async fn pi_start_inner(
                 }
             }
         }
-        info!("Pi stdout reader ended (pid: {})", pid);
+        info!("Pi stdout reader ended (pid: {}), processed {} lines", pid, line_count);
         let _ = app_handle.emit("pi_terminated", pid);
     });
 
