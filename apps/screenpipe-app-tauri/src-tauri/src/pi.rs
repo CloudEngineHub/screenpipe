@@ -38,9 +38,18 @@ fn build_command_for_path(path: &str) -> Command {
 
 /// On Unix, pi's shebang is `#!/usr/bin/env node` but screenpipe only bundles
 /// bun. Run `bun <pi_path>` so it works without node installed.
+///
+/// NOTE: We prefer the user's system bun over the bundled bun for running Pi.
+/// The bundled bun (in the .app bundle) causes Pi to hang during startup due to
+/// Metal/GPU native module loading in the sandboxed app context. The system bun
+/// (installed at ~/.bun/bin/bun) does not have this issue.
 #[cfg(not(windows))]
 fn build_command_for_path(path: &str) -> Command {
-    if let Some(bun) = find_bun_executable() {
+    if let Some(bun) = find_user_bun_executable() {
+        let mut cmd = Command::new(bun);
+        cmd.arg(path);
+        cmd
+    } else if let Some(bun) = find_bun_executable() {
         let mut cmd = Command::new(bun);
         cmd.arg(path);
         cmd
@@ -65,7 +74,11 @@ fn build_async_command_for_path(path: &str) -> tokio::process::Command {
 /// bun. Run `bun <pi_path>` so it works without node installed.
 #[cfg(not(windows))]
 fn build_async_command_for_path(path: &str) -> tokio::process::Command {
-    if let Some(bun) = find_bun_executable() {
+    if let Some(bun) = find_user_bun_executable() {
+        let mut cmd = tokio::process::Command::new(bun);
+        cmd.arg(path);
+        cmd
+    } else if let Some(bun) = find_bun_executable() {
         let mut cmd = tokio::process::Command::new(bun);
         cmd.arg(path);
         cmd
@@ -1012,6 +1025,35 @@ pub fn kill(pid: u32) -> Result<(), String> {
             .output();
     }
     Ok(())
+}
+
+/// Find the user's system-installed bun (skipping the bundled app bun).
+/// The bundled bun in the .app bundle causes Pi to hang on macOS due to
+/// Metal/GPU native module loading. Prefer the user's own bun for running Pi.
+fn find_user_bun_executable() -> Option<String> {
+    let home = dirs::home_dir()
+        .map(|h| h.to_string_lossy().to_string())
+        .unwrap_or_default();
+
+    #[cfg(unix)]
+    let paths = vec![
+        format!("{}/.bun/bin/bun", home),
+        "/opt/homebrew/bin/bun".to_string(),
+        "/usr/local/bin/bun".to_string(),
+    ];
+
+    #[cfg(windows)]
+    let paths = vec![
+        format!("{}\\.bun\\bin\\bun.exe", home),
+        format!("{}\\AppData\\Local\\bun\\bin\\bun.exe", home),
+    ];
+
+    for path in paths {
+        if std::path::Path::new(&path).exists() {
+            return Some(path);
+        }
+    }
+    None
 }
 
 /// Find bun executable (shared by pi_install and ensure_pi_installed_background)
