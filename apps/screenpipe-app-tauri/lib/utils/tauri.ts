@@ -718,6 +718,18 @@ async remindersSetAudioOnly(audioOnly: boolean) : Promise<Result<null, string>> 
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
 }
+},
+/**
+ * Tauri command: start voice training. Spawns a background task that polls
+ * until audio is transcribed, then assigns the speaker. Returns immediately.
+ */
+async trainVoice(name: string, startTime: string, endTime: string) : Promise<Result<string, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("train_voice", { name, startTime, endTime }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
 }
 }
 

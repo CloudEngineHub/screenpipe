@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState, useMemo, useCallback } from "react";
+import React, { useEffect, useState, useMemo, useCallback, useRef } from "react";
 import { Label } from "@/components/ui/label";
 import {
   Select,
@@ -35,6 +35,7 @@ import {
   Shield,
   Film,
   Zap,
+  User,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
@@ -67,6 +68,8 @@ import { exists } from "@tauri-apps/plugin-fs";
 import { ToastAction } from "@/components/ui/toast";
 import { open as openUrl } from "@tauri-apps/plugin-shell";
 import { Separator } from "@/components/ui/separator";
+import { Dialog, DialogContent, DialogTitle, DialogDescription } from "@/components/ui/dialog";
+import { Progress } from "@/components/ui/progress";
 import { Card, CardContent } from "@/components/ui/card";
 import { MultiSelect } from "@/components/ui/multi-select";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -542,6 +545,76 @@ export function RecordingSettings() {
     handleSettingsChange({ useChineseMirror: checked }, true);
   };
 
+  // Voice training state
+  const [voiceTraining, setVoiceTraining] = useState<{ active: boolean; secondsLeft: number; dialogOpen: boolean }>({ active: false, secondsLeft: 0, dialogOpen: false });
+  const [speakerSuggestions, setSpeakerSuggestions] = useState<{ id: number; name: string }[]>([]);
+  const [speakerInputFocused, setSpeakerInputFocused] = useState(false);
+  const trainingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const VOICE_TRAINING_TEXT = `The human eye processes around ten million bits of visual information every single second. That's roughly the bandwidth of an ethernet connection, streaming directly into your brain through two tiny biological cameras.
+
+Most of this data gets quietly filtered away before you're even conscious of it. Your visual cortex silently discards ninety-nine percent of what hits your retina, keeping only the fragments it judges important: a familiar face in a crowd, a flash of movement at the edge of your peripheral vision, the subtle shift in someone's expression during a conversation.
+
+Screenpipe works on a similar philosophy. It watches everything that flows through your digital world — every window, every tab, every meeting, every notification — and distills it into searchable, meaningful memory. Think of it as a second brain that never forgets, never gets tired, and never loses track of that important thing someone said three weeks ago on a Tuesday afternoon.
+
+The average knowledge worker switches between four hundred different windows per day and types roughly forty words per minute across dozens of applications. Without a system to capture and organize this firehose of information, most of it simply evaporates.
+
+Your screen is a pipe. Everything you see, hear, and type flows through it. Screenpipe just makes sure nothing valuable leaks away.`;
+
+  // Search speakers as user types
+  useEffect(() => {
+    const name = (settings.userName || "").trim();
+    if (name.length < 1) { setSpeakerSuggestions([]); return; }
+    const controller = new AbortController();
+    const timer = setTimeout(async () => {
+      try {
+        const res = await fetch(
+          `http://localhost:${settings.port}/speakers/search?name=${encodeURIComponent(name)}`,
+          { signal: controller.signal }
+        );
+        if (res.ok) setSpeakerSuggestions(await res.json());
+      } catch { /* ignore */ }
+    }, 300);
+    return () => { clearTimeout(timer); controller.abort(); };
+  }, [settings.userName, settings.port]);
+
+  const handleStartTraining = useCallback(() => {
+    const name = (settings.userName || "").trim();
+    if (!name) {
+      toast({ title: "enter your name first", variant: "destructive" });
+      return;
+    }
+    setVoiceTraining({ active: true, secondsLeft: 30, dialogOpen: true });
+
+    trainingIntervalRef.current = setInterval(() => {
+      setVoiceTraining((prev) => {
+        if (prev.secondsLeft <= 1) {
+          if (trainingIntervalRef.current) clearInterval(trainingIntervalRef.current);
+          return { ...prev, secondsLeft: 0 };
+        }
+        return { ...prev, secondsLeft: prev.secondsLeft - 1 };
+      });
+    }, 1000);
+  }, [settings.userName, toast]);
+
+  const handleFinishTraining = useCallback(async () => {
+    if (trainingIntervalRef.current) clearInterval(trainingIntervalRef.current);
+    setVoiceTraining({ active: false, secondsLeft: 0, dialogOpen: false });
+
+    const name = (settings.userName || "").trim();
+    if (!name) return;
+
+    const now = new Date();
+    const startTime = new Date(now.getTime() - 120000); // 2 min ago to capture chunks that started before dialog
+
+    try {
+      await commands.trainVoice(name, startTime.toISOString(), now.toISOString());
+      toast({ title: "voice training started", description: "screenpipe will match your voice in the background — this may take a few minutes" });
+    } catch (e) {
+      toast({ title: "failed to start voice training", description: String(e), variant: "destructive" });
+    }
+  }, [settings.userName, toast]);
+
   const handleDataDirChange = async () => {
     if (clickTimeout) {
       // Double Click
@@ -880,6 +953,60 @@ export function RecordingSettings() {
       {/* Audio */}
       <div className="space-y-2 pt-2">
         <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-1">Audio</h2>
+
+        {/* Your Name + Train Voice */}
+        <Card className="border-border bg-card">
+          <CardContent className="px-3 py-2.5">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-2.5">
+                <User className="h-4 w-4 text-muted-foreground shrink-0" />
+                <h3 className="text-sm font-medium text-foreground flex items-center gap-1.5">
+                  Your name
+                  <HelpTooltip text="Your name in transcripts. Click 'train' and speak for 30 seconds to teach screenpipe your voice — it will recognize you across all devices using voice matching." />
+                </h3>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <div className="relative">
+                  <Input
+                    placeholder="e.g. Louis"
+                    value={settings.userName || ""}
+                    onChange={(e) => handleSettingsChange({ userName: e.target.value }, false)}
+                    onFocus={() => setSpeakerInputFocused(true)}
+                    onBlur={() => setTimeout(() => setSpeakerInputFocused(false), 150)}
+                    className="w-32 h-7 text-xs"
+                  />
+                  {speakerInputFocused && speakerSuggestions.length > 0 && (
+                    <div className="absolute top-full left-0 w-44 mt-0.5 z-50 bg-popover border border-border shadow-md max-h-[120px] overflow-y-auto">
+                      {speakerSuggestions.map((s) => (
+                        <button
+                          key={s.id}
+                          type="button"
+                          className="w-full px-2 py-1 text-left text-xs hover:bg-accent truncate"
+                          onMouseDown={(e) => {
+                            e.preventDefault();
+                            handleSettingsChange({ userName: s.name }, false);
+                            setSpeakerInputFocused(false);
+                          }}
+                        >
+                          {s.name}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-7 text-xs"
+                  onClick={handleStartTraining}
+                  disabled={voiceTraining.active || !settings.userName?.trim()}
+                >
+                  train
+                </Button>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
 
         {/* Transcription Engine */}
         <Card className="border-border bg-card">
@@ -1428,6 +1555,47 @@ export function RecordingSettings() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Voice Training Dialog */}
+      <Dialog open={voiceTraining.dialogOpen} onOpenChange={(open) => {
+        if (!open) {
+          if (trainingIntervalRef.current) clearInterval(trainingIntervalRef.current);
+          setVoiceTraining({ active: false, secondsLeft: 0, dialogOpen: false });
+        }
+      }}>
+        <DialogContent className="max-w-lg">
+          <DialogTitle className="text-sm font-medium">read this aloud</DialogTitle>
+          <DialogDescription className="text-xs text-muted-foreground">
+            speak naturally at your normal pace — this helps screenpipe learn your voice
+          </DialogDescription>
+          <div className="space-y-4">
+
+            <div className="bg-muted/50 border border-border p-4 rounded-sm max-h-[300px] overflow-y-auto">
+              <p className="text-sm leading-relaxed whitespace-pre-line">
+                {VOICE_TRAINING_TEXT}
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              <div className="flex items-center justify-between text-xs text-muted-foreground">
+                <span>{voiceTraining.secondsLeft > 0 ? `${voiceTraining.secondsLeft}s remaining` : "done — click finish"}</span>
+                <span>{Math.round(((30 - voiceTraining.secondsLeft) / 30) * 100)}%</span>
+              </div>
+              <Progress value={((30 - voiceTraining.secondsLeft) / 30) * 100} className="h-1.5" />
+            </div>
+
+            <div className="flex justify-end">
+              <Button
+                size="sm"
+                onClick={handleFinishTraining}
+                disabled={voiceTraining.secondsLeft > 25}
+              >
+                {voiceTraining.secondsLeft > 25 ? "keep reading..." : voiceTraining.secondsLeft > 0 ? "finish early" : "done"}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

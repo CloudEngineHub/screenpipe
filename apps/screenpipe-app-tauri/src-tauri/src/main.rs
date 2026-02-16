@@ -61,6 +61,7 @@ mod obsidian_sync;
 mod reminders;
 mod pi;
 mod embedded_server;
+mod voice_training;
 
 pub use server::*;
 
@@ -1187,6 +1188,8 @@ async fn main() {
                 reminders::reminders_set_custom_prompt,
                 reminders::reminders_get_audio_only,
                 reminders::reminders_set_audio_only,
+                // Voice training
+                voice_training::train_voice,
             ])
             .typ::<SettingsStore>()
             .typ::<OnboardingStore>()
@@ -1376,7 +1379,9 @@ async fn main() {
             // Rollback commands
             commands::rollback_to_version,
             // OCR commands
-            commands::perform_ocr_on_image
+            commands::perform_ocr_on_image,
+            // Voice training
+            voice_training::train_voice
         ])
         .setup(move |app| {
             //deep link register_all

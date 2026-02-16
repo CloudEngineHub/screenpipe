@@ -92,6 +92,8 @@ export type Settings = SettingsStore & {
 	enableUiEvents?: boolean;
 	/** Audio transcription scheduling: "realtime" (default) or "smart" (defer to idle) */
 	transcriptionMode?: "realtime" | "smart";
+	/** User's name for speaker identification — input device audio will be labeled with this name */
+	userName?: string;
 }
 
 export const DEFAULT_PROMPT = `Rules:
