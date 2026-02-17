@@ -325,11 +325,30 @@ pub async fn start_ui_recording(
         let ignored_windows_clone = config.ignored_windows.clone();
         let included_windows_clone = config.included_windows.clone();
 
-        // Run the entire tree walker loop in a blocking thread since AX APIs are synchronous IPC
+        // Run the entire tree walker loop in a dedicated thread since AX APIs are synchronous IPC.
+        // On Windows we use std::thread instead of spawn_blocking because COM (UIA) requires
+        // controlled initialization from thread birth — tokio's blocking pool may already have
+        // COM initialized with incompatible threading model, causing E_FAIL (0x80004005).
         let tree_wake = wake_signal.clone();
-        Some(tokio::task::spawn_blocking(move || {
-            run_tree_walker(tree_db, tree_stop, walk_interval, rt_handle, tree_wake, ignored_windows_clone, included_windows_clone);
-        }))
+        #[cfg(target_os = "windows")]
+        {
+            let join_handle = std::thread::Builder::new()
+                .name("tree-walker".to_string())
+                .spawn(move || {
+                    run_tree_walker(tree_db, tree_stop, walk_interval, rt_handle, tree_wake, ignored_windows_clone, included_windows_clone);
+                })
+                .expect("failed to spawn tree-walker thread");
+            // Wrap in a JoinHandle<()> compatible with the tokio handle used on other platforms
+            Some(tokio::task::spawn_blocking(move || {
+                let _ = join_handle.join();
+            }))
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            Some(tokio::task::spawn_blocking(move || {
+                run_tree_walker(tree_db, tree_stop, walk_interval, rt_handle, tree_wake, ignored_windows_clone, included_windows_clone);
+            }))
+        }
     } else {
         info!("AX tree walker is disabled");
         None

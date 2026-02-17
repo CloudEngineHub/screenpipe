@@ -2039,12 +2039,12 @@ impl DatabaseManager {
         sqlx::Error,
     > {
         let latest_frame: Option<(DateTime<Utc>,)> =
-            sqlx::query_as("SELECT timestamp FROM frames ORDER BY timestamp DESC LIMIT 1")
+            sqlx::query_as("SELECT timestamp FROM frames WHERE timestamp IS NOT NULL AND timestamp != '' ORDER BY timestamp DESC LIMIT 1")
                 .fetch_optional(&self.pool)
                 .await?;
 
         let latest_audio: Option<(DateTime<Utc>,)> =
-            sqlx::query_as("SELECT timestamp FROM audio_chunks ORDER BY timestamp DESC LIMIT 1")
+            sqlx::query_as("SELECT timestamp FROM audio_chunks WHERE timestamp IS NOT NULL AND timestamp != '' ORDER BY timestamp DESC LIMIT 1")
                 .fetch_optional(&self.pool)
                 .await?;
 
@@ -2057,7 +2057,7 @@ impl DatabaseManager {
         {
             Some(_) => {
                 sqlx::query_as(
-                    "SELECT timestamp FROM ui_monitoring ORDER BY timestamp DESC LIMIT 1",
+                    "SELECT timestamp FROM ui_monitoring WHERE timestamp IS NOT NULL AND timestamp != '' ORDER BY timestamp DESC LIMIT 1",
                 )
                 .fetch_optional(&self.pool)
                 .await?
