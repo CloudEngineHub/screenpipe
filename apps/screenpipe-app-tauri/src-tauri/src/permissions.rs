@@ -51,11 +51,10 @@ pub async fn request_permission(permission: OSPermission) {
             OSPermission::ScreenRecording => {
                 use core_graphics_helmer_fork::access::ScreenCaptureAccess;
                 if !ScreenCaptureAccess.preflight() {
-                    // CGRequestScreenCaptureAccess() handles both cases:
-                    // - NotDetermined: shows native modal prompt (macOS 15+)
-                    // - Denied: opens System Settings > Screen Recording
-                    // Do NOT also call open_permission_settings — it would open
-                    // Settings on top of the modal prompt, hiding it from the user.
+                    // Open System Settings first so it's in the background,
+                    // then request() shows the native modal on top (macOS 15+).
+                    // If the user dismisses the modal, Settings is already open.
+                    open_permission_settings(OSPermission::ScreenRecording);
                     ScreenCaptureAccess.request();
                 }
             }
