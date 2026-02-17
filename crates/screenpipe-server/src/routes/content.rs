@@ -202,6 +202,42 @@ pub(crate) async fn remove_tags(
 }
 
 #[derive(OaSchema, Deserialize)]
+pub struct GetTagsBatchRequest {
+    pub frame_ids: Vec<i64>,
+}
+
+#[derive(OaSchema, Serialize)]
+pub struct GetTagsBatchResponse {
+    pub tags: std::collections::HashMap<String, Vec<String>>,
+}
+
+/// Batch fetch tags for multiple vision frame IDs.
+/// POST /tags/vision/batch  { "frame_ids": [1, 2, 3] }
+#[oasgen]
+pub(crate) async fn get_tags_batch(
+    State(state): State<Arc<AppState>>,
+    JsonResponse(payload): JsonResponse<GetTagsBatchRequest>,
+) -> Result<Json<GetTagsBatchResponse>, (StatusCode, JsonResponse<Value>)> {
+    match state.db.get_vision_tags_batch(&payload.frame_ids).await {
+        Ok(tags_map) => {
+            // Convert i64 keys to String for JSON compatibility
+            let string_map: std::collections::HashMap<String, Vec<String>> = tags_map
+                .into_iter()
+                .map(|(k, v)| (k.to_string(), v))
+                .collect();
+            Ok(JsonResponse(GetTagsBatchResponse { tags: string_map }))
+        }
+        Err(e) => {
+            error!("Failed to get tags batch: {}", e);
+            Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                JsonResponse(json!({"error": e.to_string()})),
+            ))
+        }
+    }
+}
+
+#[derive(OaSchema, Deserialize)]
 pub struct AddContentRequest {
     pub device_name: String,     // Moved device_name to the top level
     pub content: AddContentData, // The actual content (either Frame or Transcription)

@@ -11,6 +11,7 @@ import { createPortal } from "react-dom";
 import posthog from "posthog-js";
 import { cn } from "@/lib/utils";
 import { AppContextPopover } from "./app-context-popover";
+import { TimelineTagToolbar } from "./timeline-tag-toolbar";
 
 interface TimelineSliderProps {
 	frames: StreamTimeSeriesResponse[];
@@ -155,11 +156,14 @@ export const TimelineSlider = ({
 	const [selectedIndices, setSelectedIndices] = useState<Set<number>>(
 		new Set(),
 	);
-	const { setSelectionRange, selectionRange } = useTimelineSelection();
+	const { setSelectionRange, selectionRange, tags } = useTimelineSelection();
 
 	// App context popover state
 	const [activePopoverGroup, setActivePopoverGroup] = useState<number | null>(null);
 	const [popoverAnchor, setPopoverAnchor] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+
+	// Selection bounding rect for tag toolbar positioning
+	const [selectionRect, setSelectionRect] = useState<{ x: number; y: number; width: number } | null>(null);
 
 	const MIN_ZOOM = 0.25;
 	const MAX_ZOOM = 4;
@@ -364,6 +368,7 @@ export const TimelineSlider = ({
 	useEffect(() => {
 		if (!selectionRange) {
 			setSelectedIndices(new Set());
+			setSelectionRect(null);
 		}
 	}, [selectionRange]);
 
@@ -388,6 +393,7 @@ export const TimelineSlider = ({
 		if (!isNearSelection) {
 			setSelectionRange(null);
 			setSelectedIndices(new Set());
+			setSelectionRect(null);
 		}
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [currentIndex, frames.length]);
@@ -448,11 +454,29 @@ export const TimelineSlider = ({
 			// Don't create selection for clicks
 			setSelectedIndices(new Set());
 			setSelectionRange(null);
+			setSelectionRect(null);
 		} else if (selectedIndices.size > 1) {
 			// Track selection if multiple frames were selected
 			posthog.capture("timeline_selection_made", {
 				frames_selected: selectedIndices.size,
 			});
+
+			// Compute bounding rect of selected frames for toolbar positioning
+			const container = containerRef.current;
+			if (container) {
+				const selectedElements = container.querySelectorAll('[data-selected="true"]');
+				if (selectedElements.length > 0) {
+					const first = selectedElements[0].getBoundingClientRect();
+					const last = selectedElements[selectedElements.length - 1].getBoundingClientRect();
+					const minX = Math.min(first.left, last.left);
+					const maxX = Math.max(first.right, last.right);
+					setSelectionRect({
+						x: minX,
+						y: Math.min(first.top, last.top),
+						width: maxX - minX,
+					});
+				}
+			}
 		}
 		setIsDragging(false);
 		setDragStartIndex(null);
@@ -649,10 +673,15 @@ export const TimelineSlider = ({
 										? hoveredTimestamp === frame.timestamp
 										: frames[currentIndex]?.timestamp === frame.timestamp;
 
+									const frameId = frame.devices?.[0]?.frame_id || '';
+									const frameTags = frameId ? (tags[frameId] || []) : [];
+									const hasTags = frameTags.length > 0;
+
 									return (
 										<motion.div
 											key={`${frame.timestamp}-${frameIdx}`}
 											data-timestamp={frame.timestamp}
+											data-selected={isSelected || isInRange ? "true" : undefined}
 											className={cn(
 												"flex-shrink-0 cursor-ew-resize rounded-t relative hover:z-50 transition-all duration-200",
 												(isSelected || isInRange) && "ring-2 ring-foreground/60 ring-offset-1 ring-offset-black/20"
@@ -692,6 +721,14 @@ export const TimelineSlider = ({
 												setHoveredRect(null);
 											}}
 										>
+											{/* Tag indicator dot */}
+											{hasTags && (
+												<div
+													className="absolute bottom-0.5 left-1/2 -translate-x-1/2 w-1.5 h-1.5 rounded-full bg-primary shadow-sm shadow-primary/50"
+													title={frameTags.join(', ')}
+												/>
+											)}
+
 											{/* Time marker below frame */}
 											{timeMarker && (
 												<div
@@ -731,6 +768,11 @@ export const TimelineSlider = ({
 															<span>audio recorded</span>
 														</p>
 													)}
+													{hasTags && (
+														<p className="text-primary flex items-center gap-1 mt-1 text-[11px]">
+															<span>{frameTags.join(', ')}</span>
+														</p>
+													)}
 												</div>,
 												document.body
 											)}
@@ -749,6 +791,11 @@ export const TimelineSlider = ({
 			{/* Time axis legend - hidden, too small to be useful */}
 			<div className="hidden">
 			</div>
+
+			{/* Tag toolbar — floating above selection */}
+			{selectedIndices.size > 1 && selectionRange && (
+				<TimelineTagToolbar anchorRect={selectionRect} />
+			)}
 		</div>
 	);
 };

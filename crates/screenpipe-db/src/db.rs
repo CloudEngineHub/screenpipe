@@ -2184,6 +2184,44 @@ impl DatabaseManager {
         .await
     }
 
+    /// Batch fetch vision tags for multiple frame IDs in a single query.
+    /// Returns a map of frame_id → Vec<tag_name>.
+    pub async fn get_vision_tags_batch(
+        &self,
+        vision_ids: &[i64],
+    ) -> Result<std::collections::HashMap<i64, Vec<String>>, SqlxError> {
+        if vision_ids.is_empty() {
+            return Ok(std::collections::HashMap::new());
+        }
+
+        let placeholders: Vec<String> = vision_ids.iter().map(|_| "?".to_string()).collect();
+        let query_str = format!(
+            r#"
+            SELECT vt.vision_id, t.name
+            FROM tags t
+            JOIN vision_tags vt ON t.id = vt.tag_id
+            WHERE vt.vision_id IN ({})
+            ORDER BY vt.vision_id, t.name
+            "#,
+            placeholders.join(",")
+        );
+
+        let mut query = sqlx::query_as::<_, (i64, String)>(&query_str);
+        for id in vision_ids {
+            query = query.bind(*id);
+        }
+
+        let rows = query.fetch_all(&self.pool).await?;
+
+        let mut result: std::collections::HashMap<i64, Vec<String>> =
+            std::collections::HashMap::new();
+        for (vision_id, tag_name) in rows {
+            result.entry(vision_id).or_default().push(tag_name);
+        }
+
+        Ok(result)
+    }
+
     pub async fn remove_tags(
         &self,
         id: i64,

@@ -134,7 +134,14 @@ export default function Timeline() {
 	const [seekingTimestamp, setSeekingTimestamp] = useState<string | null>(null);
 
 	// Get timeline selection for chat context
-	const { selectionRange } = useTimelineSelection();
+	const { selectionRange, loadTagsForFrames } = useTimelineSelection();
+
+	// Load tags when a selection is made (lazy-load)
+	useEffect(() => {
+		if (selectionRange && selectionRange.frameIds.length > 0) {
+			loadTagsForFrames(selectionRange.frameIds);
+		}
+	}, [selectionRange?.frameIds.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
 	// Re-show audio transcript when navigating timeline
 	useEffect(() => {
