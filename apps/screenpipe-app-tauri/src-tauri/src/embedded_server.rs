@@ -382,9 +382,9 @@ pub async fn start_embedded_server(
 
         // Check if user has specific monitor IDs set (not empty, not "default")
         // This handles upgrades where old configs have monitor_ids but use_all_monitors defaults to true
+        // Supports both legacy numeric IDs and new stable IDs (e.g. "Display 4_5120x1440_0,0")
         let has_specific_monitors = !config.monitor_ids.is_empty()
-            && !config.monitor_ids.contains(&"default".to_string())
-            && config.monitor_ids.iter().any(|id| id.parse::<u32>().is_ok());
+            && !config.monitor_ids.contains(&"default".to_string());
 
         let use_dynamic_detection = config.use_all_monitors && !has_specific_monitors;
 
@@ -477,10 +477,35 @@ pub async fn start_embedded_server(
             // or has specific monitor IDs set from previous config
             let monitor_ids: Vec<u32> = if has_specific_monitors {
                 // User has specific monitors selected - respect their choice
+                // Resolve stable IDs (e.g. "Display 4_5120x1440_0,0") or legacy numeric IDs to runtime u32
+                let all_monitors = screenpipe_vision::monitor::list_monitors().await;
                 let parsed: Vec<u32> = config
                     .monitor_ids
                     .iter()
-                    .filter_map(|s| s.parse().ok())
+                    .filter_map(|stored_id| {
+                        // 1. Exact stable_id match
+                        if let Some(m) = all_monitors.iter().find(|m| m.stable_id() == *stored_id) {
+                            return Some(m.id());
+                        }
+                        // 2. Backward compat: try parsing as raw u32 ID
+                        if let Ok(id) = stored_id.parse::<u32>() {
+                            return Some(id);
+                        }
+                        // 3. Fuzzy: match by name+resolution (position may shift across reboot)
+                        //    stable_id format: "Name_WxH_X,Y" — strip the trailing "_X,Y"
+                        if let Some(last_underscore) = stored_id.rfind('_') {
+                            let prefix = &stored_id[..last_underscore];
+                            if let Some(m) = all_monitors.iter().find(|m| {
+                                let sid = m.stable_id();
+                                sid.rfind('_').map_or(false, |pos| &sid[..pos] == prefix)
+                            }) {
+                                info!("Fuzzy-matched monitor '{}' -> runtime id {} (position changed)", stored_id, m.id());
+                                return Some(m.id());
+                            }
+                        }
+                        warn!("Could not resolve stored monitor ID '{}' to any available monitor", stored_id);
+                        None
+                    })
                     .collect();
                 info!(
                     "Using user-selected monitors: {:?} (from settings: {:?})",

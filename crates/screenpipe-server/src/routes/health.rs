@@ -24,6 +24,7 @@ use screenpipe_vision::monitor::{
 #[derive(OaSchema, Serialize)]
 pub struct MonitorInfo {
     pub id: u32,
+    pub stable_id: String,
     pub name: String,
     pub width: u32,
     pub height: u32,
@@ -390,6 +391,7 @@ pub async fn api_list_monitors(
         match get_monitor_by_id(monitor_id).await {
             Some(monitor) => MonitorInfo {
                 id: monitor.id(),
+                stable_id: monitor.stable_id(),
                 name: monitor.name().to_string(),
                 width: monitor.width(),
                 height: monitor.height(),
@@ -397,6 +399,7 @@ pub async fn api_list_monitors(
             },
             None => MonitorInfo {
                 id: monitor_id,
+                stable_id: format!("unknown_{}", monitor_id),
                 name: "Unknown".to_string(),
                 width: 0,
                 height: 0,

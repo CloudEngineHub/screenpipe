@@ -24,6 +24,7 @@ pub struct RecordingState {
 #[serde(rename_all = "camelCase")]
 pub struct MonitorDevice {
     pub id: u32,
+    pub stable_id: String,
     pub name: String,
     pub is_default: bool,
     pub width: u32,
@@ -90,6 +91,7 @@ pub async fn get_available_monitors() -> Result<Vec<MonitorDevice>, String> {
         .enumerate()
         .map(|(i, m)| MonitorDevice {
             id: m.id(),
+            stable_id: m.stable_id(),
             name: if m.name().is_empty() { format!("Monitor {}", i + 1) } else { m.name().to_string() },
             is_default: i == 0, // First monitor is default
             width: m.width(),
