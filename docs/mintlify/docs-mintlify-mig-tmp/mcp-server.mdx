@@ -75,7 +75,7 @@ search through recorded screen content (OCR) and audio transcriptions:
 | `speaker_ids` | string | comma-separated speaker IDs for audio filtering (e.g., `1,2,3`) |
 | `speaker_name` | string | filter audio by speaker name (case-insensitive partial match) |
 
-### search-ui-events (macOS)
+### search-ui-events
 
 search UI input events captured via accessibility APIs. this is the third data modality alongside vision and audio.
 
@@ -98,10 +98,10 @@ search UI input events captured via accessibility APIs. this is the third data m
 - `scroll` - scroll events with delta values
 
 <Note>
-UI events require macOS with Accessibility permissions and "UI Events" enabled in screenpipe settings.
+UI events require Accessibility permissions (macOS) or appropriate permissions (Windows) and "UI Events" enabled in screenpipe settings.
 </Note>
 
-### get-ui-event-stats (macOS)
+### get-ui-event-stats
 
 get aggregated statistics of UI events by app and event type for productivity analysis:
 
