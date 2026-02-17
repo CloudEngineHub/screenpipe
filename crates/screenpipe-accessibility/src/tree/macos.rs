@@ -49,6 +49,7 @@ impl TreeWalkerPlatform for MacosTreeWalker {
             "dashlane",
             "keepassxc",
             "keychain access",
+            "screenpipe",
         ];
         if EXCLUDED_APPS.iter().any(|ex| app_lower.contains(ex)) {
             return Ok(None);
