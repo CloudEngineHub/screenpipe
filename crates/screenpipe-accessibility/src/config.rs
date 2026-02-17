@@ -44,6 +44,18 @@ pub struct UiCaptureConfig {
     /// Capture mouse movement (high volume - disabled by default)
     pub capture_mouse_move: bool,
 
+    /// Capture full accessibility tree of focused window
+    pub capture_tree: bool,
+
+    /// Debounce time before capturing tree after focus change (ms)
+    pub tree_debounce_ms: u64,
+
+    /// Maximum elements to capture per window tree
+    pub tree_max_elements: usize,
+
+    /// Safety-net interval for periodic tree re-capture (ms, 0 = disabled)
+    pub tree_capture_interval_ms: u64,
+
     /// Mouse move threshold in pixels (higher = fewer events)
     pub mouse_move_threshold: f64,
 
@@ -104,6 +116,10 @@ impl Default for UiCaptureConfig {
             capture_clipboard_content: true,
             capture_context: true,
             capture_mouse_move: false, // High volume
+            capture_tree: true,
+            tree_debounce_ms: 300,
+            tree_max_elements: 10000,
+            tree_capture_interval_ms: 2000,
             mouse_move_threshold: 5.0,
             text_timeout_ms: 300,
             max_buffer_size: 10000,
