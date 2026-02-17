@@ -55,6 +55,10 @@ pub struct TreeWalkerConfig {
     pub max_text_length: usize,
     /// Per-element AX IPC timeout (default: 200ms).
     pub element_timeout_secs: f32,
+    /// User-configured windows to ignore (substring match on app name or window title).
+    pub ignored_windows: Vec<String>,
+    /// User-configured windows to include (whitelist — if non-empty, only these are captured).
+    pub included_windows: Vec<String>,
 }
 
 impl Default for TreeWalkerConfig {
@@ -66,6 +70,8 @@ impl Default for TreeWalkerConfig {
             walk_timeout: Duration::from_millis(100),
             max_text_length: 50_000,
             element_timeout_secs: 0.2,
+            ignored_windows: Vec::new(),
+            included_windows: Vec::new(),
         }
     }
 }

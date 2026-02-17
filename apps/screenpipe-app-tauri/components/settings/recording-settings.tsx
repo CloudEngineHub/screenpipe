@@ -1291,9 +1291,9 @@ Your screen is a pipe. Everything you see, hear, and type flows through it. Scre
 
       
 
-      {/* Video */}
+      {/* Screen */}
       <div className="space-y-2 pt-2">
-        <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-1">Video</h2>
+        <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-1">Screen</h2>
 
         {/* Disable Screen Recording */}
         <Card className="border-border bg-card">
@@ -1311,20 +1311,43 @@ Your screen is a pipe. Everything you see, hear, and type flows through it. Scre
           </CardContent>
         </Card>
 
-        {/* Disable OCR */}
+        {/* Text extraction methods - shown when screen recording is on */}
         {!settings.disableVision && (
           <Card className="border-border bg-card">
-            <CardContent className="px-3 py-2.5">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center space-x-2.5">
-                  <EyeOff className="h-4 w-4 text-muted-foreground shrink-0" />
-                  <div>
-                    <h3 className="text-sm font-medium text-foreground">Disable OCR</h3>
-                    <p className="text-xs text-muted-foreground">Capture screen but skip text extraction (reduces CPU usage significantly)</p>
-                  </div>
-                </div>
-                <Switch id="disableOcr" checked={settings.disableOcr ?? false} onCheckedChange={(checked) => handleSettingsChange({ disableOcr: checked }, true)} />
+            <CardContent className="px-3 py-2.5 space-y-3">
+              <div className="flex items-center space-x-2.5">
+                <Eye className="h-4 w-4 text-muted-foreground shrink-0" />
+                <h3 className="text-sm font-medium text-foreground">Text extraction</h3>
               </div>
+
+              {/* OCR */}
+              <div className="flex items-center justify-between ml-[26px]">
+                <div>
+                  <h4 className="text-sm text-foreground">OCR (optical character recognition)</h4>
+                  <p className="text-xs text-muted-foreground">Reads text from screenshots. Higher CPU but captures everything visible on screen.</p>
+                </div>
+                <Switch id="enableOcr" checked={!(settings.disableOcr ?? false)} onCheckedChange={(checked) => handleSettingsChange({ disableOcr: !checked }, true)} />
+              </div>
+
+              <Separator className="ml-[26px]" />
+
+              {/* Element capture (accessibility tree walker) */}
+              {(isMacOS || platform() === "windows") && (
+                <div className="flex items-center justify-between ml-[26px]">
+                  <div>
+                    <h4 className="text-sm text-foreground flex items-center gap-1.5">
+                      Element capture
+                      <Badge variant="outline" className="text-[10px] px-1 py-0">beta</Badge>
+                    </h4>
+                    <p className="text-xs text-muted-foreground">Reads text directly from UI elements via accessibility APIs. Much lower CPU than OCR but may miss some content (images, custom-rendered text).</p>
+                  </div>
+                  <Switch
+                    id="enableUiEvents"
+                    checked={settings.enableUiEvents ?? false}
+                    onCheckedChange={(checked) => handleSettingsChange({ enableUiEvents: checked }, true)}
+                  />
+                </div>
+              )}
             </CardContent>
           </Card>
         )}
@@ -1438,33 +1461,7 @@ Your screen is a pipe. Everything you see, hear, and type flows through it. Scre
 
       
 
-      {/* UI Events */}
-      {(isMacOS || platform() === "windows") && (
-        <div className="space-y-2 pt-2">
-          <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-1">UI Events</h2>
-          <Card className="border-border bg-card">
-            <CardContent className="px-3 py-2.5">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center space-x-2.5">
-                  <Key className="h-4 w-4 text-muted-foreground shrink-0" />
-                  <div>
-                    <h3 className="text-sm font-medium text-foreground flex items-center gap-1.5">
-                      UI event capture
-                      <HelpTooltip text="Records mouse clicks, keyboard activity, and window focus changes. Used for activity tracking and search context." />
-                    </h3>
-                    <p className="text-xs text-muted-foreground">Keyboard, mouse, and clipboard events</p>
-                  </div>
-                </div>
-                <Switch
-                  id="enableUiEvents"
-                  checked={settings.enableUiEvents ?? false}
-                  onCheckedChange={(checked) => handleSettingsChange({ enableUiEvents: checked }, true)}
-                />
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-      )}
+      {/* UI Events section removed — now part of Screen > Text extraction */}
 
       
 
@@ -1478,7 +1475,7 @@ Your screen is a pipe. Everything you see, hear, and type flows through it. Scre
               <AppWindowMac className="h-4 w-4 text-muted-foreground shrink-0" />
               <h3 className="text-sm font-medium text-foreground flex items-center gap-1.5">
                 Ignored windows
-                <HelpTooltip text="Windows matching these patterns will not be captured. Use for privacy — e.g. add 'Password Manager' to skip sensitive apps." />
+                <HelpTooltip text="Windows matching these patterns will not be captured by OCR or element capture. Use for privacy — e.g. add 'Password Manager' to skip sensitive apps." />
               </h3>
             </div>
             <div className="ml-[26px]">
@@ -1499,7 +1496,7 @@ Your screen is a pipe. Everything you see, hear, and type flows through it. Scre
               <AppWindowMac className="h-4 w-4 text-muted-foreground shrink-0" />
               <h3 className="text-sm font-medium text-foreground flex items-center gap-1.5">
                 Included windows
-                <HelpTooltip text="When set, ONLY windows matching these patterns will be captured. Everything else is ignored. Leave empty to capture all windows (except ignored ones)." />
+                <HelpTooltip text="When set, ONLY windows matching these patterns will be captured by OCR and element capture. Everything else is ignored. Leave empty to capture all windows (except ignored ones)." />
               </h3>
             </div>
             <div className="ml-[26px]">

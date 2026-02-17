@@ -55,8 +55,12 @@ pub struct UiRecorderConfig {
     pub capture_context: bool,
     /// Additional apps to exclude
     pub excluded_apps: Vec<String>,
-    /// Window patterns to exclude
+    /// Window patterns to exclude (for input event capture)
     pub excluded_windows: Vec<String>,
+    /// User-configured ignored windows (for tree walker — substring match)
+    pub ignored_windows: Vec<String>,
+    /// User-configured included windows (whitelist for tree walker)
+    pub included_windows: Vec<String>,
     /// Batch size for database inserts
     pub batch_size: usize,
     /// Batch timeout in milliseconds
@@ -83,6 +87,8 @@ impl Default for UiRecorderConfig {
             capture_context: true,
             excluded_apps: Vec::new(),
             excluded_windows: Vec::new(),
+            ignored_windows: Vec::new(),
+            included_windows: Vec::new(),
             batch_size: 100,
             batch_timeout_ms: 1000,
             enable_tree_walker: true,
@@ -316,11 +322,13 @@ pub async fn start_ui_recording(
         let tree_stop = stop_flag.clone();
         let walk_interval = Duration::from_millis(config.tree_walk_interval_ms);
         let rt_handle = tokio::runtime::Handle::current();
+        let ignored_windows_clone = config.ignored_windows.clone();
+        let included_windows_clone = config.included_windows.clone();
 
         // Run the entire tree walker loop in a blocking thread since AX APIs are synchronous IPC
         let tree_wake = wake_signal.clone();
         Some(tokio::task::spawn_blocking(move || {
-            run_tree_walker(tree_db, tree_stop, walk_interval, rt_handle, tree_wake);
+            run_tree_walker(tree_db, tree_stop, walk_interval, rt_handle, tree_wake, ignored_windows_clone, included_windows_clone);
         }))
     } else {
         info!("AX tree walker is disabled");
@@ -398,11 +406,15 @@ fn run_tree_walker(
     walk_interval: Duration,
     rt_handle: tokio::runtime::Handle,
     wake_signal: WakeSignal,
+    ignored_windows: Vec<String>,
+    included_windows: Vec<String>,
 ) {
     info!("Starting AX tree walker (interval: {:?})", walk_interval);
 
     let tree_config = TreeWalkerConfig {
         walk_interval,
+        ignored_windows,
+        included_windows,
         ..Default::default()
     };
     let walker = create_tree_walker(tree_config);

@@ -603,6 +603,9 @@ pub async fn start_embedded_server(
     if config.enable_ui_events {
         let ui_config = UiRecorderConfig {
             enabled: true,
+            excluded_windows: config.ignored_windows.clone(),
+            ignored_windows: config.ignored_windows.clone(),
+            included_windows: config.included_windows.clone(),
             ..Default::default()
         };
         let db_clone = db.clone();

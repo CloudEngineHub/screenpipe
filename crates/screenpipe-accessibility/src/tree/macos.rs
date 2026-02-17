@@ -55,6 +55,14 @@ impl TreeWalkerPlatform for MacosTreeWalker {
             return Ok(None);
         }
 
+        // Apply user-configured ignored windows (check app name)
+        if self.config.ignored_windows.iter().any(|pattern| {
+            let p = pattern.to_lowercase();
+            app_lower.contains(&p)
+        }) {
+            return Ok(None);
+        }
+
         // 2. Get the focused window via AX API
         let ax_app = ax::UiElement::with_app_pid(pid);
         let _ = ax_app.set_messaging_timeout_secs(self.config.element_timeout_secs);
@@ -79,6 +87,29 @@ impl TreeWalkerPlatform for MacosTreeWalker {
             || window_lower.contains("secret")
         {
             return Ok(None);
+        }
+
+        // Apply user-configured ignored windows (also check window title)
+        if self.config.ignored_windows.iter().any(|pattern| {
+            let p = pattern.to_lowercase();
+            window_lower.contains(&p)
+        }) {
+            return Ok(None);
+        }
+
+        // Apply user-configured included windows (also check window title)
+        if !self.config.included_windows.is_empty() {
+            let matches_app = self.config.included_windows.iter().any(|pattern| {
+                let p = pattern.to_lowercase();
+                app_lower.contains(&p)
+            });
+            let matches_window = self.config.included_windows.iter().any(|pattern| {
+                let p = pattern.to_lowercase();
+                window_lower.contains(&p)
+            });
+            if !matches_app && !matches_window {
+                return Ok(None);
+            }
         }
 
         // 3. Walk the accessibility tree

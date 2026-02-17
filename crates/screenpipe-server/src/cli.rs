@@ -332,6 +332,8 @@ impl Cli {
         crate::ui_recorder::UiRecorderConfig {
             enabled: self.enable_ui_events,
             excluded_windows: self.ignored_windows.clone(),
+            ignored_windows: self.ignored_windows.clone(),
+            included_windows: self.included_windows.clone(),
             ..Default::default()
         }
     }
@@ -628,6 +630,8 @@ impl RecordArgs {
         crate::ui_recorder::UiRecorderConfig {
             enabled: self.enable_ui_events,
             excluded_windows: self.ignored_windows.clone(),
+            ignored_windows: self.ignored_windows.clone(),
+            included_windows: self.included_windows.clone(),
             ..Default::default()
         }
     }
