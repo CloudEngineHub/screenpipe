@@ -13,6 +13,34 @@ import { cn } from "@/lib/utils";
 import { AppContextPopover } from "./app-context-popover";
 import { TimelineTagToolbar } from "./timeline-tag-toolbar";
 
+interface UiEventSummary {
+	event_type: string;
+	text_content: string | null;
+	app_name: string | null;
+	window_title: string | null;
+	timestamp: string;
+}
+
+function formatUiEvent(ev: UiEventSummary): { icon: string; label: string; context: string | null } | null {
+	const truncate = (s: string, max = 30) => s.length > max ? s.slice(0, max) + "\u2026" : s;
+	switch (ev.event_type) {
+		case "text":
+			return ev.text_content
+				? { icon: "\u2328", label: `typed "${truncate(ev.text_content)}"`, context: ev.app_name }
+				: null;
+		case "clipboard":
+			return ev.text_content
+				? { icon: "\ud83d\udccb", label: `copied "${truncate(ev.text_content)}"`, context: ev.app_name }
+				: null;
+		case "click":
+			return { icon: "\ud83d\uddb1", label: `clicked "${truncate(ev.text_content || "element")}"`, context: ev.app_name };
+		case "app_switch":
+			return { icon: "\u21d4", label: `switched to ${ev.app_name || "app"}`, context: null };
+		default:
+			return null; // skip key, scroll, window_focus, move etc.
+	}
+}
+
 interface TimelineSliderProps {
 	frames: StreamTimeSeriesResponse[];
 	currentIndex: number;
@@ -159,6 +187,38 @@ export const TimelineSlider = ({
 		new Set(),
 	);
 	const { setSelectionRange, selectionRange, tags } = useTimelineSelection();
+
+	// UI events cache for tooltip enrichment
+	const [uiEventsCache, setUiEventsCache] = useState<Record<string, UiEventSummary[]>>({});
+	const uiEventsCacheRef = useRef(uiEventsCache);
+	uiEventsCacheRef.current = uiEventsCache;
+	const uiEventsFetchingRef = useRef<Set<string>>(new Set());
+
+	const fetchUiEvents = useCallback((frameId: string | number, timestamp: string) => {
+		const cacheKey = timestamp;
+		if (uiEventsCacheRef.current[cacheKey] || uiEventsFetchingRef.current.has(cacheKey)) return;
+		uiEventsFetchingRef.current.add(cacheKey);
+
+		const query = frameId
+			? `SELECT event_type, text_content, app_name, window_title, timestamp FROM ui_events WHERE frame_id = ${Number(frameId)} ORDER BY timestamp ASC LIMIT 10`
+			: `SELECT event_type, text_content, app_name, window_title, timestamp FROM ui_events WHERE timestamp BETWEEN datetime('${timestamp}', '-15 seconds') AND datetime('${timestamp}', '+15 seconds') ORDER BY timestamp ASC LIMIT 10`;
+
+		fetch("http://localhost:3030/raw_sql", {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ query }),
+		})
+			.then((r) => (r.ok ? r.json() : []))
+			.then((rows: UiEventSummary[]) => {
+				if (Array.isArray(rows)) {
+					setUiEventsCache((prev) => ({ ...prev, [cacheKey]: rows }));
+				}
+			})
+			.catch(() => {})
+			.finally(() => {
+				uiEventsFetchingRef.current.delete(cacheKey);
+			});
+	}, []);
 
 	// App context popover state
 	const [activePopoverGroup, setActivePopoverGroup] = useState<number | null>(null);
@@ -717,6 +777,9 @@ export const TimelineSlider = ({
 												setHoveredRect({ x: rect.left + rect.width / 2, y: rect.top });
 												setHoveredTimestamp(frame.timestamp);
 												handleDragOver(frameIndex);
+												// Fetch UI events for tooltip enrichment
+												const fId = frame.devices?.[0]?.frame_id;
+												if (fId) fetchUiEvents(fId, frame.timestamp);
 											}}
 											onMouseLeave={() => {
 												setHoveredTimestamp(null);
@@ -775,6 +838,37 @@ export const TimelineSlider = ({
 															<span>{frameTags.join(', ')}</span>
 														</p>
 													)}
+													{/* UI events section */}
+													{(() => {
+														const events = uiEventsCache[frame.timestamp];
+														if (!events || events.length === 0) return null;
+														const formatted = events
+															.map(formatUiEvent)
+															.filter((e): e is NonNullable<typeof e> => e !== null);
+														if (formatted.length === 0) return null;
+														const shown = formatted.slice(0, 5);
+														const remaining = formatted.length - shown.length;
+														return (
+															<>
+																<div className="border-t border-border/50 my-1.5" />
+																<div className="flex flex-col gap-0.5">
+																	{shown.map((ev, i) => (
+																		<p key={i} className="text-muted-foreground text-[11px] leading-tight">
+																			<span>{ev.icon} {ev.label}</span>
+																			{ev.context && (
+																				<span className="opacity-60"> (in {ev.context})</span>
+																			)}
+																		</p>
+																	))}
+																	{remaining > 0 && (
+																		<p className="text-muted-foreground/60 text-[10px]">
+																			{remaining} more...
+																		</p>
+																	)}
+																</div>
+															</>
+														);
+													})()}
 												</div>,
 												document.body
 											)}
