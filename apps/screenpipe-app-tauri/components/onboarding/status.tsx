@@ -41,7 +41,7 @@ const OnboardingStatus: React.FC<OnboardingStatusProps> = ({
   const [isSendingLogs, setIsSendingLogs] = useState(false);
   const [logsSent, setLogsSent] = useState(false);
   const [showContinueAnyway, setShowContinueAnyway] = useState(false);
-  const { isMac: isMacOS } = usePlatform();
+  const { isMac: isMacOS, isLoading: isPlatformLoading } = usePlatform();
   const { settings, updateSettings } = useSettings();
   const hasStartedRef = useRef(false);
   const isStartingRef = useRef(false);
@@ -251,6 +251,10 @@ const OnboardingStatus: React.FC<OnboardingStatusProps> = ({
   const screenPermissionRef = useRef<string | null>(null);
 
   useEffect(() => {
+    // Don't act until platform detection has finished — isMac defaults to false
+    // and acting on that default would skip permissions on macOS
+    if (isPlatformLoading) return;
+
     const checkScreenPermissionOnce = async () => {
       if (!isMacOS || hasStartedRef.current) return;
       try {
@@ -283,7 +287,7 @@ const OnboardingStatus: React.FC<OnboardingStatusProps> = ({
         }
       } catch (error) {
         console.error("Failed to check permissions:", error);
-        if (!hasStartedRef.current) setSetupState("ready");
+        if (!hasStartedRef.current) setSetupState("needs-permissions");
       }
     };
     if (!isMacOS) {
@@ -292,7 +296,7 @@ const OnboardingStatus: React.FC<OnboardingStatusProps> = ({
       return;
     }
     checkScreenPermissionOnce();
-  }, [isMacOS]);
+  }, [isMacOS, isPlatformLoading]);
 
   // Poll mic and accessibility permissions
   useEffect(() => {
