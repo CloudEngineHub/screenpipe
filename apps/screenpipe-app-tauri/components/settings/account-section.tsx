@@ -16,6 +16,7 @@ import { Card } from "../ui/card";
 import { onOpenUrl } from "@tauri-apps/plugin-deep-link";
 import { PricingToggle } from "./pricing-toggle";
 import { UpgradeDialog } from "@/components/upgrade-dialog";
+import { ReferralCard } from "./referral-card";
 import posthog from "posthog-js";
 
 
@@ -421,6 +422,8 @@ export function AccountSection() {
           `}</style>
         </>
       )}
+
+      <ReferralCard />
 
       <UpgradeDialog
         open={showUpgrade}

@@ -11,6 +11,7 @@ import { Badge } from "@/components/ui/badge";
 import { Copy, Check, Gift, Send } from "lucide-react";
 import { toast } from "@/components/ui/use-toast";
 import { useSettings } from "@/lib/hooks/use-settings";
+import { open as openUrl } from "@tauri-apps/plugin-shell";
 
 interface ReferralData {
   code: string;
@@ -78,7 +79,7 @@ export function ReferralCard() {
     const body = encodeURIComponent(
       `hey, I've been using screenpipe and thought you'd like it.\n\nsign up with my link and get 10% off:\n${referral.link}\n\nit records your screen & audio locally and lets AI work with everything you've seen or heard.`
     );
-    window.open(`mailto:${email}?subject=${subject}&body=${body}`);
+    openUrl(`mailto:${email}?subject=${subject}&body=${body}`);
     setEmail("");
     toast({ title: "opening email client..." });
   };

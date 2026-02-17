@@ -13,7 +13,7 @@ use serde_json::json;
 use std::path::{Path, PathBuf};
 use tracing::{debug, error, info, warn};
 
-const PI_PACKAGE: &str = "@mariozechner/pi-coding-agent@0.51.1";
+const PI_PACKAGE: &str = "@mariozechner/pi-coding-agent@0.53.0";
 pub const SCREENPIPE_API_URL: &str = "https://api.screenpi.pe/v1";
 
 /// Returns the screenpipe cloud models array as a serde_json::Value.
@@ -194,7 +194,10 @@ impl PiExecutor {
             }
         }
 
-        std::fs::write(&models_path, serde_json::to_string_pretty(&models_config)?)?;
+        // Atomic write: write to temp file then rename to prevent partial reads
+        let models_tmp = config_dir.join("models.json.tmp");
+        std::fs::write(&models_tmp, serde_json::to_string_pretty(&models_config)?)?;
+        std::fs::rename(&models_tmp, &models_path)?;
 
         // -- auth.json: merge screenpipe token, preserve other providers --
         if let Some(token) = user_token {
@@ -210,7 +213,9 @@ impl PiExecutor {
                 obj.insert("screenpipe".to_string(), json!(token));
             }
 
-            std::fs::write(&auth_path, serde_json::to_string_pretty(&auth)?)?;
+            let auth_tmp = config_dir.join("auth.json.tmp");
+            std::fs::write(&auth_tmp, serde_json::to_string_pretty(&auth)?)?;
+            std::fs::rename(&auth_tmp, &auth_path)?;
 
             // Set restrictive permissions (user read/write only)
             #[cfg(unix)]
@@ -223,6 +228,66 @@ impl PiExecutor {
 
         debug!("pi config merged at {:?}", models_path);
         Ok(())
+    }
+
+    /// Spawn the pi subprocess and wait for its output.
+    async fn spawn_pi(
+        &self,
+        pi_path: &str,
+        prompt: &str,
+        model: &str,
+        working_dir: &Path,
+        resolved_provider: &str,
+        pid_tx: Option<tokio::sync::oneshot::Sender<u32>>,
+    ) -> Result<AgentOutput> {
+        let mut cmd = build_async_command(pi_path);
+        cmd.current_dir(working_dir);
+        cmd.arg("-p").arg(prompt);
+        cmd.arg("--provider").arg(resolved_provider);
+        cmd.arg("--model").arg(model);
+
+        if let Some(ref token) = self.user_token {
+            cmd.env("SCREENPIPE_API_KEY", token);
+        }
+
+        cmd.stdout(std::process::Stdio::piped());
+        cmd.stderr(std::process::Stdio::piped());
+
+        // Use process groups on Unix so we can kill the entire tree
+        #[cfg(unix)]
+        unsafe {
+            cmd.pre_exec(|| {
+                libc::setsid();
+                Ok(())
+            });
+        }
+
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            const CREATE_NO_WINDOW: u32 = 0x08000000;
+            cmd.creation_flags(CREATE_NO_WINDOW);
+        }
+
+        let child = cmd.spawn()?;
+        let pid = child.id();
+
+        if let Some(tx) = pid_tx {
+            if let Some(p) = pid {
+                let _ = tx.send(p);
+            }
+        }
+
+        let output = child.wait_with_output().await?;
+        let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+
+        Ok(AgentOutput {
+            stdout,
+            stderr,
+            success: output.status.success(),
+            pid,
+        })
     }
 }
 
@@ -259,56 +324,33 @@ impl AgentExecutor for PiExecutor {
             resolved_provider, model
         );
 
-        let mut cmd = build_async_command(&pi_path);
-        cmd.current_dir(working_dir);
-        cmd.arg("-p").arg(prompt);
-        cmd.arg("--provider").arg(&resolved_provider);
-        cmd.arg("--model").arg(model);
+        let output = self
+            .spawn_pi(&pi_path, prompt, model, working_dir, &resolved_provider, pid_tx)
+            .await?;
 
-        if let Some(ref token) = self.user_token {
-            cmd.env("SCREENPIPE_API_KEY", token);
+        // Retry once on "model not found": delete stale models.json and rewrite
+        if !output.success && output.stderr.to_lowercase().contains("not found") {
+            warn!(
+                "pi model not found, retrying with fresh models.json (stderr: {})",
+                output.stderr.trim()
+            );
+            let config_dir = get_pi_config_dir()?;
+            let models_path = config_dir.join("models.json");
+            // Remove possibly-stale file so ensure_pi_config writes from scratch
+            let _ = std::fs::remove_file(&models_path);
+            Self::ensure_pi_config(
+                self.user_token.as_deref(),
+                &self.api_url,
+                provider,
+                Some(model),
+                None,
+            )?;
+            return self
+                .spawn_pi(&pi_path, prompt, model, working_dir, &resolved_provider, None)
+                .await;
         }
 
-        cmd.stdout(std::process::Stdio::piped());
-        cmd.stderr(std::process::Stdio::piped());
-
-        // Use process groups on Unix so we can kill the entire tree
-        #[cfg(unix)]
-        unsafe {
-            cmd.pre_exec(|| {
-                // Create a new process group (setsid)
-                libc::setsid();
-                Ok(())
-            });
-        }
-
-        #[cfg(windows)]
-        {
-            use std::os::windows::process::CommandExt;
-            const CREATE_NO_WINDOW: u32 = 0x08000000;
-            cmd.creation_flags(CREATE_NO_WINDOW);
-        }
-
-        let child = cmd.spawn()?;
-        let pid = child.id();
-
-        // Report PID immediately so the caller can track/kill the process
-        if let Some(tx) = pid_tx {
-            if let Some(p) = pid {
-                let _ = tx.send(p);
-            }
-        }
-
-        let output = child.wait_with_output().await?;
-        let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-
-        Ok(AgentOutput {
-            stdout,
-            stderr,
-            success: output.status.success(),
-            pid,
-        })
+        Ok(output)
     }
 
     fn kill(&self, handle: &ExecutionHandle) -> Result<()> {
