@@ -513,6 +513,16 @@ export function PipesSection() {
             scheduled agents that run on your screen data
             {" · "}
             <a
+              href="https://screenpi.pe/pipes"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1 underline underline-offset-2 hover:text-foreground transition-colors"
+            >
+              pipe store
+              <ExternalLink className="h-3 w-3" />
+            </a>
+            {" · "}
+            <a
               href="https://docs.screenpi.pe/pipes"
               target="_blank"
               rel="noopener noreferrer"

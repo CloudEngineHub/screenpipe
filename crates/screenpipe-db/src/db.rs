@@ -4044,6 +4044,40 @@ LIMIT ? OFFSET ?
 
         Ok(rows.into_iter().map(UiEventRecord::from).collect())
     }
+
+    /// Spawn a background task that runs `PRAGMA wal_checkpoint(TRUNCATE)` every 5 minutes.
+    /// This prevents unbounded WAL growth when long-running readers block auto-checkpoint.
+    pub fn start_wal_maintenance(&self) {
+        let pool = self.pool.clone();
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(Duration::from_secs(300));
+            loop {
+                interval.tick().await;
+                match sqlx::query("PRAGMA wal_checkpoint(TRUNCATE)")
+                    .fetch_one(&pool)
+                    .await
+                {
+                    Ok(row) => {
+                        let busy: i32 = row.get(0);
+                        let log_pages: i32 = row.get(1);
+                        let checkpointed: i32 = row.get(2);
+                        if busy == 1 {
+                            warn!(
+                                "wal checkpoint: busy (could not truncate), {} pages in WAL",
+                                log_pages
+                            );
+                        } else {
+                            debug!(
+                                "wal checkpoint: truncated, checkpointed {}/{} pages",
+                                checkpointed, log_pages
+                            );
+                        }
+                    }
+                    Err(e) => warn!("wal checkpoint failed: {}", e),
+                }
+            }
+        });
+    }
 }
 
 pub fn find_matching_positions(blocks: &[OcrTextBlock], query: &str) -> Vec<TextPosition> {

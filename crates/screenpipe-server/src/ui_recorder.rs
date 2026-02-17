@@ -63,7 +63,7 @@ impl Default for UiRecorderConfig {
             capture_text: true,
             capture_keystrokes: false,
             capture_clipboard: true,
-            capture_clipboard_content: false,
+            capture_clipboard_content: true,
             capture_app_switch: true,
             capture_window_focus: true,
             capture_context: true,

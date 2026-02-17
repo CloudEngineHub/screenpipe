@@ -241,6 +241,68 @@ fn setup_logging(local_data_dir: &PathBuf, cli: &Cli) -> anyhow::Result<WorkerGu
     Ok(guard)
 }
 
+/// Periodically scans the data directory for `.log` files and enforces a total size cap.
+/// Deletes oldest log files first until total size is under the limit.
+fn spawn_log_cleanup(data_dir: PathBuf) {
+    const MAX_TOTAL_LOG_BYTES: u64 = 200 * 1024 * 1024; // 200 MB
+    const CHECK_INTERVAL_SECS: u64 = 60;
+
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(Duration::from_secs(CHECK_INTERVAL_SECS));
+        loop {
+            interval.tick().await;
+
+            let entries = match std::fs::read_dir(&data_dir) {
+                Ok(e) => e,
+                Err(e) => {
+                    warn!("log cleanup: failed to read dir {}: {}", data_dir.display(), e);
+                    continue;
+                }
+            };
+
+            let mut log_files: Vec<(PathBuf, u64, std::time::SystemTime)> = Vec::new();
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.extension().and_then(|e| e.to_str()) == Some("log") {
+                    if let Ok(meta) = entry.metadata() {
+                        let modified = meta.modified().unwrap_or(std::time::UNIX_EPOCH);
+                        log_files.push((path, meta.len(), modified));
+                    }
+                }
+            }
+
+            // Sort oldest first
+            log_files.sort_by_key(|(_, _, modified)| *modified);
+
+            let total: u64 = log_files.iter().map(|(_, size, _)| size).sum();
+            if total <= MAX_TOTAL_LOG_BYTES {
+                continue;
+            }
+
+            let mut remaining = total;
+            for (path, size, _) in &log_files {
+                if remaining <= MAX_TOTAL_LOG_BYTES {
+                    break;
+                }
+                match std::fs::remove_file(path) {
+                    Ok(_) => {
+                        info!("log cleanup: deleted {} ({} bytes)", path.display(), size);
+                        remaining -= size;
+                    }
+                    Err(e) => {
+                        warn!("log cleanup: failed to delete {}: {}", path.display(), e);
+                    }
+                }
+            }
+
+            info!(
+                "log cleanup: total log size reduced from {} to {} bytes",
+                total, remaining
+            );
+        }
+    });
+}
+
 #[tokio::main]
 #[tracing::instrument]
 async fn main() -> anyhow::Result<()> {
@@ -1235,6 +1297,12 @@ async fn main() -> anyhow::Result<()> {
 
     // Start background FTS indexer (replaces synchronous INSERT triggers)
     let _fts_handle = screenpipe_db::fts_indexer::start_fts_indexer(db.clone());
+
+    // Periodic WAL checkpoint to prevent unbounded WAL growth
+    db.start_wal_maintenance();
+
+    // Periodic log file cleanup to cap total log size at 200 MB
+    spawn_log_cleanup(local_data_dir.clone());
 
     let server_future = server.start(cli.enable_frame_cache);
     pin_mut!(server_future);

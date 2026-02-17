@@ -88,7 +88,7 @@ impl Default for UiCaptureConfig {
             capture_app_switch: true,
             capture_window_focus: true,
             capture_clipboard: true,
-            capture_clipboard_content: false, // Privacy risk
+            capture_clipboard_content: true,
             capture_context: true,
             capture_mouse_move: false, // High volume
             mouse_move_threshold: 5.0,
@@ -242,7 +242,7 @@ mod tests {
         assert!(config.enabled);
         assert!(config.capture_clicks);
         assert!(!config.capture_keystrokes); // Should be off by default
-        assert!(!config.capture_clipboard_content); // Should be off by default
+        assert!(config.capture_clipboard_content); // On by default
     }
 
     #[test]
