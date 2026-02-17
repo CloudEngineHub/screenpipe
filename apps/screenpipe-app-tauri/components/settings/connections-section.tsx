@@ -249,7 +249,7 @@ export function ConnectionsSection() {
           const cmd = Command.create("cmd", ["/c", "start", "", claudeExe]);
           await cmd.execute();
         } else {
-          await open("https://claude.ai/download");
+          await openUrl("https://claude.ai/download");
         }
       } else {
         // Fallback to download page
