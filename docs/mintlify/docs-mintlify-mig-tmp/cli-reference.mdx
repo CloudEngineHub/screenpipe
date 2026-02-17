@@ -150,7 +150,7 @@ screenpipe serves a REST API on `localhost:3030`:
 ### search example
 
 ```bash
-curl "http://localhost:3030/search?q=meeting&limit=10&content_type=ocr"
+curl "http://localhost:3030/search?q=meeting&limit=10&content_type=vision"
 ```
 
 ### search parameters
@@ -160,7 +160,7 @@ curl "http://localhost:3030/search?q=meeting&limit=10&content_type=ocr"
 | `q` | string | search query |
 | `limit` | int | max results |
 | `offset` | int | pagination offset |
-| `content_type` | string | `ocr`, `audio`, `ui`, `all` |
+| `content_type` | string | `vision`, `audio`, `input`, `all` |
 | `start_time` | ISO 8601 | filter start |
 | `end_time` | ISO 8601 | filter end |
 | `app_name` | string | filter by app |

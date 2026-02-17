@@ -57,12 +57,12 @@ add this as a stdio MCP server in your editor's MCP settings. see also:
 
 ### search-content (all platforms)
 
-search through recorded screen content (OCR) and audio transcriptions:
+search through recorded screen content, audio transcriptions, and user input events:
 
 | parameter | type | description |
 |-----------|------|-------------|
 | `q` | string | search query (optional - omit to get recent content) |
-| `content_type` | string | `all`, `ocr`, `audio`, or `ui` (default: `all`) |
+| `content_type` | string | `all`, `vision`, `audio`, or `input` (default: `all`) |
 | `limit` | integer | max results (default: 10) |
 | `offset` | integer | pagination offset (default: 0) |
 | `start_time` | string | ISO 8601 UTC start time (e.g., `2024-01-15T10:00:00Z`) |
