@@ -595,8 +595,8 @@ export function ObsidianSyncCard() {
                 size="sm"
                 className="text-xs gap-1.5 h-7 mb-2"
                 onClick={async () => {
-                  const { open } = await import("@tauri-apps/plugin-shell");
-                  await open("https://screenpi.pe/login");
+                  const { openUrl } = await import("@tauri-apps/plugin-opener");
+                  await openUrl("https://screenpi.pe/login");
                 }}
               >
                 <AlertCircle className="h-3 w-3" />
@@ -725,8 +725,8 @@ export function ObsidianSyncCard() {
                   size="sm"
                   className="text-xs h-6 gap-1"
                   onClick={async () => {
-                    const { open } = await import("@tauri-apps/plugin-shell");
-                    await open(isLoggedIn ? "https://screenpi.pe/pricing" : "https://screenpi.pe/login");
+                    const { openUrl } = await import("@tauri-apps/plugin-opener");
+                    await openUrl(isLoggedIn ? "https://screenpi.pe/pricing" : "https://screenpi.pe/login");
                   }}
                 >
                   {isLoggedIn ? "upgrade" : "sign in"}

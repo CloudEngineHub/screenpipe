@@ -63,7 +63,8 @@
         { "url": "^https?://.*" },
         { "url": "^mailto:.*" },
         { "url": "^tel:.*" },
-        { "url": "^x-apple-reminderkit://.*" }
+        { "url": "^x-apple-reminderkit://.*" },
+        { "url": "^obsidian://.*" }
       ]
     },
     "core:window:default",
