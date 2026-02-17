@@ -1125,16 +1125,18 @@ export function StandaloneChat() {
   }, []);
 
   // Track previous preset to detect changes
-  const prevPresetRef = useRef<{ provider?: string; model?: string }>({});
+  const prevPresetRef = useRef<{ provider?: string; model?: string; token?: string | null }>({});
 
-  // Restart Pi when user switches preset (different provider/model)
+  // Restart Pi when user switches preset (different provider/model) or token changes (login)
   useEffect(() => {
     if (!activePreset) return;
     const prev = prevPresetRef.current;
-    const changed = prev.provider && (prev.provider !== activePreset.provider || prev.model !== activePreset.model);
-    prevPresetRef.current = { provider: activePreset.provider, model: activePreset.model };
+    const currentToken = settings.user?.token ?? null;
+    const presetChanged = prev.provider && (prev.provider !== activePreset.provider || prev.model !== activePreset.model);
+    const tokenChanged = prev.token !== undefined && prev.token !== currentToken;
+    prevPresetRef.current = { provider: activePreset.provider, model: activePreset.model, token: currentToken };
 
-    if (!changed) return;
+    if (!presetChanged && !tokenChanged) return;
     if (piStartInFlightRef.current) return;
 
     const restartPi = async () => {
