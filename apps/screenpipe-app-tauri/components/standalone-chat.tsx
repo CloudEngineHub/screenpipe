@@ -471,6 +471,7 @@ export function StandaloneChat() {
   const [upgradeReason, setUpgradeReason] = useState<"daily_limit" | "model_not_allowed" | "rate_limit">("daily_limit");
   const [upgradeResetsAt, setUpgradeResetsAt] = useState<string | undefined>();
   const [prefillContext, setPrefillContext] = useState<string | null>(null);
+  const [prefillSource, setPrefillSource] = useState<string>("search");
   const [prefillFrameId, setPrefillFrameId] = useState<number | null>(null);
   const [pastedImage, setPastedImage] = useState<string | null>(null); // Base64 data URL
   const [isDragging, setIsDragging] = useState(false);
@@ -814,8 +815,8 @@ export function StandaloneChat() {
 
   // Listen for chat-prefill events from search modal and pipe creation
   useEffect(() => {
-    const unlisten = listen<{ context: string; prompt?: string; frameId?: number; autoSend?: boolean }>("chat-prefill", (event) => {
-      const { context, prompt, frameId, autoSend } = event.payload;
+    const unlisten = listen<{ context: string; prompt?: string; frameId?: number; autoSend?: boolean; source?: string }>("chat-prefill", (event) => {
+      const { context, prompt, frameId, autoSend, source } = event.payload;
 
       if (autoSend && prompt && context) {
         // Auto-send: compose full message (context above, user text below) and send immediately
@@ -846,6 +847,7 @@ export function StandaloneChat() {
       }
 
       setPrefillContext(context);
+      setPrefillSource(source || "search");
       if (frameId) {
         setPrefillFrameId(frameId);
       }
@@ -1639,8 +1641,9 @@ export function StandaloneChat() {
 
       // Clear prefill context banner (was only cleared in non-Pi path)
       if (prefillContext) {
-        // Prepend search context to the user message so Pi sees it
-        userMessage = `[Context from search: ${prefillContext}]\n\n${userMessage}`;
+        // Prepend context to the user message so Pi sees it
+        const contextLabel = prefillSource === "timeline" ? "timeline selection" : "search";
+        userMessage = `[Context from ${contextLabel}: ${prefillContext}]\n\n${userMessage}`;
         setPrefillContext(null);
       }
 
@@ -2215,7 +2218,7 @@ export function StandaloneChat() {
               {prefillContext && (
                 <div className="flex-1 min-w-0">
                   <div className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider mb-1">
-                    context from search
+                    context from {prefillSource === "timeline" ? "timeline selection" : "search"}
                   </div>
                   <p className="text-xs text-foreground font-mono line-clamp-2">
                     {prefillContext.slice(0, 150)}{prefillContext.length > 150 ? "..." : ""}

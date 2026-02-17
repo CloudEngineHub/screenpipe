@@ -27,6 +27,7 @@ interface TimelineSliderProps {
 	zoomLevel: number;
 	targetZoom: number;
 	setTargetZoom: (fn: (prev: number) => number) => void;
+	onAskAI?: () => void;
 }
 
 interface AppGroup {
@@ -139,6 +140,7 @@ export const TimelineSlider = ({
 	zoomLevel,
 	targetZoom,
 	setTargetZoom,
+	onAskAI,
 }: TimelineSliderProps) => {
 	const containerRef = useRef<HTMLDivElement>(null);
 	const observerTargetRef = useRef<HTMLDivElement>(null);
@@ -794,7 +796,7 @@ export const TimelineSlider = ({
 
 			{/* Tag toolbar — floating above selection */}
 			{selectedIndices.size > 1 && selectionRange && (
-				<TimelineTagToolbar anchorRect={selectionRect} />
+				<TimelineTagToolbar anchorRect={selectionRect} onAskAI={onAskAI} />
 			)}
 		</div>
 	);

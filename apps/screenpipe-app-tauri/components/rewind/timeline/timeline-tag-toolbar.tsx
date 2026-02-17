@@ -4,8 +4,8 @@
 import { useTimelineSelection } from "@/lib/hooks/use-timeline-selection";
 import { cn } from "@/lib/utils";
 import { format } from "date-fns";
-import { Tag, Plus } from "lucide-react";
-import { useState, useRef, useMemo } from "react";
+import { Tag, Plus, MessageSquare } from "lucide-react";
+import { useState, useRef, useMemo, useCallback } from "react";
 import { createPortal } from "react-dom";
 import { toast } from "@/components/ui/use-toast";
 import posthog from "posthog-js";
@@ -15,31 +15,19 @@ const QUICK_TAGS = ["deep work", "meeting", "admin", "break"];
 interface TimelineTagToolbarProps {
 	/** Bounding rect of the selection range for positioning */
 	anchorRect: { x: number; y: number; width: number } | null;
+	/** Called when user clicks "ask AI" — parent handles building context and opening chat */
+	onAskAI?: () => void;
 }
 
-export function TimelineTagToolbar({ anchorRect }: TimelineTagToolbarProps) {
+export function TimelineTagToolbar({ anchorRect, onAskAI }: TimelineTagToolbarProps) {
 	const { selectionRange, tagFrames, setSelectionRange, tags } = useTimelineSelection();
 	const [customTag, setCustomTag] = useState("");
 	const [isApplying, setIsApplying] = useState(false);
 	const inputRef = useRef<HTMLInputElement>(null);
 
-	if (!selectionRange || !anchorRect || selectionRange.frameIds.length === 0) {
-		return null;
-	}
+	const frameIds = selectionRange?.frameIds ?? [];
 
-	const { start, end, frameIds } = selectionRange;
-
-	// Format the selection time range
-	const startTime = format(start, "h:mm a");
-	const endTime = format(end, "h:mm a");
-	const durationMs = end.getTime() - start.getTime();
-	const durationMins = Math.round(durationMs / 60000);
-	const durationStr =
-		durationMins >= 60
-			? `${Math.floor(durationMins / 60)}h ${durationMins % 60}m`
-			: `${durationMins}m`;
-
-	// Collect existing tags on selected frames
+	// Collect existing tags on selected frames — must be called before any early return
 	const existingTags = useMemo(() => {
 		const tagSet = new Set<string>();
 		for (const id of frameIds) {
@@ -49,8 +37,8 @@ export function TimelineTagToolbar({ anchorRect }: TimelineTagToolbarProps) {
 		return [...tagSet];
 	}, [frameIds, tags]);
 
-	const handleApplyTag = async (tag: string) => {
-		if (!tag.trim() || isApplying) return;
+	const handleApplyTag = useCallback(async (tag: string) => {
+		if (!tag.trim() || isApplying || frameIds.length === 0) return;
 		setIsApplying(true);
 		try {
 			await tagFrames(frameIds, tag.trim());
@@ -74,12 +62,29 @@ export function TimelineTagToolbar({ anchorRect }: TimelineTagToolbarProps) {
 		} finally {
 			setIsApplying(false);
 		}
-	};
+	}, [isApplying, frameIds, tagFrames, setSelectionRange]);
 
-	const handleCustomSubmit = (e: React.FormEvent) => {
+	const handleCustomSubmit = useCallback((e: React.FormEvent) => {
 		e.preventDefault();
 		handleApplyTag(customTag);
-	};
+	}, [handleApplyTag, customTag]);
+
+	// Early return AFTER all hooks
+	if (!selectionRange || !anchorRect || frameIds.length === 0) {
+		return null;
+	}
+
+	const { start, end } = selectionRange;
+
+	// Format the selection time range
+	const startTime = format(start, "h:mm a");
+	const endTime = format(end, "h:mm a");
+	const durationMs = end.getTime() - start.getTime();
+	const durationMins = Math.round(durationMs / 60000);
+	const durationStr =
+		durationMins >= 60
+			? `${Math.floor(durationMins / 60)}h ${durationMins % 60}m`
+			: `${durationMins}m`;
 
 	// Center the toolbar above the selection
 	const left = anchorRect.x + anchorRect.width / 2;
@@ -95,12 +100,23 @@ export function TimelineTagToolbar({ anchorRect }: TimelineTagToolbarProps) {
 			}}
 		>
 			<div className="bg-popover border border-border rounded-xl shadow-2xl px-3 py-2.5 flex flex-col gap-2 min-w-[280px]">
-				{/* Selection info */}
-				<div className="flex items-center gap-2 text-xs text-muted-foreground">
-					<Tag className="w-3 h-3" />
-					<span>
-						{startTime} → {endTime} ({durationStr}, {frameIds.length} frames)
-					</span>
+				{/* Selection info + ask AI */}
+				<div className="flex items-center justify-between gap-2">
+					<div className="flex items-center gap-2 text-xs text-muted-foreground">
+						<Tag className="w-3 h-3" />
+						<span>
+							{startTime} → {endTime} ({durationStr})
+						</span>
+					</div>
+					{onAskAI && (
+						<button
+							onClick={onAskAI}
+							className="flex items-center gap-1 text-xs px-2 py-1 rounded-md bg-foreground text-background hover:bg-foreground/90 transition-colors font-medium"
+						>
+							<MessageSquare className="w-3 h-3" />
+							ask ai
+						</button>
+					)}
 				</div>
 
 				{/* Existing tags on selection */}
