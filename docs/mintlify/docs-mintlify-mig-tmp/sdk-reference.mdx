@@ -60,26 +60,7 @@ for await (const event of client.streamVision(true)) {
 
 ### pipes
 
-pipes are scheduled AI agents that run on your screenpipe data (Next.js apps).
-
-add a `pipe.json` to your pipe folder:
-
-```json
-{
-  "crons": [
-    {
-      "path": "/api/log",
-      "schedule": "0 */5 * * *"
-    }
-  ]
-}
-```
-
-scaffold react hooks with the CLI:
-
-```bash
-bunx --bun @screenpipe/dev@latest components add
-```
+pipes are scheduled AI agents defined as markdown files (`pipe.md`) that run on your screenpipe data. see [pipes docs](/pipes) for details.
 
 ### links
 

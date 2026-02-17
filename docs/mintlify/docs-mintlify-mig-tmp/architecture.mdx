@@ -128,7 +128,7 @@ graph TD
 |--------|------|----------|
 | Apple Vision | OCR | macOS |
 | Windows native | OCR | Windows |
-| Tesseract | OCR | cross-platform fallback |
+| Tesseract | OCR | Linux |
 | Whisper | speech-to-text | local, all platforms |
 | Deepgram | speech-to-text | cloud API |
 
@@ -197,9 +197,10 @@ key tables:
 | table | stores |
 |-------|--------|
 | `frames` | captured screen frame metadata |
-| `ocr_results` | text extracted from frames |
+| `ocr_text` | text extracted from frames |
+| `video_chunks` | video recording file metadata |
 | `audio_chunks` | audio recording metadata |
-| `transcriptions` | text from audio |
+| `audio_transcriptions` | text from audio |
 | `speakers` | identified speakers |
 | `ui_events` | keyboard, mouse, clipboard events |
 | `tags` | user-applied tags on content |

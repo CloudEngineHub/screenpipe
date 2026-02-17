@@ -42,11 +42,11 @@ sudo pacman -S libpulse alsa-lib ffmpeg
 | `-d, --audio-chunk-duration <INT>` | chunk duration (seconds) | `30` |
 | `--disable-audio` | disable audio recording | `false` |
 | `-i, --audio-device <STRING>` | audio device (repeatable) | — |
-| `-a, --audio-transcription-engine <ENGINE>` | STT engine | `whisper-large-v3-turbo` |
+| `-a, --audio-transcription-engine <ENGINE>` | STT engine | `whisper-large-v3-turbo-quantized` |
 | `--vad-engine <ENGINE>` | voice activity detection (`silero`/`webrtc`) | `silero` |
 | `--vad-sensitivity <LEVEL>` | VAD sensitivity (`low`/`medium`/`high`) | `high` |
 
-transcription engines: `deepgram`, `whisper-tiny`, `whisper-large`, `whisper-large-v3-turbo`
+transcription engines: `whisper-large-v3-turbo-quantized` (default), `whisper-tiny`, `whisper-tiny-quantized`, `whisper-large`, `whisper-large-quantized`, `whisper-large-v3-turbo`, `deepgram`
 
 ### vision
 
@@ -66,14 +66,14 @@ OCR engines: `apple-native`, `windows-native`, `tesseract`, `unstructured`, `cus
 | flag | description | default |
 | --- | --- | --- |
 | `-l, --language <LANG>` | languages to support (repeatable) | — |
-| `--use-pii-removal` | redact PII from OCR text | `false` |
+| `--use-pii-removal` | redact PII from OCR text | `true` |
 
 ### experimental
 
 | flag | description | default |
 | --- | --- | --- |
 
-| `--enable-frame-cache` | video frame cache | `false` |
+| `--enable-frame-cache` | video frame cache | `true` |
 | `--capture-unfocused-windows` | capture unfocused windows | `false` |
 
 ## subcommands
@@ -105,20 +105,6 @@ bunx screenpipe pipe logs my-pipe -f  # follow
 bunx screenpipe pipe delete my-pipe
 ```
 
-### add external data
-
-add screen recordings from external sources (iPhone recordings, journal photos, etc.):
-
-```bash
-bunx screenpipe add /path/to/videos --ocr-engine apple-native
-```
-
-optional: override metadata with a JSON file:
-
-```bash
-bunx screenpipe add /path/to/videos --metadata-override metadata.json
-```
-
 ### status
 
 ```bash
@@ -130,20 +116,12 @@ bunx screenpipe status --json
 
 ```bash
 bunx screenpipe audio list
-bunx screenpipe audio start <device-id>
-bunx screenpipe audio stop <device-id>
 ```
 
 ### vision devices
 
 ```bash
 bunx screenpipe vision list
-```
-
-### database
-
-```bash
-bunx screenpipe migrate
 ```
 
 ## API endpoints
@@ -162,8 +140,12 @@ screenpipe serves a REST API on `localhost:3030`:
 | DELETE | `/tags/{type}/{id}` | remove tags |
 | POST | `/raw_sql` | execute raw SQL |
 | POST | `/add` | add content to database |
-| GET | `/semantic-search` | semantic search |
 | GET | `/search/keyword` | keyword search |
+| GET | `/ui-events` | search UI events (keyboard, mouse, clipboard) |
+| GET | `/ui-events/stats` | UI event statistics by app |
+| POST | `/audio/start` | start audio recording |
+| POST | `/audio/stop` | stop audio recording |
+| POST | `/add` | add external content to database |
 
 ### search example
 
@@ -186,21 +168,5 @@ curl "http://localhost:3030/search?q=meeting&limit=10&content_type=ocr"
 | `browser_url` | string | filter by browser URL |
 | `min_length` | int | minimum text length |
 | `max_length` | int | maximum text length |
-
-## shell completions
-
-```bash
-# bash
-eval "$(screenpipe completions bash)"
-
-# zsh
-eval "$(screenpipe completions zsh)"
-
-# fish
-screenpipe completions fish | source
-
-# powershell
-screenpipe completions powershell | Out-String | Invoke-Expression
-```
 
 need help? [join our discord](https://discord.gg/dU9EBuw7Uq).
