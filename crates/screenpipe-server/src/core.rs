@@ -37,6 +37,7 @@ pub async fn start_continuous_recording(
     activity_feed: screenpipe_vision::ActivityFeedOption,
     video_quality: String,
     vision_metrics: Arc<PipelineMetrics>,
+    disable_ocr: bool,
 ) -> Result<()> {
     debug!("Starting video recording for monitors {:?}", monitor_ids);
     let video_tasks = if !vision_disabled {
@@ -55,6 +56,7 @@ pub async fn start_continuous_recording(
                 let activity_feed = activity_feed.clone();
                 let video_quality = video_quality.clone();
                 let vision_metrics = vision_metrics.clone();
+                let disable_ocr = disable_ocr;
 
                 debug!("Starting video recording for monitor {}", monitor_id);
                 vision_handle.spawn(async move {
@@ -78,6 +80,7 @@ pub async fn start_continuous_recording(
                             activity_feed.clone(),
                             video_quality.clone(),
                             vision_metrics.clone(),
+                            disable_ocr,
                         )
                         .await
                         {
@@ -160,6 +163,7 @@ pub async fn record_video(
     activity_feed: screenpipe_vision::ActivityFeedOption,
     video_quality: String,
     vision_metrics: Arc<PipelineMetrics>,
+    disable_ocr: bool,
 ) -> Result<()> {
     debug!("record_video: Starting for monitor {}", monitor_id);
     let device_name = Arc::new(format!("monitor_{}", monitor_id));
@@ -215,6 +219,7 @@ pub async fn record_video(
         activity_feed,
         video_quality,
         vision_metrics,
+        disable_ocr,
     );
 
     info!(

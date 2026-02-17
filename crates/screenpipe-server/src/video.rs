@@ -189,6 +189,7 @@ impl VideoCapture {
         activity_feed: screenpipe_vision::ActivityFeedOption,
         video_quality: String,
         metrics: Arc<PipelineMetrics>,
+        disable_ocr: bool,
     ) -> Self {
         let fps = if fps.is_finite() && fps > 0.0 {
             fps
@@ -452,32 +453,52 @@ impl VideoCapture {
                 true
             }
 
-            info!("Starting OCR worker for monitor {}", monitor_id);
+            if disable_ocr {
+                info!("OCR disabled for monitor {} — passing frames through without text extraction", monitor_id);
+            } else {
+                info!("Starting OCR worker for monitor {}", monitor_id);
+            }
             loop {
                 if let Some(raw_frame) = ocr_work_queue_clone.pop() {
-                    let ocr_start = std::time::Instant::now();
-                    match process_ocr_task(
-                        &raw_frame,
-                        &ocr_worker_engine,
-                        &ocr_worker_languages,
-                        ocr_cache.clone(),
-                    )
-                    .await
-                    {
-                        Ok(ocr_result) => {
-                            let ocr_latency = ocr_start.elapsed();
-                            ocr_metrics.record_ocr(
-                                ocr_latency,
-                                ocr_result.cache_hits,
-                                ocr_result.cache_misses,
-                            );
-                            push_to_ocr_queue(
-                                &ocr_frame_queue_clone,
-                                &Arc::new(ocr_result.capture),
-                                "OCR-out",
-                            );
+                    if disable_ocr {
+                        // Skip OCR, create result with empty window_ocr_results
+                        let capture = CaptureResult {
+                            image: raw_frame.image.clone(),
+                            frame_number: raw_frame.frame_number,
+                            timestamp: raw_frame.timestamp,
+                            captured_at: raw_frame.captured_at,
+                            window_ocr_results: Vec::new(),
+                        };
+                        push_to_ocr_queue(
+                            &ocr_frame_queue_clone,
+                            &Arc::new(capture),
+                            "OCR-out",
+                        );
+                    } else {
+                        let ocr_start = std::time::Instant::now();
+                        match process_ocr_task(
+                            &raw_frame,
+                            &ocr_worker_engine,
+                            &ocr_worker_languages,
+                            ocr_cache.clone(),
+                        )
+                        .await
+                        {
+                            Ok(ocr_result) => {
+                                let ocr_latency = ocr_start.elapsed();
+                                ocr_metrics.record_ocr(
+                                    ocr_latency,
+                                    ocr_result.cache_hits,
+                                    ocr_result.cache_misses,
+                                );
+                                push_to_ocr_queue(
+                                    &ocr_frame_queue_clone,
+                                    &Arc::new(ocr_result.capture),
+                                    "OCR-out",
+                                );
+                            }
+                            Err(e) => error!("OCR worker error for monitor {}: {}", monitor_id, e),
                         }
-                        Err(e) => error!("OCR worker error for monitor {}: {}", monitor_id, e),
                     }
                 } else {
                     tokio::time::sleep(Duration::from_millis(50)).await;

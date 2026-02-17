@@ -4013,6 +4013,39 @@ LIMIT ? OFFSET ?
         Ok(count)
     }
 
+    // ============================================================================
+    // Accessibility Text (Tree Walker)
+    // ============================================================================
+
+    /// Insert accessibility tree text into the accessibility table.
+    /// FTS indexing is automatic via SQL triggers.
+    pub async fn insert_accessibility_text(
+        &self,
+        app_name: &str,
+        window_name: &str,
+        text_content: &str,
+        browser_url: Option<&str>,
+    ) -> Result<i64, sqlx::Error> {
+        let mut tx = self.begin_immediate_with_retry().await?;
+
+        let result = sqlx::query(
+            r#"
+            INSERT INTO accessibility (app_name, window_name, text_content, browser_url)
+            VALUES (?1, ?2, ?3, ?4)
+            "#,
+        )
+        .bind(app_name)
+        .bind(window_name)
+        .bind(text_content)
+        .bind(browser_url)
+        .execute(&mut **tx.conn())
+        .await?;
+
+        let id = result.last_insert_rowid();
+        tx.commit().await?;
+        Ok(id)
+    }
+
     /// Get recent UI events for a specific app
     pub async fn get_recent_ui_events_by_app(
         &self,

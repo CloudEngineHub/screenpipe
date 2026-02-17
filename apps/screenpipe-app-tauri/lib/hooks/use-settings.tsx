@@ -94,6 +94,8 @@ export type Settings = SettingsStore & {
 	transcriptionMode?: "realtime" | "smart";
 	/** User's name for speaker identification — input device audio will be labeled with this name */
 	userName?: string;
+	/** When true, screen capture continues but OCR text extraction is skipped (saves CPU) */
+	disableOcr?: boolean;
 }
 
 export const DEFAULT_PROMPT = `Rules:
@@ -222,6 +224,7 @@ let DEFAULT_SETTINGS: Settings = {
 			enableRealtimeAudioTranscription: false,
 			realtimeAudioTranscriptionEngine: "deepgram",
 			disableVision: false,
+			disableOcr: false,
 			useAllMonitors: true,
 			adaptiveFps: false,
 			enableRealtimeVision: true,

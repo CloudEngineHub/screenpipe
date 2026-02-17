@@ -62,6 +62,7 @@ pub mod activity_feed;
 pub mod config;
 pub mod events;
 pub mod platform;
+pub mod tree;
 
 // Re-exports
 pub use activity_feed::{ActivityFeed, ActivityKind, CaptureParams};

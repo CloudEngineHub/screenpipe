@@ -5490,6 +5490,7 @@ dependencies = [
  "chrono",
  "cidre 0.13.1",
  "crossbeam-channel",
+ "libc",
  "parking_lot",
  "regex",
  "screenpipe-core",

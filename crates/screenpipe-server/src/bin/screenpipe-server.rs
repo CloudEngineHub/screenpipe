@@ -754,6 +754,7 @@ async fn main() -> anyhow::Result<()> {
             activity_feed,
             video_quality: cli.video_quality.clone(),
             vision_metrics: vision_metrics.clone(),
+            disable_ocr: false,
         };
         Some(Arc::new(VisionManager::new(
             config,
@@ -845,6 +846,7 @@ async fn main() -> anyhow::Result<()> {
                     activity_feed_legacy,
                     cli.video_quality.clone(),
                     vision_metrics_for_recording.clone(),
+                    false, // disable_ocr: CLI doesn't support this yet
                 );
 
                 let result = tokio::select! {

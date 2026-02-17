@@ -191,6 +191,10 @@ pub struct SettingsStore {
     pub realtime_audio_transcription_engine: String,
     #[serde(rename = "disableVision")]
     pub disable_vision: bool,
+    /// When true, screen capture continues but OCR text extraction is skipped.
+    /// Reduces CPU usage significantly while still recording video.
+    #[serde(rename = "disableOcr", default)]
+    pub disable_ocr: bool,
     #[serde(rename = "useAllMonitors")]
     pub use_all_monitors: bool,
     #[serde(rename = "adaptiveFps", default)]
@@ -521,6 +525,7 @@ impl Default for SettingsStore {
             enable_realtime_audio_transcription: false,
             realtime_audio_transcription_engine: "deepgram".to_string(),
             disable_vision: false,
+            disable_ocr: false,
             use_all_monitors: true,  // Match CLI default - dynamic monitor detection
             enable_realtime_vision: true,
             show_shortcut_overlay: true,

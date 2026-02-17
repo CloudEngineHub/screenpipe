@@ -32,6 +32,7 @@ pub struct VisionManagerConfig {
     pub activity_feed: screenpipe_vision::ActivityFeedOption,
     pub video_quality: String,
     pub vision_metrics: Arc<PipelineMetrics>,
+    pub disable_ocr: bool,
 }
 
 /// Status of the VisionManager
@@ -170,6 +171,7 @@ impl VisionManager {
         let activity_feed = self.config.activity_feed.clone();
         let video_quality = self.config.video_quality.clone();
         let vision_metrics = self.config.vision_metrics.clone();
+        let disable_ocr = self.config.disable_ocr;
 
         // Spawn the recording task using the existing record_video function
         let handle = self.vision_handle.spawn(async move {
@@ -192,6 +194,7 @@ impl VisionManager {
                     activity_feed.clone(),
                     video_quality.clone(),
                     vision_metrics.clone(),
+                    disable_ocr,
                 )
                 .await
                 {

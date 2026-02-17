@@ -1311,6 +1311,24 @@ Your screen is a pipe. Everything you see, hear, and type flows through it. Scre
           </CardContent>
         </Card>
 
+        {/* Disable OCR */}
+        {!settings.disableVision && (
+          <Card className="border-border bg-card">
+            <CardContent className="px-3 py-2.5">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center space-x-2.5">
+                  <EyeOff className="h-4 w-4 text-muted-foreground shrink-0" />
+                  <div>
+                    <h3 className="text-sm font-medium text-foreground">Disable OCR</h3>
+                    <p className="text-xs text-muted-foreground">Capture screen but skip text extraction (reduces CPU usage significantly)</p>
+                  </div>
+                </div>
+                <Switch id="disableOcr" checked={settings.disableOcr ?? false} onCheckedChange={(checked) => handleSettingsChange({ disableOcr: checked }, true)} />
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
         {/* Use All Monitors */}
         <Card className="border-border bg-card">
           <CardContent className="px-3 py-2.5">

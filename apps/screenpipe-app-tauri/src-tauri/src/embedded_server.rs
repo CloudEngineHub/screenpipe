@@ -39,6 +39,7 @@ pub struct EmbeddedServerConfig {
     pub video_chunk_duration: u64,
     pub disable_audio: bool,
     pub disable_vision: bool,
+    pub disable_ocr: bool,
     pub use_pii_removal: bool,
     pub ocr_engine: String,
     pub audio_transcription_engine: String,
@@ -96,6 +97,7 @@ impl EmbeddedServerConfig {
             video_chunk_duration: 30,
             disable_audio: store.disable_audio,
             disable_vision: store.disable_vision,
+            disable_ocr: store.disable_ocr,
             use_pii_removal: store.use_pii_removal,
             ocr_engine: store.ocr_engine.clone(),
             audio_transcription_engine,
@@ -435,6 +437,7 @@ pub async fn start_embedded_server(
                 activity_feed,
                 video_quality,
                 vision_metrics: vision_metrics.clone(),
+                disable_ocr: config.disable_ocr,
             };
 
             let vision_manager = Arc::new(VisionManager::new(
@@ -524,6 +527,7 @@ pub async fn start_embedded_server(
             let shutdown_rx = shutdown_tx_clone.subscribe();
             let video_quality = config.video_quality.clone();
             let recording_metrics = vision_metrics.clone();
+            let disable_ocr = config.disable_ocr;
 
             tokio::spawn(async move {
                 let mut shutdown_rx = shutdown_rx;
@@ -548,6 +552,7 @@ pub async fn start_embedded_server(
                         None,
                         video_quality.clone(),
                         recording_metrics.clone(),
+                        disable_ocr,
                     );
 
                     tokio::select! {

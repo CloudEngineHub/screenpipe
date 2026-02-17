@@ -9,9 +9,13 @@ use tracing::{debug, info, warn};
 use crate::DatabaseManager;
 
 /// Batch size for FTS indexing. Process this many rows per table per cycle.
-/// With bulk INSERT...SELECT, overhead is per-batch not per-row, so a larger
-/// batch lets backfill complete faster without increasing semaphore hold time.
-const FTS_BATCH_SIZE: i64 = 2000;
+/// Kept small to minimize write-lock hold time: each batch acquires
+/// BEGIN IMMEDIATE which blocks frame inserts. 500 rows ≈ a few hundred ms
+/// vs 2000 rows which could hold the lock for seconds on large monitors.
+const FTS_BATCH_SIZE: i64 = 500;
+
+/// Delay between indexing each table to let frame inserts interleave.
+const FTS_INTER_TABLE_DELAY: Duration = Duration::from_millis(200);
 
 /// Interval between FTS indexing cycles.
 const FTS_INDEX_INTERVAL: Duration = Duration::from_secs(30);
@@ -47,25 +51,66 @@ pub fn start_fts_indexer(db: Arc<DatabaseManager>) -> tokio::task::JoinHandle<()
 }
 
 /// Index all FTS tables, returning total rows indexed.
+/// Adds a small delay between tables so frame inserts can interleave.
 async fn index_all_tables(db: &DatabaseManager) -> i64 {
     let mut total = 0;
 
-    total += index_frames_fts(db).await.unwrap_or_else(|e| {
+    let t0 = std::time::Instant::now();
+    let frames_count = index_frames_fts(db).await.unwrap_or_else(|e| {
         warn!("FTS indexer: frames error: {}", e);
         0
     });
+    let frames_elapsed = t0.elapsed();
+    if frames_elapsed.as_secs() >= 1 {
+        info!(
+            "FTS indexer: frames batch took {:.1}s ({} rows)",
+            frames_elapsed.as_secs_f64(),
+            frames_count
+        );
+    }
+    total += frames_count;
 
-    total += index_ocr_text_fts(db).await.unwrap_or_else(|e| {
+    // Yield to let frame inserts through
+    if total > 0 {
+        tokio::time::sleep(FTS_INTER_TABLE_DELAY).await;
+    }
+
+    let t1 = std::time::Instant::now();
+    let ocr_count = index_ocr_text_fts(db).await.unwrap_or_else(|e| {
         warn!("FTS indexer: ocr_text error: {}", e);
         0
     });
+    let ocr_elapsed = t1.elapsed();
+    if ocr_elapsed.as_secs() >= 1 {
+        info!(
+            "FTS indexer: ocr_text batch took {:.1}s ({} rows)",
+            ocr_elapsed.as_secs_f64(),
+            ocr_count
+        );
+    }
+    total += ocr_count;
 
-    total += index_audio_transcriptions_fts(db)
+    // Yield again
+    if ocr_count > 0 {
+        tokio::time::sleep(FTS_INTER_TABLE_DELAY).await;
+    }
+
+    let t2 = std::time::Instant::now();
+    let audio_count = index_audio_transcriptions_fts(db)
         .await
         .unwrap_or_else(|e| {
             warn!("FTS indexer: audio_transcriptions error: {}", e);
             0
         });
+    let audio_elapsed = t2.elapsed();
+    if audio_elapsed.as_secs() >= 1 {
+        info!(
+            "FTS indexer: audio_transcriptions batch took {:.1}s ({} rows)",
+            audio_elapsed.as_secs_f64(),
+            audio_count
+        );
+    }
+    total += audio_count;
 
     // ui_events_fts is not indexed — the /ui-events/search endpoint uses LIKE,
     // so maintaining that FTS table is wasted work.
