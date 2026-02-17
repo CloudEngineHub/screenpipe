@@ -67,6 +67,34 @@ async function getLatestMcpRelease(): Promise<{ url: string; version: string }> 
   throw new Error("No MCP release found");
 }
 
+async function findClaudeExeOnWindows(): Promise<string | null> {
+  try {
+    const home = await homeDir();
+    const localAppData = await join(home, "AppData", "Local");
+
+    const candidates = [
+      await join(localAppData, "AnthropicClaude", "claude.exe"),
+      await join(localAppData, "Programs", "Claude", "Claude.exe"),
+      await join(localAppData, "Programs", "claude-desktop", "Claude.exe"),
+    ];
+
+    for (const p of candidates) {
+      try {
+        const check = Command.create("cmd", ["/c", "dir", "/b", p]);
+        const result = await check.execute();
+        if (result.code === 0) {
+          return p;
+        }
+      } catch {
+        continue;
+      }
+    }
+  } catch {
+    // ignore
+  }
+  return null;
+}
+
 async function getInstalledMcpVersion(): Promise<string | null> {
   try {
     const os = platform();
@@ -120,12 +148,14 @@ export function ConnectionsSection() {
   }, [downloadState]);
 
   const handleClaudeConnect = async () => {
+    let mcpbUrl: string | null = null;
+
     try {
       setDownloadState("downloading");
 
       // Get the latest mcpb URL dynamically
       const release = await getLatestMcpRelease();
-      const mcpbUrl = release.url;
+      mcpbUrl = release.url;
 
       // Use Tauri's HTTP client to avoid CORS issues
       const response = await tauriFetch(mcpbUrl, {
@@ -157,25 +187,46 @@ export function ConnectionsSection() {
         const openFile = Command.create("open", [filePath]);
         await openFile.execute();
       } else if (os === "windows") {
-        // Open Claude Desktop first
-        const openClaude = Command.create("cmd", ["/c", "start", "", "Claude"]);
-        await openClaude.execute();
+        // Find Claude Desktop at known install location
+        const claudeExe = await findClaudeExeOnWindows();
 
-        // Wait for Claude to open
-        await new Promise(resolve => setTimeout(resolve, 1500));
+        if (claudeExe) {
+          // Launch Claude Desktop
+          const openClaude = Command.create("cmd", ["/c", "start", "", claudeExe]);
+          await openClaude.execute();
 
-        // Then open the .mcpb file
-        const openFile = Command.create("cmd", ["/c", "start", "", filePath]);
-        await openFile.execute();
+          // Wait for Claude to initialize
+          await new Promise(resolve => setTimeout(resolve, 2000));
+
+          // Open the .mcpb file — Claude handles the install modal
+          const openFile = Command.create("cmd", ["/c", "start", "", filePath]);
+          await openFile.execute();
+        } else {
+          // Claude not found — tell user where the file is
+          await message(
+            `Claude Desktop was not found.\n\nThe extension was saved to:\n${filePath}\n\nOpen this file with Claude Desktop to install the screenpipe extension.`,
+            { title: "Open with Claude Desktop", kind: "info" }
+          );
+        }
       }
 
       setDownloadState("downloaded");
     } catch (error) {
       console.error("Failed to download mcpb:", error instanceof Error ? error.message : String(error));
-      await message("Failed to download extension. Please try again.", {
-        title: "Download Error",
-        kind: "error",
-      });
+
+      if (mcpbUrl) {
+        // Download failed but we have the URL — give it to the user
+        await message(
+          `Download failed (firewall or network issue?).\n\nYou can download manually:\n${mcpbUrl}\n\nThen open the .mcpb file with Claude Desktop.`,
+          { title: "Download Failed", kind: "error" }
+        );
+      } else {
+        // Couldn't even fetch release info
+        await message(
+          "Could not fetch the extension. Check your internet connection.\n\nYou can download manually from:\nhttps://github.com/screenpipe/screenpipe/releases\n\nLook for the latest mcp-v* release and download the .mcpb file.",
+          { title: "Download Failed", kind: "error" }
+        );
+      }
       setDownloadState("idle");
     }
   };
@@ -189,9 +240,13 @@ export function ConnectionsSection() {
         const cmd = Command.create("open", ["-a", "Claude"]);
         await cmd.execute();
       } else if (os === "windows") {
-        // On Windows, try to open Claude from typical install locations
-        const cmd = Command.create("cmd", ["/c", "start", "", "Claude"]);
-        await cmd.execute();
+        const claudeExe = await findClaudeExeOnWindows();
+        if (claudeExe) {
+          const cmd = Command.create("cmd", ["/c", "start", "", claudeExe]);
+          await cmd.execute();
+        } else {
+          await open("https://claude.ai/download");
+        }
       } else {
         // Fallback to download page
         await open("https://claude.ai/download");
