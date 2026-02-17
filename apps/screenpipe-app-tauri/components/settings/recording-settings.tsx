@@ -1321,27 +1321,32 @@ Your screen is a pipe. Everything you see, hear, and type flows through it. Scre
               </div>
 
               {/* OCR */}
-              <div className="flex items-center justify-between ml-[26px]">
-                <div>
-                  <h4 className="text-sm text-foreground">OCR (optical character recognition)</h4>
-                  <p className="text-xs text-muted-foreground">Reads text from screenshots. Higher CPU but captures everything visible on screen.</p>
+              <div className="flex items-center justify-between ml-[26px] gap-3">
+                <div className="min-w-0">
+                  <h4 className="text-sm text-foreground flex items-center gap-1.5">
+                    OCR (optical character recognition)
+                    <HelpTooltip text="Takes screenshots of your screen and extracts text using optical character recognition. Captures everything visible including images with text, custom-rendered content, and terminal output. Uses more CPU (~15-30%) but provides the most complete text capture." />
+                  </h4>
+                  <p className="text-xs text-muted-foreground">Extracts text from screenshots — captures everything visible</p>
                 </div>
-                <Switch id="enableOcr" checked={!(settings.disableOcr ?? false)} onCheckedChange={(checked) => handleSettingsChange({ disableOcr: !checked }, true)} />
+                <Switch className="shrink-0" id="enableOcr" checked={!(settings.disableOcr ?? false)} onCheckedChange={(checked) => handleSettingsChange({ disableOcr: !checked }, true)} />
               </div>
 
-              <Separator className="ml-[26px]" />
+              {(isMacOS || platform() === "windows") && <Separator />}
 
               {/* Element capture (accessibility tree walker) */}
               {(isMacOS || platform() === "windows") && (
-                <div className="flex items-center justify-between ml-[26px]">
-                  <div>
+                <div className="flex items-center justify-between ml-[26px] gap-3">
+                  <div className="min-w-0">
                     <h4 className="text-sm text-foreground flex items-center gap-1.5">
                       Element capture
                       <Badge variant="outline" className="text-[10px] px-1 py-0">beta</Badge>
+                      <HelpTooltip text="Reads text directly from UI elements using macOS/Windows accessibility APIs. Much lower CPU usage (~2-5%) than OCR. Works great for native apps, browsers, and standard UI. May miss text in images, games, terminals with GPU rendering, or custom-drawn content. Both methods can run together for best coverage." />
                     </h4>
-                    <p className="text-xs text-muted-foreground">Reads text directly from UI elements via accessibility APIs. Much lower CPU than OCR but may miss some content (images, custom-rendered text).</p>
+                    <p className="text-xs text-muted-foreground">Reads UI elements directly — lower CPU, may miss some content</p>
                   </div>
                   <Switch
+                    className="shrink-0"
                     id="enableUiEvents"
                     checked={settings.enableUiEvents ?? false}
                     onCheckedChange={(checked) => handleSettingsChange({ enableUiEvents: checked }, true)}
