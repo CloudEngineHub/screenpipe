@@ -5,7 +5,7 @@
 
 import React, { useEffect, useRef, useState, useCallback } from "react";
 import { useSettings } from "@/lib/hooks/use-settings";
-import { open as openUrl } from "@tauri-apps/plugin-shell";
+import { commands } from "@/lib/utils/tauri";
 import { motion, AnimatePresence } from "framer-motion";
 import posthog from "posthog-js";
 
@@ -247,7 +247,9 @@ const OnboardingLogin: React.FC<OnboardingLoginProps> = ({ handleNextSlide }) =>
 
   const handleLogin = useCallback(() => {
     posthog.capture("onboarding_login_clicked");
-    openUrl("https://screenpi.pe/login");
+    // Open login in an in-app WebView instead of Safari so we can intercept
+    // the screenpipe:// deep-link redirect (Safari blocks custom-scheme redirects)
+    commands.openLoginWindow();
   }, []);
 
   const handleSkip = useCallback(() => {

@@ -1,8 +1,8 @@
-## Bug Fixes
-- Fixed silent screen recording data loss: FFmpeg crashes now auto-recover instead of silently destroying frames forever
-- Fixed video chunk DB registration race condition that could cause hours of missing timeline data
-- Pipeline now self-heals after 100 consecutive database errors instead of looping silently
-- Dead capture/OCR/video tasks now trigger automatic restart instead of running as empty shells
-- Frame drops and queue overflows are now visible in logs (previously hidden at debug level)
+## New Features
+- Voice training for speaker identification: record your voice so screenpipe can better identify you in audio transcriptions
+- Audio device modal improvements
 
-#### **Full Changelog:** [300d588c..68973c9d](https://github.com/mediar-ai/screenpipe/compare/300d588c..68973c9d)
+## Bug Fixes
+- Fixed login on onboarding page: sign-in now opens in an in-app browser instead of Safari, fixing the issue where Safari blocked the redirect back to the app
+
+#### **Full Changelog:** [6a0f06ab..HEAD](https://github.com/mediar-ai/screenpipe/compare/6a0f06ab..HEAD)

@@ -337,6 +337,53 @@ pub async fn get_disk_usage(
     }
 }
 
+/// Open the screenpi.pe login page inside an in-app WebView.
+/// Intercepts the screenpipe:// deep-link redirect so we don't rely on
+/// Safari custom-scheme support (which can silently fail).
+#[tauri::command]
+#[specta::specta]
+pub async fn open_login_window(app_handle: tauri::AppHandle) -> Result<(), String> {
+    use tauri::{WebviewUrl, WebviewWindowBuilder};
+
+    let label = "login-browser";
+
+    // If already open, just focus it
+    if let Some(w) = app_handle.get_webview_window(label) {
+        let _ = w.show();
+        let _ = w.set_focus();
+        return Ok(());
+    }
+
+    let app_for_nav = app_handle.clone();
+
+    WebviewWindowBuilder::new(
+        &app_handle,
+        label,
+        WebviewUrl::External("https://screenpi.pe/login".parse().unwrap()),
+    )
+    .title("sign in to screenpipe")
+    .inner_size(460.0, 700.0)
+    .focused(true)
+    .on_navigation(move |url| {
+        if url.scheme() == "screenpipe" {
+            info!("login window intercepted deep link: {}", url);
+            let _ = app_for_nav.emit("deep-link-received", url.to_string());
+            // Close the login window after a short delay to avoid
+            // closing before the event is delivered
+            if let Some(w) = app_for_nav.get_webview_window("login-browser") {
+                let _ = w.close();
+            }
+            false // block navigation to custom scheme
+        } else {
+            true // allow all https navigations (Clerk, OAuth providers, etc.)
+        }
+    })
+    .build()
+    .map_err(|e| e.to_string())?;
+
+    Ok(())
+}
+
 #[tauri::command]
 #[specta::specta]
 pub async fn show_window(

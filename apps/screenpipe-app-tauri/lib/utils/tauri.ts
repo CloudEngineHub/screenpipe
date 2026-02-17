@@ -140,6 +140,19 @@ async showWindow(window: ShowRewindWindow) : Promise<Result<null, string>> {
 }
 },
 /**
+ * Open the screenpi.pe login page inside an in-app WebView.
+ * Intercepts the screenpipe:// deep-link redirect so we don't rely on
+ * Safari custom-scheme support (which can silently fail).
+ */
+async openLoginWindow() : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("open_login_window") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Re-assert the WKWebView as first responder for the current key panel.
  * Called from JS on pointer enter / window focus to ensure trackpad pinch
  * gestures (magnifyWithEvent:) reach the WKWebView for zoom handling.
