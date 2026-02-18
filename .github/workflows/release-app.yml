@@ -738,6 +738,17 @@ jobs:
           echo "MACOSX_DEPLOYMENT_TARGET=10.15" >> $GITHUB_ENV
           echo "Setting MACOSX_DEPLOYMENT_TARGET=10.15 for std::filesystem support"
 
+      - name: Unlock login keychain for codesign cert chain
+        if: matrix.os_type == 'macos'
+        shell: bash
+        run: |
+          # On self-hosted runners, the login keychain may be locked which prevents
+          # codesign from finding Apple intermediate certs needed for chain verification.
+          # Unlock it (empty password set during runner setup).
+          security unlock-keychain -p '' ~/Library/Keychains/login.keychain-db 2>/dev/null || true
+          # Ensure System.keychain is in search list for cert chain verification
+          security list-keychain -d user -s ~/Library/Keychains/login.keychain-db /Library/Keychains/System.keychain
+
       - name: Compute Tauri build args
         id: tauri-args
         shell: bash
