@@ -6,7 +6,7 @@
 //!
 //! This is intentionally decoupled from `ui_recorder` (which records events to the DB).
 //! Meeting detection only needs app-switch/window-focus events from the accessibility API
-//! and does NOT depend on the `enable_ui_events` user toggle.
+//! and does NOT depend on the `enable_input_capture`/`enable_accessibility` user toggles.
 
 #[cfg(feature = "ui-events")]
 use screenpipe_accessibility::{UiCaptureConfig, UiRecorder};

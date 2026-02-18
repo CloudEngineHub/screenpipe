@@ -89,7 +89,8 @@ export type Settings = SettingsStore & {
 	/** When true, audio devices follow system default and auto-switch on changes */
 	useSystemDefaultAudio?: boolean;
 	adaptiveFps?: boolean;
-	enableUiEvents?: boolean;
+	enableInputCapture?: boolean;
+	enableAccessibility?: boolean;
 	/** Audio transcription scheduling: "realtime" (default) or "smart" (defer to idle) */
 	transcriptionMode?: "realtime" | "smart";
 	/** User's name for speaker identification — input device audio will be labeled with this name */
@@ -193,7 +194,6 @@ let DEFAULT_SETTINGS: Settings = {
 		updateChannel: "stable",
 			isFirstTimeUser: true,
 			autoStartEnabled: true,
-			enableFrameCache: true,
 			platform: "unknown",
 			disabledShortcuts: [],
 			user: {
@@ -221,20 +221,19 @@ let DEFAULT_SETTINGS: Settings = {
 			stopAudioShortcut: "",
 			showChatShortcut: "Control+Super+L",
 			searchShortcut: "Control+Super+K",
-			enableRealtimeAudioTranscription: false,
 			realtimeAudioTranscriptionEngine: "deepgram",
 			disableVision: false,
 			disableOcr: false,
 			useAllMonitors: true,
 			adaptiveFps: false,
-			enableRealtimeVision: true,
 			showShortcutOverlay: true,
 			chatHistory: {
 				conversations: [],
 				activeConversationId: null,
 				historyEnabled: true,
 			},
-			enableUiEvents: false,
+			enableInputCapture: false,
+			enableAccessibility: true,
 			overlayMode: "fullscreen",
 			showOverlayInScreenRecording: false,
 			videoQuality: "balanced",

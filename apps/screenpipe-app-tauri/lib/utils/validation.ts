@@ -64,7 +64,6 @@ export const settingsStoreSchema = z.object({
   // Audio Settings
   audioTranscriptionEngine: z.string().min(1, "Audio transcription engine is required"),
   realtimeAudioTranscriptionEngine: z.string(),
-  enableRealtimeAudioTranscription: z.boolean(),
   audioDevices: z.array(z.string()),
   disableAudio: z.boolean(),
   vadSensitivity: z.enum(["low", "medium", "high"]),
@@ -79,9 +78,7 @@ export const settingsStoreSchema = z.object({
   ignoredUrls: z.array(z.string()),
   disableVision: z.boolean(),
   useAllMonitors: z.boolean(),
-  enableRealtimeVision: z.boolean(),
   fps: z.number().min(0.1, "FPS must be at least 0.1").max(60, "FPS cannot exceed 60"),
-  enableFrameCache: z.boolean(),
 
   // System Settings
   dataDir: z.string().min(1, "Data directory is required"),
