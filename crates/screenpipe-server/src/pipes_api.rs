@@ -82,13 +82,15 @@ pub async fn enable_pipe(
 }
 
 /// POST /pipes/:id/run — trigger a manual pipe run.
+/// Uses start_pipe_background to avoid holding the PipeManager mutex for the
+/// entire execution duration, which would block stop/list/other API calls.
 pub async fn run_pipe_now(
     State(pm): State<SharedPipeManager>,
     Path(id): Path<String>,
 ) -> Json<Value> {
     let mgr = pm.lock().await;
-    match mgr.run_pipe(&id).await {
-        Ok(log) => Json(json!({ "data": log })),
+    match mgr.start_pipe_background(&id).await {
+        Ok(()) => Json(json!({ "success": true })),
         Err(e) => Json(json!({ "error": e.to_string() })),
     }
 }

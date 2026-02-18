@@ -1367,7 +1367,7 @@ mod tests {
         let results = db
             .search(
                 "Hello",
-                ContentType::UI,
+                ContentType::Accessibility,
                 100,
                 0,
                 None,
@@ -1397,7 +1397,7 @@ mod tests {
         let results = db
             .search(
                 "Hello",
-                ContentType::UI,
+                ContentType::Accessibility,
                 100,
                 0,
                 None,
@@ -1420,7 +1420,7 @@ mod tests {
         let results = db
             .search(
                 "nonexistent",
-                ContentType::UI,
+                ContentType::Accessibility,
                 100,
                 0,
                 None,
@@ -1443,7 +1443,7 @@ mod tests {
         let results = db
             .search(
                 "",
-                ContentType::UI,
+                ContentType::Accessibility,
                 100,
                 0,
                 None,
@@ -1978,11 +1978,11 @@ mod tests {
             .await
             .unwrap();
 
-        // Vision = OCR + Accessibility, empty query bypasses FTS
+        // All = OCR + Audio + Accessibility, empty query bypasses FTS
         let results = db
             .search(
                 "",
-                ContentType::Vision,
+                ContentType::All,
                 100,
                 0,
                 None,
@@ -2004,7 +2004,7 @@ mod tests {
             .iter()
             .filter(|r| matches!(r, SearchResult::UI(_)))
             .count();
-        assert_eq!(ui_count, 1, "Expected 1 Accessibility result in Vision");
+        assert_eq!(ui_count, 1, "Expected 1 Accessibility result in All");
     }
 
     #[tokio::test]
@@ -2021,11 +2021,11 @@ mod tests {
         .await
         .unwrap();
 
-        // ContentType::UI should still work and return accessibility data (empty query)
+        // ContentType::Accessibility should return accessibility data (empty query)
         let results = db
             .search(
                 "",
-                ContentType::UI,
+                ContentType::Accessibility,
                 100,
                 0,
                 None,
@@ -2046,7 +2046,7 @@ mod tests {
         if let SearchResult::UI(ui) = &results[0] {
             assert_eq!(ui.text, "deprecated UI query text");
         } else {
-            panic!("Expected UI result from deprecated ContentType::UI");
+            panic!("Expected UI result from ContentType::Accessibility");
         }
     }
 

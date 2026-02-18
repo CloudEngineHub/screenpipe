@@ -1029,7 +1029,7 @@ impl DatabaseManager {
                     results.extend(audio_results.into_iter().map(SearchResult::Audio));
                 }
             }
-            ContentType::UI | ContentType::Accessibility => {
+            ContentType::Accessibility => {
                 let ui_results = self
                     .search_accessibility(
                         query,
@@ -1041,142 +1041,13 @@ impl DatabaseManager {
                         offset,
                     )
                     .await?;
-                results.extend(ui_results.into_iter().map(SearchResult::UI));
-            }
-            ContentType::AudioAndUi => {
-                let audio_results = self
-                    .search_audio(
-                        query,
-                        limit / 2,
-                        offset,
-                        start_time,
-                        end_time,
-                        min_length,
-                        max_length,
-                        speaker_ids,
-                        speaker_name,
-                    )
-                    .await?;
-                let ui_results = self
-                    .search_accessibility(
-                        query,
-                        app_name,
-                        window_name,
-                        start_time,
-                        end_time,
-                        limit / 2,
-                        offset,
-                    )
-                    .await?;
-
-                results.extend(audio_results.into_iter().map(SearchResult::Audio));
-                results.extend(ui_results.into_iter().map(SearchResult::UI));
-            }
-            ContentType::OcrAndUi => {
-                let ocr_results = self
-                    .search_ocr(
-                        query,
-                        limit / 2,
-                        offset,
-                        start_time,
-                        end_time,
-                        app_name,
-                        window_name,
-                        min_length,
-                        max_length,
-                        frame_name,
-                        browser_url,
-                        focused,
-                    )
-                    .await?;
-                let ui_results = self
-                    .search_accessibility(
-                        query,
-                        app_name,
-                        window_name,
-                        start_time,
-                        end_time,
-                        limit / 2,
-                        offset,
-                    )
-                    .await?;
-
-                results.extend(ocr_results.into_iter().map(SearchResult::OCR));
-                results.extend(ui_results.into_iter().map(SearchResult::UI));
-            }
-            ContentType::AudioAndOcr => {
-                let audio_results = self
-                    .search_audio(
-                        query,
-                        limit / 2,
-                        offset,
-                        start_time,
-                        end_time,
-                        min_length,
-                        max_length,
-                        speaker_ids,
-                        speaker_name,
-                    )
-                    .await?;
-                let ocr_results = self
-                    .search_ocr(
-                        query,
-                        limit / 2,
-                        offset,
-                        start_time,
-                        end_time,
-                        app_name,
-                        window_name,
-                        min_length,
-                        max_length,
-                        frame_name,
-                        browser_url,
-                        focused,
-                    )
-                    .await?;
-
-                results.extend(audio_results.into_iter().map(SearchResult::Audio));
-                results.extend(ocr_results.into_iter().map(SearchResult::OCR));
-            }
-            ContentType::Vision => {
-                // Vision = OCR + UI monitoring (accessibility text)
-                let ocr_results = self
-                    .search_ocr(
-                        query,
-                        limit / 2,
-                        offset,
-                        start_time,
-                        end_time,
-                        app_name,
-                        window_name,
-                        min_length,
-                        max_length,
-                        frame_name,
-                        browser_url,
-                        focused,
-                    )
-                    .await?;
-                let ui_results = self
-                    .search_accessibility(
-                        query,
-                        app_name,
-                        window_name,
-                        start_time,
-                        end_time,
-                        limit / 2,
-                        offset,
-                    )
-                    .await?;
-
-                results.extend(ocr_results.into_iter().map(SearchResult::OCR));
                 results.extend(ui_results.into_iter().map(SearchResult::UI));
             }
             ContentType::Input => {
-                // Input = UI events (clicks, keystrokes, etc.)
                 let input_results = self
                     .search_ui_events(
                         Some(query),
-                        None, // event_type
+                        None,
                         app_name,
                         window_name,
                         start_time,
@@ -1185,140 +1056,6 @@ impl DatabaseManager {
                         offset,
                     )
                     .await?;
-                results.extend(input_results.into_iter().map(SearchResult::Input));
-            }
-            ContentType::VisionAndInput => {
-                let ocr_results = self
-                    .search_ocr(
-                        query,
-                        limit / 3,
-                        offset,
-                        start_time,
-                        end_time,
-                        app_name,
-                        window_name,
-                        min_length,
-                        max_length,
-                        frame_name,
-                        browser_url,
-                        focused,
-                    )
-                    .await?;
-                let ui_results = self
-                    .search_accessibility(
-                        query,
-                        app_name,
-                        window_name,
-                        start_time,
-                        end_time,
-                        limit / 3,
-                        offset,
-                    )
-                    .await?;
-                let input_results = self
-                    .search_ui_events(
-                        Some(query),
-                        None,
-                        app_name,
-                        window_name,
-                        start_time,
-                        end_time,
-                        limit / 3,
-                        offset,
-                    )
-                    .await?;
-
-                results.extend(ocr_results.into_iter().map(SearchResult::OCR));
-                results.extend(ui_results.into_iter().map(SearchResult::UI));
-                results.extend(input_results.into_iter().map(SearchResult::Input));
-            }
-            ContentType::AudioAndInput => {
-                let audio_results = self
-                    .search_audio(
-                        query,
-                        limit / 2,
-                        offset,
-                        start_time,
-                        end_time,
-                        min_length,
-                        max_length,
-                        speaker_ids,
-                        speaker_name,
-                    )
-                    .await?;
-                let input_results = self
-                    .search_ui_events(
-                        Some(query),
-                        None,
-                        app_name,
-                        window_name,
-                        start_time,
-                        end_time,
-                        limit / 2,
-                        offset,
-                    )
-                    .await?;
-
-                results.extend(audio_results.into_iter().map(SearchResult::Audio));
-                results.extend(input_results.into_iter().map(SearchResult::Input));
-            }
-            ContentType::VisionAudioInput => {
-                let ocr_results = self
-                    .search_ocr(
-                        query,
-                        limit / 4,
-                        offset,
-                        start_time,
-                        end_time,
-                        app_name,
-                        window_name,
-                        min_length,
-                        max_length,
-                        frame_name,
-                        browser_url,
-                        focused,
-                    )
-                    .await?;
-                let ui_results = self
-                    .search_accessibility(
-                        query,
-                        app_name,
-                        window_name,
-                        start_time,
-                        end_time,
-                        limit / 4,
-                        offset,
-                    )
-                    .await?;
-                let audio_results = self
-                    .search_audio(
-                        query,
-                        limit / 4,
-                        offset,
-                        start_time,
-                        end_time,
-                        min_length,
-                        max_length,
-                        speaker_ids,
-                        speaker_name,
-                    )
-                    .await?;
-                let input_results = self
-                    .search_ui_events(
-                        Some(query),
-                        None,
-                        app_name,
-                        window_name,
-                        start_time,
-                        end_time,
-                        limit / 4,
-                        offset,
-                    )
-                    .await?;
-
-                results.extend(ocr_results.into_iter().map(SearchResult::OCR));
-                results.extend(ui_results.into_iter().map(SearchResult::UI));
-                results.extend(audio_results.into_iter().map(SearchResult::Audio));
                 results.extend(input_results.into_iter().map(SearchResult::Input));
             }
         }
@@ -1808,7 +1545,7 @@ impl DatabaseManager {
 
             let ui_future = Box::pin(self.count_search_results(
                 query,
-                ContentType::UI,
+                ContentType::Accessibility,
                 start_time,
                 end_time,
                 app_name,
@@ -1916,7 +1653,7 @@ impl DatabaseManager {
                     "ocr_text_fts MATCH ?1"
                 }
             ),
-            ContentType::UI | ContentType::Accessibility => format!(
+            ContentType::Accessibility => format!(
                 r#"SELECT COUNT(DISTINCT accessibility.id)
                    FROM {table}
                    WHERE {match_condition}
@@ -1989,7 +1726,7 @@ impl DatabaseManager {
                     .fetch_one(&self.pool)
                     .await?
             }
-            ContentType::UI | ContentType::Accessibility => {
+            ContentType::Accessibility => {
                 sqlx::query_scalar(&sql)
                     .bind(if ui_query.is_empty() { "*" } else { &ui_query })
                     .bind(start_time)

@@ -330,7 +330,7 @@ async fn test_search_by_multiple_tags() {
         .oneshot(
             Request::builder()
                 .method("GET")
-                .uri("/search?content_type=audio+ocr")
+                .uri("/search?content_type=audio")
                 .body(Body::empty())
                 .unwrap(),
         )

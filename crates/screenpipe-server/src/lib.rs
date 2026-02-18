@@ -21,7 +21,6 @@ mod server;
 pub mod sleep_monitor;
 mod sync_api;
 pub mod sync_provider;
-pub mod ui_events_api;
 pub mod ui_recorder;
 mod video;
 pub mod video_cache;

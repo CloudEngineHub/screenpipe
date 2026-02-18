@@ -88,64 +88,24 @@ pub struct OCRResult {
 
 /// Content type for search queries.
 ///
-/// ## Primary modalities:
+/// - `all` - OCR + Audio + Accessibility
 /// - `ocr` - Screen text from screenshots
 /// - `audio` - Transcribed speech
 /// - `input` - User actions (clicks, keystrokes, clipboard)
 /// - `accessibility` - Accessibility tree text
-///
-/// ## Composite types:
-/// - `vision` - OCR + accessibility
-/// - `all` - OCR + audio + accessibility
 #[derive(OaSchema, Debug, Deserialize, PartialEq, Default, Clone)]
 #[serde(rename_all = "lowercase")]
 pub enum ContentType {
     #[default]
     All,
-
-    // === New API (Three Pillars) ===
-    /// Screen content: OCR text + accessibility text
-    Vision,
-    /// User input actions: clicks, keystrokes, clipboard, app switches
-    Input,
-
-    // === Primary modalities ===
     /// Screen text from screenshots
-    #[serde(alias = "ocr")]
     OCR,
     /// Audio transcriptions
     Audio,
-    /// Accessibility tree text (reads from accessibility table)
-    #[serde(alias = "accessibility")]
+    /// User input actions: clicks, keystrokes, clipboard, app switches
+    Input,
+    /// Accessibility tree text
     Accessibility,
-
-    // === Deprecated (backwards compatible) ===
-    /// @deprecated Use `accessibility` instead
-    #[serde(alias = "ui")]
-    UI,
-
-    // === Combinations ===
-    #[serde(rename = "audio+ui")]
-    #[serde(alias = "audio ui")]
-    AudioAndUi,
-    #[serde(rename = "ocr+ui")]
-    #[serde(alias = "ocr ui")]
-    #[serde(alias = "vision+ui")]
-    OcrAndUi,
-    #[serde(rename = "audio+ocr")]
-    #[serde(alias = "audio ocr")]
-    #[serde(alias = "audio+vision")]
-    AudioAndOcr,
-    /// Vision + Audio + Input (everything)
-    #[serde(rename = "vision+audio+input")]
-    #[serde(alias = "all_modalities")]
-    VisionAudioInput,
-    /// Vision + Input
-    #[serde(rename = "vision+input")]
-    VisionAndInput,
-    /// Audio + Input
-    #[serde(rename = "audio+input")]
-    AudioAndInput,
 }
 
 #[derive(FromRow)]

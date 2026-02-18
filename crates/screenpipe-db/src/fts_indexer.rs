@@ -132,7 +132,7 @@ async fn index_all_tables(db: &DatabaseManager) -> i64 {
     }
     total += accessibility_count;
 
-    // ui_events_fts is not indexed — the /ui-events/search endpoint uses LIKE,
+    // ui_events_fts is not indexed — input event search uses LIKE,
     // so maintaining that FTS table is wasted work.
 
     total

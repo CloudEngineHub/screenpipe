@@ -20,7 +20,7 @@ curl "http://localhost:3030/search?q=QUERY&content_type=all&limit=10&start_time=
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `q` | string | No | Search keywords. Be specific. |
-| `content_type` | string | No | `all` (default), `ocr`, `audio`, `vision`, `input` |
+| `content_type` | string | No | `all` (default), `ocr`, `audio`, `input`, `accessibility` |
 | `limit` | integer | No | Max results 1-20. Default: 10 |
 | `offset` | integer | No | Pagination offset. Default: 0 |
 | `start_time` | ISO 8601 | **Yes** | Start of time range. ALWAYS include this. |
@@ -32,10 +32,11 @@ curl "http://localhost:3030/search?q=QUERY&content_type=all&limit=10&start_time=
 
 ### Content Types
 
-- `vision` or `ocr` — Screen text captured via OCR
+- `ocr` — Screen text captured via OCR
 - `audio` — Audio transcriptions (meetings, voice)
 - `input` — UI events: clicks, keystrokes, clipboard, app switches
-- `all` — Everything (default)
+- `accessibility` — Accessibility tree text
+- `all` — OCR + Audio + Accessibility (default)
 
 ### CRITICAL RULES
 
