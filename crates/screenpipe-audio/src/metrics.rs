@@ -55,6 +55,8 @@ pub struct AudioPipelineMetrics {
 
     // --- Timing ---
     pub started_at: Instant,
+    /// Unix timestamp (secs) of most recent DB insert — used by health check to avoid DB queries
+    pub last_db_write_ts: AtomicU64,
 }
 
 impl AudioPipelineMetrics {
@@ -78,6 +80,7 @@ impl AudioPipelineMetrics {
             batch_pause_events: AtomicU64::new(0),
             batch_resume_events: AtomicU64::new(0),
             started_at: Instant::now(),
+            last_db_write_ts: AtomicU64::new(0),
         }
     }
 
@@ -128,6 +131,11 @@ impl AudioPipelineMetrics {
     pub fn record_db_insert(&self, word_count: u64) {
         self.db_inserted.fetch_add(1, Ordering::Relaxed);
         self.total_words.fetch_add(word_count, Ordering::Relaxed);
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        self.last_db_write_ts.store(now, Ordering::Relaxed);
     }
 
     pub fn record_duplicate_blocked(&self) {
@@ -207,6 +215,7 @@ impl AudioPipelineMetrics {
             } else {
                 0.0
             },
+            last_db_write_ts: self.last_db_write_ts.load(Ordering::Relaxed),
         }
     }
 }
@@ -254,4 +263,6 @@ pub struct AudioMetricsSnapshot {
     pub vad_passthrough_rate: f64,
     /// Transcribed words per minute of uptime
     pub words_per_minute: f64,
+    /// Unix timestamp (secs) of most recent DB insert (0 = none yet)
+    pub last_db_write_ts: u64,
 }

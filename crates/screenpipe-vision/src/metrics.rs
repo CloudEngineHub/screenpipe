@@ -52,6 +52,10 @@ pub struct PipelineMetrics {
     // --- Stalls ---
     /// Number of times capture was stuck >10s without sending a frame
     pub pipeline_stall_count: AtomicU64,
+
+    // --- Timestamps ---
+    /// Unix timestamp (secs) of most recent DB write — used by health check to avoid DB queries
+    pub last_db_write_ts: AtomicU64,
 }
 
 impl PipelineMetrics {
@@ -72,6 +76,7 @@ impl PipelineMetrics {
             ocr_queue_depth: AtomicU64::new(0),
             video_queue_depth: AtomicU64::new(0),
             pipeline_stall_count: AtomicU64::new(0),
+            last_db_write_ts: AtomicU64::new(0),
         }
     }
 
@@ -105,6 +110,13 @@ impl PipelineMetrics {
         let count = self.frames_db_written.fetch_add(1, Ordering::Relaxed);
         self.db_total_latency_us
             .fetch_add(latency.as_micros() as u64, Ordering::Relaxed);
+
+        // Update last DB write timestamp for health check
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        self.last_db_write_ts.store(now, Ordering::Relaxed);
 
         // Record first frame time (only once — compare-and-swap from 0)
         if count == 0 {
@@ -184,6 +196,7 @@ impl PipelineMetrics {
             ocr_queue_depth: self.ocr_queue_depth.load(Ordering::Relaxed),
             video_queue_depth: self.video_queue_depth.load(Ordering::Relaxed),
             pipeline_stall_count: self.pipeline_stall_count.load(Ordering::Relaxed),
+            last_db_write_ts: self.last_db_write_ts.load(Ordering::Relaxed),
         }
     }
 }
@@ -216,4 +229,6 @@ pub struct MetricsSnapshot {
     pub ocr_queue_depth: u64,
     pub video_queue_depth: u64,
     pub pipeline_stall_count: u64,
+    /// Unix timestamp (secs) of most recent DB write (0 = none yet)
+    pub last_db_write_ts: u64,
 }

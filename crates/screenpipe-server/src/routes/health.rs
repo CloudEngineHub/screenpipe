@@ -9,11 +9,8 @@ use chrono::{TimeZone, Utc};
 
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use std::{
-    sync::{atomic::Ordering, Arc},
-    time::Duration,
-};
-use tracing::{debug, error};
+use std::sync::{atomic::Ordering, Arc};
+use tracing::debug;
 
 use crate::server::AppState;
 
@@ -150,47 +147,43 @@ pub async fn health_check(State(state): State<Arc<AppState>>) -> JsonResponse<He
         };
     }
 
-    let (last_frame, audio, _last_ui) = match state.db.get_latest_timestamps().await {
-        Ok((frame, audio, ui)) => (frame, audio, ui),
-        Err(e) => {
-            error!("failed to get latest timestamps: {}", e);
-            (None, None, None)
-        }
+    // Read last-write timestamps from in-memory atomics instead of querying DB.
+    // These are updated on every DB write by the vision/audio pipelines.
+    let vision_snap = state.vision_metrics.snapshot();
+    let audio_snap = state.audio_metrics.snapshot();
+
+    let last_frame_ts = vision_snap.last_db_write_ts;
+    let last_frame = if last_frame_ts > 0 {
+        Utc.timestamp_opt(last_frame_ts as i64, 0).single()
+    } else {
+        None
     };
 
+    let last_audio_ts = audio_snap.last_db_write_ts;
+
     let now = Utc::now();
-    let threshold = Duration::from_secs(1800); // 30 minutes
+    let threshold_secs = 1800u64; // 30 minutes
 
     let frame_status = if state.vision_disabled {
         "disabled"
+    } else if last_frame_ts == 0 {
+        "not_started"
+    } else if now.timestamp() as u64 - last_frame_ts < threshold_secs {
+        "ok"
     } else {
-        match last_frame {
-            Some(timestamp)
-                if now.signed_duration_since(timestamp)
-                    < chrono::Duration::from_std(threshold).unwrap() =>
-            {
-                "ok"
-            }
-            Some(_) => "stale",
-            None => "not_started",
-        }
+        "stale"
     };
 
     let audio_status = if state.audio_disabled {
         "disabled".to_string()
     } else if global_audio_active {
         "ok".to_string()
+    } else if last_audio_ts == 0 {
+        "not_started".to_string()
+    } else if now.timestamp() as u64 - last_audio_ts < threshold_secs {
+        "stale".to_string()
     } else {
-        match audio {
-            Some(timestamp)
-                if now.signed_duration_since(timestamp)
-                    < chrono::Duration::from_std(threshold).unwrap() =>
-            {
-                "stale".to_string()
-            }
-            Some(_) => "stale".to_string(),
-            None => "not_started".to_string(),
-        }
+        "stale".to_string()
     };
 
     // Format device statuses as a string for a more detailed view
@@ -258,25 +251,24 @@ pub async fn health_check(State(state): State<Arc<AppState>>) -> JsonResponse<He
         None
     };
 
-    // Build pipeline metrics snapshot
+    // Build pipeline metrics from the snapshot already taken above
     let pipeline = if !state.vision_disabled {
-        let snap = state.vision_metrics.snapshot();
-        let total_ocr_ops = snap.ocr_cache_hits + snap.ocr_cache_misses;
+        let total_ocr_ops = vision_snap.ocr_cache_hits + vision_snap.ocr_cache_misses;
         Some(PipelineHealthInfo {
-            uptime_secs: snap.uptime_secs,
-            frames_captured: snap.frames_captured,
-            frames_db_written: snap.frames_db_written,
-            frames_dropped: snap.frames_dropped,
-            frame_drop_rate: snap.frame_drop_rate,
-            capture_fps_actual: snap.capture_fps_actual,
-            avg_ocr_latency_ms: snap.avg_ocr_latency_ms,
-            avg_db_latency_ms: snap.avg_db_latency_ms,
-            ocr_queue_depth: snap.ocr_queue_depth,
-            video_queue_depth: snap.video_queue_depth,
-            time_to_first_frame_ms: snap.time_to_first_frame_ms,
-            pipeline_stall_count: snap.pipeline_stall_count,
+            uptime_secs: vision_snap.uptime_secs,
+            frames_captured: vision_snap.frames_captured,
+            frames_db_written: vision_snap.frames_db_written,
+            frames_dropped: vision_snap.frames_dropped,
+            frame_drop_rate: vision_snap.frame_drop_rate,
+            capture_fps_actual: vision_snap.capture_fps_actual,
+            avg_ocr_latency_ms: vision_snap.avg_ocr_latency_ms,
+            avg_db_latency_ms: vision_snap.avg_db_latency_ms,
+            ocr_queue_depth: vision_snap.ocr_queue_depth,
+            video_queue_depth: vision_snap.video_queue_depth,
+            time_to_first_frame_ms: vision_snap.time_to_first_frame_ms,
+            pipeline_stall_count: vision_snap.pipeline_stall_count,
             ocr_cache_hit_rate: if total_ocr_ops > 0 {
-                snap.ocr_cache_hits as f64 / total_ocr_ops as f64
+                vision_snap.ocr_cache_hits as f64 / total_ocr_ops as f64
             } else {
                 0.0
             },
@@ -289,11 +281,10 @@ pub async fn health_check(State(state): State<Arc<AppState>>) -> JsonResponse<He
         status: overall_status.to_string(),
         status_code,
         last_frame_timestamp: last_frame,
-        last_audio_timestamp: if most_recent_audio_timestamp > 0 {
-            Some(
-                Utc.timestamp_opt(most_recent_audio_timestamp as i64, 0)
-                    .unwrap(),
-            )
+        last_audio_timestamp: if last_audio_ts > 0 {
+            Utc.timestamp_opt(last_audio_ts as i64, 0).single()
+        } else if most_recent_audio_timestamp > 0 {
+            Utc.timestamp_opt(most_recent_audio_timestamp as i64, 0).single()
         } else {
             None
         },
@@ -305,7 +296,6 @@ pub async fn health_check(State(state): State<Arc<AppState>>) -> JsonResponse<He
         monitors,
         pipeline,
         audio_pipeline: if !state.audio_disabled {
-            let snap = state.audio_metrics.snapshot();
             let is_paused = state
                 .audio_manager
                 .transcription_paused
@@ -326,36 +316,36 @@ pub async fn health_check(State(state): State<Arc<AppState>>) -> JsonResponse<He
                 };
 
             Some(AudioPipelineHealthInfo {
-                uptime_secs: snap.uptime_secs,
-                chunks_sent: snap.chunks_sent,
-                chunks_channel_full: snap.chunks_channel_full,
-                stream_timeouts: snap.stream_timeouts,
-                vad_passed: snap.vad_passed,
-                vad_rejected: snap.vad_rejected,
-                vad_passthrough_rate: snap.vad_passthrough_rate,
-                avg_speech_ratio: snap.avg_speech_ratio,
-                transcriptions_completed: snap.transcriptions_completed,
-                transcriptions_empty: snap.transcriptions_empty,
-                transcription_errors: snap.transcription_errors,
-                db_inserted: snap.db_inserted,
-                total_words: snap.total_words,
-                words_per_minute: snap.words_per_minute,
+                uptime_secs: audio_snap.uptime_secs,
+                chunks_sent: audio_snap.chunks_sent,
+                chunks_channel_full: audio_snap.chunks_channel_full,
+                stream_timeouts: audio_snap.stream_timeouts,
+                vad_passed: audio_snap.vad_passed,
+                vad_rejected: audio_snap.vad_rejected,
+                vad_passthrough_rate: audio_snap.vad_passthrough_rate,
+                avg_speech_ratio: audio_snap.avg_speech_ratio,
+                transcriptions_completed: audio_snap.transcriptions_completed,
+                transcriptions_empty: audio_snap.transcriptions_empty,
+                transcription_errors: audio_snap.transcription_errors,
+                db_inserted: audio_snap.db_inserted,
+                total_words: audio_snap.total_words,
+                words_per_minute: audio_snap.words_per_minute,
                 // Batch/Smart mode
-                transcription_mode: if snap.segments_deferred > 0
-                    || snap.segments_batch_processed > 0
+                transcription_mode: if audio_snap.segments_deferred > 0
+                    || audio_snap.segments_batch_processed > 0
                 {
                     Some("smart".to_string())
                 } else {
                     Some("realtime".to_string())
                 },
                 transcription_paused: Some(is_paused),
-                segments_deferred: if snap.segments_deferred > 0 {
-                    Some(snap.segments_deferred)
+                segments_deferred: if audio_snap.segments_deferred > 0 {
+                    Some(audio_snap.segments_deferred)
                 } else {
                     None
                 },
-                segments_batch_processed: if snap.segments_batch_processed > 0 {
-                    Some(snap.segments_batch_processed)
+                segments_batch_processed: if audio_snap.segments_batch_processed > 0 {
+                    Some(audio_snap.segments_batch_processed)
                 } else {
                     None
                 },
