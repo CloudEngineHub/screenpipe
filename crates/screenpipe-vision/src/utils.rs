@@ -46,6 +46,30 @@ impl From<screenpipe_db::OcrEngine> for OcrEngine {
     }
 }
 
+impl OcrEngine {
+    pub fn platform_default() -> Self {
+        #[cfg(target_os = "macos")]
+        { Self::AppleNative }
+        #[cfg(target_os = "windows")]
+        { Self::WindowsNative }
+        #[cfg(target_os = "linux")]
+        { Self::Tesseract }
+    }
+}
+
+impl std::str::FromStr for OcrEngine {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "tesseract" => Ok(Self::Tesseract),
+            "windows-native" => Ok(Self::WindowsNative),
+            "unstructured" => Ok(Self::Unstructured),
+            "apple-native" => Ok(Self::AppleNative),
+            _ => Ok(Self::platform_default()),
+        }
+    }
+}
+
 pub fn calculate_hash(image: &DynamicImage) -> u64 {
     let mut hasher = DefaultHasher::new();
     image.as_bytes().hash(&mut hasher);

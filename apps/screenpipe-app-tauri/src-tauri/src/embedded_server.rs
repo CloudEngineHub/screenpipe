@@ -6,140 +6,23 @@
 // Runs the screenpipe server directly in the Tauri process
 
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
-use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
 use screenpipe_audio::audio_manager::builder::TranscriptionMode;
-use screenpipe_audio::audio_manager::AudioManagerBuilder;
 use screenpipe_audio::core::device::{default_input_device, default_output_device, parse_audio_device};
 use screenpipe_audio::core::engine::AudioTranscriptionEngine;
 use screenpipe_audio::meeting_detector::MeetingDetector;
-use screenpipe_audio::vad::{VadEngineEnum, VadSensitivity};
-use screenpipe_core::Language;
 use screenpipe_db::DatabaseManager;
 use screenpipe_server::{
-    analytics,
+    analytics, RecordingConfig,
     ResourceMonitor, SCServer, start_continuous_recording, start_meeting_watcher,
-    start_sleep_monitor, start_ui_recording, UiRecorderConfig,
-    vision_manager::{VisionManager, VisionManagerConfig, start_monitor_watcher, stop_monitor_watcher},
+    start_sleep_monitor, start_ui_recording,
+    vision_manager::{VisionManager, start_monitor_watcher, stop_monitor_watcher},
 };
-use screenpipe_vision::OcrEngine;
 use tokio::sync::broadcast;
 use tracing::{error, info, warn};
 
-use crate::store::SettingsStore;
-
-/// Configuration for embedded server
-#[derive(Clone)]
-pub struct EmbeddedServerConfig {
-    pub port: u16,
-    pub data_dir: PathBuf,
-    pub fps: f64,
-    pub audio_chunk_duration: u64,
-    pub disable_audio: bool,
-    pub disable_vision: bool,
-    pub disable_ocr: bool,
-    pub use_pii_removal: bool,
-    pub ocr_engine: String,
-    pub audio_transcription_engine: String,
-    pub monitor_ids: Vec<String>,
-    pub audio_devices: Vec<String>,
-    pub ignored_windows: Vec<String>,
-    pub included_windows: Vec<String>,
-    pub ignored_urls: Vec<String>,
-    pub languages: Vec<String>,
-    pub vad_sensitivity: String,
-    pub deepgram_api_key: Option<String>,
-    pub analytics_enabled: bool,
-    pub analytics_id: String,
-    pub enable_input_capture: bool,
-    pub enable_accessibility: bool,
-    pub use_all_monitors: bool,
-    pub use_chinese_mirror: bool,
-    pub user_id: Option<String>,
-    pub use_system_default_audio: bool,
-    pub video_quality: String,
-    pub adaptive_fps: bool,
-    pub transcription_mode: TranscriptionMode,
-}
-
-impl EmbeddedServerConfig {
-    pub fn from_store(store: &SettingsStore, data_dir: PathBuf) -> Self {
-        info!("Building EmbeddedServerConfig from store: enable_input_capture={}, enable_accessibility={}, disable_audio={}, disable_vision={}",
-              store.enable_input_capture, store.enable_accessibility, store.disable_audio, store.disable_vision);
-
-        // Fallback: if engine requires cloud auth but user is not logged in, use local whisper
-        let audio_transcription_engine = {
-            let engine = store.audio_transcription_engine.clone();
-            let has_user_id = store.user.id.as_ref().map_or(false, |id| !id.is_empty());
-            let has_deepgram_key = !store.deepgram_api_key.is_empty()
-                && store.deepgram_api_key != "default";
-
-            match engine.as_str() {
-                "screenpipe-cloud" if !has_user_id => {
-                    warn!("screenpipe-cloud selected but user not logged in, falling back to whisper-large-v3-turbo");
-                    "whisper-large-v3-turbo".to_string()
-                }
-                "deepgram" if !has_deepgram_key => {
-                    warn!("deepgram selected but no API key configured, falling back to whisper-large-v3-turbo");
-                    "whisper-large-v3-turbo".to_string()
-                }
-                _ => engine,
-            }
-        };
-
-        Self {
-            port: store.port,
-            data_dir,
-            fps: if store.fps > 0.0 { store.fps as f64 } else { 1.0 },
-            audio_chunk_duration: store.audio_chunk_duration as u64,
-            disable_audio: store.disable_audio,
-            disable_vision: store.disable_vision,
-            disable_ocr: store.disable_ocr,
-            use_pii_removal: store.use_pii_removal,
-            ocr_engine: store.ocr_engine.clone(),
-            audio_transcription_engine,
-            monitor_ids: store.monitor_ids.clone(),
-            audio_devices: store.audio_devices.clone(),
-            ignored_windows: store.ignored_windows.clone(),
-            included_windows: store.included_windows.clone(),
-            languages: store
-                .languages
-                .iter()
-                .filter(|s| s != &"default")
-                .cloned()
-                .collect(),
-            vad_sensitivity: store.vad_sensitivity.clone(),
-            deepgram_api_key: if store.deepgram_api_key.is_empty()
-                || store.deepgram_api_key == "default"
-            {
-                None
-            } else {
-                Some(store.deepgram_api_key.clone())
-            },
-            analytics_enabled: store.analytics_enabled,
-            analytics_id: store.analytics_id.clone(),
-            enable_input_capture: store.enable_input_capture,
-            enable_accessibility: store.enable_accessibility,
-            use_all_monitors: store.use_all_monitors,
-            use_chinese_mirror: store.use_chinese_mirror,
-            ignored_urls: store.ignored_urls.clone(),
-            user_id: if store.user.id.is_some() && !store.user.id.as_ref().unwrap().is_empty() {
-                store.user.id.clone()
-            } else {
-                None
-            },
-            use_system_default_audio: store.use_system_default_audio,
-            video_quality: store.video_quality.clone(),
-            adaptive_fps: store.adaptive_fps,
-            transcription_mode: match store.extra.get("transcriptionMode").and_then(|v| v.as_str()) {
-                Some("smart") => TranscriptionMode::Smart,
-                _ => TranscriptionMode::Realtime,
-            },
-        }
-    }
-}
 
 /// Handle for controlling the embedded server
 #[allow(dead_code)]
@@ -155,91 +38,9 @@ impl EmbeddedServerHandle {
     }
 }
 
-/// Parse language string to Language enum
-pub fn parse_language(s: &str) -> Option<Language> {
-    match s.to_lowercase().as_str() {
-        "english" | "en" => Some(Language::English),
-        "chinese" | "zh" => Some(Language::Chinese),
-        "german" | "de" => Some(Language::German),
-        "spanish" | "es" => Some(Language::Spanish),
-        "russian" | "ru" => Some(Language::Russian),
-        "korean" | "ko" => Some(Language::Korean),
-        "french" | "fr" => Some(Language::French),
-        "japanese" | "ja" => Some(Language::Japanese),
-        "portuguese" | "pt" => Some(Language::Portuguese),
-        "turkish" | "tr" => Some(Language::Turkish),
-        "polish" | "pl" => Some(Language::Polish),
-        "catalan" | "ca" => Some(Language::Catalan),
-        "dutch" | "nl" => Some(Language::Dutch),
-        "arabic" | "ar" => Some(Language::Arabic),
-        "swedish" | "sv" => Some(Language::Swedish),
-        "italian" | "it" => Some(Language::Italian),
-        "indonesian" | "id" => Some(Language::Indonesian),
-        "hindi" | "hi" => Some(Language::Hindi),
-        "finnish" | "fi" => Some(Language::Finnish),
-        "hebrew" | "he" => Some(Language::Hebrew),
-        "ukrainian" | "uk" => Some(Language::Ukrainian),
-        "greek" | "el" => Some(Language::Greek),
-        "malay" | "ms" => Some(Language::Malay),
-        "czech" | "cs" => Some(Language::Czech),
-        "romanian" | "ro" => Some(Language::Romanian),
-        "danish" | "da" => Some(Language::Danish),
-        "hungarian" | "hu" => Some(Language::Hungarian),
-        "norwegian" | "no" => Some(Language::Norwegian),
-        "thai" | "th" => Some(Language::Thai),
-        "urdu" | "ur" => Some(Language::Urdu),
-        "croatian" | "hr" => Some(Language::Croatian),
-        "bulgarian" | "bg" => Some(Language::Bulgarian),
-        "lithuanian" | "lt" => Some(Language::Lithuanian),
-        "latin" | "la" => Some(Language::Latin),
-        "malayalam" | "ml" => Some(Language::Malayalam),
-        "welsh" | "cy" => Some(Language::Welsh),
-        "slovak" | "sk" => Some(Language::Slovak),
-        "persian" | "fa" => Some(Language::Persian),
-        "latvian" | "lv" => Some(Language::Latvian),
-        "bengali" | "bn" => Some(Language::Bengali),
-        "serbian" | "sr" => Some(Language::Serbian),
-        "azerbaijani" | "az" => Some(Language::Azerbaijani),
-        "slovenian" | "sl" => Some(Language::Slovenian),
-        "estonian" | "et" => Some(Language::Estonian),
-        "macedonian" | "mk" => Some(Language::Macedonian),
-        "nepali" | "ne" => Some(Language::Nepali),
-        "mongolian" | "mn" => Some(Language::Mongolian),
-        "bosnian" | "bs" => Some(Language::Bosnian),
-        "kazakh" | "kk" => Some(Language::Kazakh),
-        "albanian" | "sq" => Some(Language::Albanian),
-        "swahili" | "sw" => Some(Language::Swahili),
-        "galician" | "gl" => Some(Language::Galician),
-        "marathi" | "mr" => Some(Language::Marathi),
-        "punjabi" | "pa" => Some(Language::Punjabi),
-        "sinhala" | "si" => Some(Language::Sinhala),
-        "khmer" | "km" => Some(Language::Khmer),
-        "afrikaans" | "af" => Some(Language::Afrikaans),
-        "belarusian" | "be" => Some(Language::Belarusian),
-        "gujarati" | "gu" => Some(Language::Gujarati),
-        "amharic" | "am" => Some(Language::Amharic),
-        "yiddish" | "yi" => Some(Language::Yiddish),
-        "lao" | "lo" => Some(Language::Lao),
-        "uzbek" | "uz" => Some(Language::Uzbek),
-        "faroese" | "fo" => Some(Language::Faroese),
-        "pashto" | "ps" => Some(Language::Pashto),
-        "maltese" | "mt" => Some(Language::Maltese),
-        "sanskrit" | "sa" => Some(Language::Sanskrit),
-        "luxembourgish" | "lb" => Some(Language::Luxembourgish),
-        "myanmar" | "my" => Some(Language::Myanmar),
-        "tibetan" | "bo" => Some(Language::Tibetan),
-        "tagalog" | "tl" => Some(Language::Tagalog),
-        "assamese" | "as" => Some(Language::Assamese),
-        "tatar" | "tt" => Some(Language::Tatar),
-        "hausa" | "ha" => Some(Language::Hausa),
-        "javanese" | "jw" => Some(Language::Javanese),
-        _ => None,
-    }
-}
-
 /// Start the embedded screenpipe server
 pub async fn start_embedded_server(
-    config: EmbeddedServerConfig,
+    config: RecordingConfig,
 ) -> Result<EmbeddedServerHandle, String> {
     info!("Starting embedded screenpipe server on port {}", config.port);
 
@@ -260,7 +61,7 @@ pub async fn start_embedded_server(
     }
     
     // Screenpipe cloud proxy for deepgram
-    if config.audio_transcription_engine == "screenpipe-cloud" {
+    if config.audio_transcription_engine == AudioTranscriptionEngine::Deepgram {
         if let Some(ref user_id) = config.user_id {
             std::env::set_var("DEEPGRAM_API_URL", "https://api.screenpi.pe/v1/listen");
             std::env::set_var("DEEPGRAM_WEBSOCKET_URL", "wss://api.screenpi.pe");
@@ -284,12 +85,8 @@ pub async fn start_embedded_server(
     );
     info!("Database initialized at {}", db_path);
 
-    // Parse languages
-    let languages: Vec<Language> = config
-        .languages
-        .iter()
-        .filter_map(|s| parse_language(s))
-        .collect();
+    // Languages are already parsed in RecordingConfig
+    let languages = config.languages.clone();
 
     // Set up audio devices
     let mut audio_devices = Vec::new();
@@ -325,23 +122,8 @@ pub async fn start_embedded_server(
         };
 
     // Build audio manager
-    let mut audio_manager_builder = AudioManagerBuilder::new()
-        .audio_chunk_duration(Duration::from_secs(config.audio_chunk_duration))
-        .vad_engine(VadEngineEnum::Silero)
-        .vad_sensitivity(match config.vad_sensitivity.as_str() {
-            "low" => VadSensitivity::Low,
-            "medium" => VadSensitivity::Medium,
-            _ => VadSensitivity::High,
-        })
-        .languages(languages.clone())
-        .transcription_engine(match config.audio_transcription_engine.as_str() {
-            "deepgram" | "screenpipe-cloud" => AudioTranscriptionEngine::Deepgram,
-            _ => AudioTranscriptionEngine::WhisperLargeV3Turbo,
-        })
-        .enabled_devices(audio_devices.clone())
-        .use_system_default_audio(config.use_system_default_audio)
-        .deepgram_api_key(config.deepgram_api_key.clone())
-        .output_path(data_path.clone())
+    let mut audio_manager_builder = config
+        .to_audio_manager_builder(data_path.clone(), audio_devices.clone())
         .transcription_mode(config.transcription_mode.clone());
 
     if let Some(ref detector) = meeting_detector {
@@ -359,20 +141,8 @@ pub async fn start_embedded_server(
     let (shutdown_tx, _) = broadcast::channel::<()>(1);
     let shutdown_tx_clone = shutdown_tx.clone();
 
-    // Parse OCR engine
-    let ocr_engine: OcrEngine = match config.ocr_engine.as_str() {
-        "tesseract" => OcrEngine::Tesseract,
-        "windows-native" => OcrEngine::WindowsNative,
-        "unstructured" => OcrEngine::Unstructured,
-        _ => {
-            #[cfg(target_os = "macos")]
-            { OcrEngine::AppleNative }
-            #[cfg(target_os = "windows")]
-            { OcrEngine::WindowsNative }
-            #[cfg(target_os = "linux")]
-            { OcrEngine::Tesseract }
-        }
-    };
+    // OCR engine is already typed in RecordingConfig
+    let ocr_engine = config.ocr_engine.clone();
 
     // Create a runtime handle for vision tasks
     let vision_handle = tokio::runtime::Handle::current();
@@ -414,8 +184,6 @@ pub async fn start_embedded_server(
         if use_dynamic_detection {
             // Use VisionManager for dynamic monitor detection (handles connect/disconnect)
             info!("Using dynamic monitor detection (use_all_monitors=true)");
-            
-            let video_quality = config.video_quality.clone();
 
             // Create activity feed for adaptive FPS if enabled
             let activity_feed: screenpipe_vision::ActivityFeedOption = if config.adaptive_fps {
@@ -438,21 +206,11 @@ pub async fn start_embedded_server(
                 None
             };
 
-            let vision_config = VisionManagerConfig {
+            let vision_config = config.to_vision_manager_config(
                 output_path,
-                fps,
-                video_chunk_duration,
-                ocr_engine,
-                use_pii_removal,
-                ignored_windows,
-                included_windows,
-                ignored_urls,
-                languages: languages_clone,
                 activity_feed,
-                video_quality,
-                vision_metrics: vision_metrics.clone(),
-                disable_ocr: config.disable_ocr,
-            };
+                vision_metrics.clone(),
+            );
 
             let vision_manager = Arc::new(VisionManager::new(
                 vision_config,
@@ -614,15 +372,7 @@ pub async fn start_embedded_server(
     let ui_enabled = config.enable_input_capture || config.enable_accessibility;
     info!("UI events setting: enable_input_capture={}, enable_accessibility={}", config.enable_input_capture, config.enable_accessibility);
     if ui_enabled {
-        let ui_config = UiRecorderConfig {
-            enabled: true,
-            enable_tree_walker: config.enable_accessibility,
-            record_input_events: config.enable_input_capture,
-            excluded_windows: config.ignored_windows.clone(),
-            ignored_windows: config.ignored_windows.clone(),
-            included_windows: config.included_windows.clone(),
-            ..Default::default()
-        };
+        let ui_config = config.to_ui_recorder_config();
         let db_clone = db.clone();
         tokio::spawn(async move {
             match start_ui_recording(db_clone, ui_config).await {

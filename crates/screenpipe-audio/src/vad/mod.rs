@@ -31,6 +31,18 @@ impl VadSensitivity {
     }
 }
 
+impl std::str::FromStr for VadSensitivity {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "low" => Ok(Self::Low),
+            "medium" => Ok(Self::Medium),
+            "high" => Ok(Self::High),
+            _ => Ok(Self::High),
+        }
+    }
+}
+
 #[derive(Clone)]
 pub enum VadEngineEnum {
     WebRtc,

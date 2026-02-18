@@ -6,6 +6,7 @@ use screenpipe_audio::{
     vad::{VadEngineEnum, VadSensitivity},
 };
 use screenpipe_core::Language;
+use std::path::PathBuf;
 use screenpipe_db::CustomOcrConfig as DBCustomOcrConfig;
 use screenpipe_db::OcrEngine as DBOcrEngine;
 use screenpipe_vision::{custom_ocr::CustomOcrConfig, utils::OcrEngine as CoreOcrEngine};
@@ -608,6 +609,42 @@ impl RecordArgs {
     #[cfg(not(feature = "ui-events"))]
     pub fn to_ui_recorder_config(&self) -> crate::ui_recorder::UiRecorderConfig {
         crate::ui_recorder::UiRecorderConfig { enabled: false }
+    }
+
+    /// Convert RecordArgs into a unified RecordingConfig.
+    pub fn into_recording_config(self, data_dir: PathBuf) -> crate::recording_config::RecordingConfig {
+        let languages = self.unique_languages().unwrap_or_default();
+        crate::recording_config::RecordingConfig {
+            fps: self.fps,
+            adaptive_fps: self.adaptive_fps,
+            audio_chunk_duration: self.audio_chunk_duration,
+            port: self.port,
+            data_dir,
+            disable_audio: self.disable_audio,
+            disable_vision: self.disable_vision,
+            disable_ocr: false,
+            use_pii_removal: self.use_pii_removal,
+            enable_input_capture: self.enable_input_capture,
+            enable_accessibility: self.enable_accessibility,
+            audio_transcription_engine: self.audio_transcription_engine.into(),
+            ocr_engine: self.ocr_engine.into(),
+            vad_sensitivity: self.vad_sensitivity.into(),
+            transcription_mode: self.transcription_mode.into(),
+            audio_devices: self.audio_device,
+            use_system_default_audio: self.use_system_default_audio,
+            monitor_ids: self.monitor_id.iter().map(|id| id.to_string()).collect(),
+            use_all_monitors: self.use_all_monitors,
+            ignored_windows: self.ignored_windows,
+            included_windows: self.included_windows,
+            ignored_urls: self.ignored_urls,
+            languages,
+            deepgram_api_key: self.deepgram_api_key,
+            user_id: None,
+            video_quality: self.video_quality,
+            use_chinese_mirror: false,
+            analytics_enabled: !self.disable_telemetry,
+            analytics_id: String::new(),
+        }
     }
 }
 

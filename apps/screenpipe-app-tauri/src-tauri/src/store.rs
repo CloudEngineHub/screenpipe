@@ -547,6 +547,81 @@ impl SettingsStore {
         }
     }
 
+    /// Build a unified `RecordingConfig` from this settings store.
+    pub fn to_recording_config(&self, data_dir: std::path::PathBuf) -> screenpipe_server::RecordingConfig {
+        use screenpipe_audio::audio_manager::builder::TranscriptionMode;
+        use screenpipe_audio::core::engine::AudioTranscriptionEngine;
+        use screenpipe_audio::vad::VadSensitivity;
+        use screenpipe_vision::OcrEngine;
+
+        let audio_engine_str = self.resolve_audio_engine();
+
+        screenpipe_server::RecordingConfig {
+            fps: if self.fps > 0.0 { self.fps as f64 } else { 1.0 },
+            adaptive_fps: self.adaptive_fps,
+            audio_chunk_duration: self.audio_chunk_duration as u64,
+            port: self.port,
+            data_dir,
+            disable_audio: self.disable_audio,
+            disable_vision: self.disable_vision,
+            disable_ocr: self.disable_ocr,
+            use_pii_removal: self.use_pii_removal,
+            enable_input_capture: self.enable_input_capture,
+            enable_accessibility: self.enable_accessibility,
+            audio_transcription_engine: audio_engine_str.parse()
+                .unwrap_or(AudioTranscriptionEngine::WhisperLargeV3Turbo),
+            ocr_engine: self.ocr_engine.parse()
+                .unwrap_or(OcrEngine::platform_default()),
+            vad_sensitivity: self.vad_sensitivity.parse()
+                .unwrap_or(VadSensitivity::High),
+            transcription_mode: match self.extra.get("transcriptionMode").and_then(|v| v.as_str()) {
+                Some("smart") => TranscriptionMode::Smart,
+                _ => TranscriptionMode::Realtime,
+            },
+            audio_devices: self.audio_devices.clone(),
+            use_system_default_audio: self.use_system_default_audio,
+            monitor_ids: self.monitor_ids.clone(),
+            use_all_monitors: self.use_all_monitors,
+            ignored_windows: self.ignored_windows.clone(),
+            included_windows: self.included_windows.clone(),
+            ignored_urls: self.ignored_urls.clone(),
+            languages: self.languages.iter()
+                .filter(|s| s != &"default")
+                .filter_map(|s| s.parse().ok())
+                .collect(),
+            deepgram_api_key: if self.deepgram_api_key.is_empty()
+                || self.deepgram_api_key == "default"
+            {
+                None
+            } else {
+                Some(self.deepgram_api_key.clone())
+            },
+            user_id: self.user.id.as_ref().filter(|id| !id.is_empty()).cloned(),
+            video_quality: self.video_quality.clone(),
+            use_chinese_mirror: self.use_chinese_mirror,
+            analytics_enabled: self.analytics_enabled,
+            analytics_id: self.analytics_id.clone(),
+        }
+    }
+
+    fn resolve_audio_engine(&self) -> String {
+        let engine = self.audio_transcription_engine.clone();
+        let has_user_id = self.user.id.as_ref().map_or(false, |id| !id.is_empty());
+        let has_deepgram_key = !self.deepgram_api_key.is_empty()
+            && self.deepgram_api_key != "default";
+        match engine.as_str() {
+            "screenpipe-cloud" if !has_user_id => {
+                tracing::warn!("screenpipe-cloud selected but user not logged in, falling back to whisper-large-v3-turbo");
+                "whisper-large-v3-turbo".to_string()
+            }
+            "deepgram" if !has_deepgram_key => {
+                tracing::warn!("deepgram selected but no API key configured, falling back to whisper-large-v3-turbo");
+                "whisper-large-v3-turbo".to_string()
+            }
+            _ => engine,
+        }
+    }
+
     pub fn save(&self,app: &AppHandle) -> Result<(), String> {
         let Ok(store) = get_store(app, None) else {
             return Err("Failed to get store".to_string());

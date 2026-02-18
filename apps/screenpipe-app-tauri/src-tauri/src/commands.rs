@@ -894,7 +894,6 @@ pub async fn perform_ocr_on_image(
     image_base64: String,
 ) -> Result<String, String> {
     use crate::store::SettingsStore;
-    use crate::embedded_server::parse_language;
     use screenpipe_vision::OcrEngine;
 
     use base64::Engine;
@@ -913,7 +912,8 @@ pub async fn perform_ocr_on_image(
     let languages: Vec<screenpipe_core::Language> = store
         .languages
         .iter()
-        .filter_map(|s| parse_language(s))
+        .filter(|s| s != &"default")
+        .filter_map(|s| s.parse().ok())
         .collect();
 
     let ocr_engine = match store.ocr_engine.as_str() {

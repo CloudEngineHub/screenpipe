@@ -11,7 +11,6 @@ use port_check::is_local_ipv4_port_free;
 use reqwest::header::{HeaderMap, HeaderValue, USER_AGENT};
 use reqwest::Client;
 use screenpipe_audio::{
-    audio_manager::AudioManagerBuilder,
     core::device::{
         default_input_device, default_output_device, list_audio_devices, parse_audio_device,
     },
@@ -34,7 +33,7 @@ use screenpipe_server::{
     start_continuous_recording, start_meeting_watcher, start_sleep_monitor, start_ui_recording,
     sync_provider::ScreenpipeSyncProvider,
     vision_manager::{
-        start_monitor_watcher, stop_monitor_watcher, VisionManager, VisionManagerConfig,
+        start_monitor_watcher, stop_monitor_watcher, VisionManager,
     },
     watch_pid, ResourceMonitor, SCServer,
 };
@@ -507,6 +506,9 @@ async fn main() -> anyhow::Result<()> {
     let local_data_dir = get_base_dir(&cli.data_dir)?;
     let local_data_dir_clone = local_data_dir.clone();
 
+    // Build unified RecordingConfig from CLI args
+    let config = record_args.into_recording_config(local_data_dir.clone());
+
     // Replace the current conditional check with:
     let ffmpeg_path = find_ffmpeg_path();
     if ffmpeg_path.is_none() {
@@ -628,7 +630,7 @@ async fn main() -> anyhow::Result<()> {
     let ignored_windows_clone = cli.ignored_windows.clone();
     let included_windows_clone = cli.included_windows.clone();
     // Create UI recorder config early before cli is moved
-    let ui_recorder_config = cli.to_ui_recorder_config();
+    let ui_recorder_config = config.to_ui_recorder_config();
 
     let fps = if cli.fps.is_finite() && cli.fps > 0.0 {
         cli.fps
@@ -637,14 +639,10 @@ async fn main() -> anyhow::Result<()> {
         1.0
     };
 
-    let audio_chunk_duration = Duration::from_secs(cli.audio_chunk_duration);
-
     // Create meeting detector for smart transcription mode.
     // Shared between audio manager (checks state) and UI recorder (feeds events).
-    let transcription_mode: screenpipe_audio::audio_manager::TranscriptionMode =
-        cli.transcription_mode.into();
     let meeting_detector: Option<Arc<MeetingDetector>> =
-        if transcription_mode == screenpipe_audio::audio_manager::TranscriptionMode::Smart {
+        if config.transcription_mode == screenpipe_audio::audio_manager::TranscriptionMode::Smart {
             let detector = Arc::new(MeetingDetector::new());
             info!("smart mode: meeting detector enabled — will defer Whisper during meetings");
             Some(detector)
@@ -652,19 +650,12 @@ async fn main() -> anyhow::Result<()> {
             None
         };
 
-    let mut audio_manager_builder = AudioManagerBuilder::new()
-        .audio_chunk_duration(audio_chunk_duration)
-        .vad_engine(vad_engine.into())
-        .vad_sensitivity(cli.vad_sensitivity.into())
-        .languages(languages.clone())
-        .transcription_engine(cli.audio_transcription_engine.into())
-        .realtime(enable_realtime_audio)
-        .enabled_devices(audio_devices)
-        .deepgram_api_key(cli.deepgram_api_key.clone())
-        .output_path(PathBuf::from(output_path_clone.clone().to_string()))
-        .use_pii_removal(cli.use_pii_removal)
-        .use_system_default_audio(cli.use_system_default_audio)
-        .transcription_mode(transcription_mode);
+    let mut audio_manager_builder = config
+        .to_audio_manager_builder(
+            PathBuf::from(output_path_clone.clone().to_string()),
+            audio_devices,
+        )
+        .realtime(enable_realtime_audio);
 
     if let Some(ref detector) = meeting_detector {
         audio_manager_builder = audio_manager_builder.meeting_detector(detector.clone());
@@ -710,23 +701,13 @@ async fn main() -> anyhow::Result<()> {
         #[cfg(not(feature = "adaptive-fps"))]
         let activity_feed: screenpipe_vision::ActivityFeedOption = None;
 
-        let config = VisionManagerConfig {
-            output_path: output_path_clone.to_string(),
-            fps,
-            video_chunk_duration: Duration::from_secs(60),
-            ocr_engine: Arc::new(cli.ocr_engine.clone().into()),
-            use_pii_removal: cli.use_pii_removal,
-            ignored_windows: cli.ignored_windows.clone(),
-            included_windows: cli.included_windows.clone(),
-            ignored_urls: cli.ignored_urls.clone(),
-            languages: languages_clone.clone(),
+        let vision_config = config.to_vision_manager_config(
+            output_path_clone.to_string(),
             activity_feed,
-            video_quality: cli.video_quality.clone(),
-            vision_metrics: vision_metrics.clone(),
-            disable_ocr: false,
-        };
+            vision_metrics.clone(),
+        );
         Some(Arc::new(VisionManager::new(
-            config,
+            vision_config,
             db_clone.clone(),
             vision_handle.clone(),
         )))
@@ -734,7 +715,6 @@ async fn main() -> anyhow::Result<()> {
         None
     };
 
-    let video_quality_for_server = cli.video_quality.clone();
     let handle = if let Some(ref vm) = vision_manager {
         // Use VisionManager for dynamic monitor detection
         let vm_clone = vm.clone();
@@ -810,7 +790,7 @@ async fn main() -> anyhow::Result<()> {
                     &cli.included_windows,
                     &cli.ignored_urls,
                     languages_clone.clone(),
-                    activity_feed_legacy,
+                    activity_feed_legacy.clone(),
                     cli.video_quality.clone(),
                     vision_metrics_for_recording.clone(),
                     false, // disable_ocr: CLI doesn't support this yet
@@ -835,13 +815,13 @@ async fn main() -> anyhow::Result<()> {
 
     let mut server = SCServer::new(
         db_server,
-        SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), cli.port),
+        SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), config.port),
         local_data_dir_clone_2,
-        cli.disable_vision,
-        cli.disable_audio,
+        config.disable_vision,
+        config.disable_audio,
         audio_manager.clone(),
-        cli.use_pii_removal,
-        video_quality_for_server,
+        config.use_pii_removal,
+        config.video_quality.clone(),
     );
     server.vision_metrics = vision_metrics;
     server.audio_metrics = audio_manager.metrics.clone();
@@ -873,7 +853,7 @@ async fn main() -> anyhow::Result<()> {
         ));
 
     let mut pipe_manager =
-        screenpipe_core::pipes::PipeManager::new(pipes_dir, agent_executors, pipe_store, cli.port);
+        screenpipe_core::pipes::PipeManager::new(pipes_dir, agent_executors, pipe_store, config.port);
     pipe_manager.set_on_run_complete(std::sync::Arc::new(|pipe_name, success, duration_secs| {
         analytics::capture_event_nonblocking(
             "pipe_scheduled_run",
@@ -1127,7 +1107,7 @@ async fn main() -> anyhow::Result<()> {
     );
 
     // start recording after all this text
-    if !cli.disable_audio {
+    if !config.disable_audio {
         let audio_manager_clone = audio_manager.clone();
         tokio::spawn(async move {
             tokio::time::sleep(Duration::from_secs(10)).await;

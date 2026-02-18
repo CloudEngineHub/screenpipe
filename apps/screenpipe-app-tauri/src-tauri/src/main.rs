@@ -1862,10 +1862,7 @@ async fn main() {
                             }
 
                             info!("Starting embedded screenpipe server on dedicated runtime...");
-                            let config = embedded_server::EmbeddedServerConfig::from_store(
-                                &store_clone,
-                                base_dir_clone,
-                            );
+                            let config = store_clone.to_recording_config(base_dir_clone);
 
                             match embedded_server::start_embedded_server(config).await {
                                 Ok(handle) => {

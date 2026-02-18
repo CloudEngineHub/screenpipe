@@ -8,6 +8,7 @@ mod apple_intelligence_api;
 mod auto_destruct;
 pub mod cli;
 pub mod cli_pipe;
+pub mod recording_config;
 pub mod cli_status;
 pub mod cloud_search;
 pub mod core;
@@ -30,6 +31,7 @@ pub mod vision_manager;
 pub use auto_destruct::watch_pid;
 pub use axum::Json as JsonResponse;
 pub use cli::Cli;
+pub use recording_config::RecordingConfig;
 pub use core::{record_video, start_continuous_recording};
 
 pub use cloud_search::{CloudSearchClient, CloudSearchMetadata, CloudStatus};
