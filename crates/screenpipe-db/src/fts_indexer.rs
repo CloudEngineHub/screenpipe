@@ -332,4 +332,3 @@ async fn index_accessibility_fts(db: &DatabaseManager) -> Result<i64, sqlx::Erro
 
     Ok(count)
 }
-

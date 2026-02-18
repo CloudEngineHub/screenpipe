@@ -723,7 +723,10 @@ mod tests {
         .await
         .unwrap();
 
-        let audio_chunk_id2 = db.insert_audio_chunk("test_audio2.mp4", None).await.unwrap();
+        let audio_chunk_id2 = db
+            .insert_audio_chunk("test_audio2.mp4", None)
+            .await
+            .unwrap();
 
         db.insert_audio_transcription(
             audio_chunk_id2,
@@ -1124,7 +1127,10 @@ mod tests {
         db.update_speaker_name(speaker.id, "test name")
             .await
             .unwrap();
-        let audio_chunk_id = db.insert_audio_chunk("test_audio1.mp4", None).await.unwrap();
+        let audio_chunk_id = db
+            .insert_audio_chunk("test_audio1.mp4", None)
+            .await
+            .unwrap();
         db.insert_audio_transcription(
             audio_chunk_id,
             "similar speakers test transcription one",
@@ -1145,7 +1151,10 @@ mod tests {
         // Create second speaker with audio data
         let speaker2 = db.insert_speaker(&vec![0.2; 512]).await.unwrap();
         db.update_speaker_name(speaker2.id, "name").await.unwrap();
-        let audio_chunk_id2 = db.insert_audio_chunk("test_audio2.mp4", None).await.unwrap();
+        let audio_chunk_id2 = db
+            .insert_audio_chunk("test_audio2.mp4", None)
+            .await
+            .unwrap();
         db.insert_audio_transcription(
             audio_chunk_id2,
             "similar speakers test transcription two",
@@ -1593,7 +1602,10 @@ mod tests {
         let db = setup_test_db().await;
 
         // Insert an audio chunk via a committed transaction (baseline)
-        let chunk_id = db.insert_audio_chunk("rollback_test.mp4", None).await.unwrap();
+        let chunk_id = db
+            .insert_audio_chunk("rollback_test.mp4", None)
+            .await
+            .unwrap();
         assert!(chunk_id > 0);
 
         // Start a transaction, insert a row, then DROP without committing.
@@ -1608,16 +1620,21 @@ mod tests {
         }
 
         // Verify the uncommitted row was rolled back
-        let row: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM audio_chunks WHERE file_path = 'should_not_exist.mp4'")
-            .fetch_one(&db.pool)
-            .await
-            .unwrap();
+        let row: (i64,) = sqlx::query_as(
+            "SELECT COUNT(*) FROM audio_chunks WHERE file_path = 'should_not_exist.mp4'",
+        )
+        .fetch_one(&db.pool)
+        .await
+        .unwrap();
         assert_eq!(row.0, 0, "Uncommitted row should have been rolled back");
 
         // Verify the pool is still healthy — we can acquire connections and do work.
         // If the connection was leaked (detached), the pool would eventually exhaust.
         for i in 0..5 {
-            let id = db.insert_audio_chunk(&format!("pool_health_{}.mp4", i), None).await.unwrap();
+            let id = db
+                .insert_audio_chunk(&format!("pool_health_{}.mp4", i), None)
+                .await
+                .unwrap();
             assert!(id > 0, "Pool should still be healthy after rollback");
         }
     }
@@ -1643,9 +1660,14 @@ mod tests {
     async fn test_insert_and_search_accessibility() {
         let db = setup_test_db().await;
 
-        db.insert_accessibility_text("Safari", "Wikipedia", "Hello from accessibility tree", Some("https://en.wikipedia.org"))
-            .await
-            .unwrap();
+        db.insert_accessibility_text(
+            "Safari",
+            "Wikipedia",
+            "Hello from accessibility tree",
+            Some("https://en.wikipedia.org"),
+        )
+        .await
+        .unwrap();
 
         index_accessibility_fts(&db).await;
 
@@ -1800,9 +1822,14 @@ mod tests {
     async fn test_search_accessibility_fts() {
         let db = setup_test_db().await;
 
-        db.insert_accessibility_text("App", "Win", "the quick brown fox jumps over the lazy dog", None)
-            .await
-            .unwrap();
+        db.insert_accessibility_text(
+            "App",
+            "Win",
+            "the quick brown fox jumps over the lazy dog",
+            None,
+        )
+        .await
+        .unwrap();
         db.insert_accessibility_text("App", "Win", "hello world greeting message", None)
             .await
             .unwrap();
@@ -1935,7 +1962,10 @@ mod tests {
             .await
             .unwrap();
 
-        let ui_count = results.iter().filter(|r| matches!(r, SearchResult::UI(_))).count();
+        let ui_count = results
+            .iter()
+            .filter(|r| matches!(r, SearchResult::UI(_)))
+            .count();
         assert_eq!(ui_count, 1, "Expected 1 Accessibility result in All");
     }
 
@@ -1970,7 +2000,10 @@ mod tests {
             .await
             .unwrap();
 
-        let ui_count = results.iter().filter(|r| matches!(r, SearchResult::UI(_))).count();
+        let ui_count = results
+            .iter()
+            .filter(|r| matches!(r, SearchResult::UI(_)))
+            .count();
         assert_eq!(ui_count, 1, "Expected 1 Accessibility result in Vision");
     }
 
@@ -1979,9 +2012,14 @@ mod tests {
         let db = setup_test_db().await;
 
         // Insert into accessibility table (not ui_monitoring)
-        db.insert_accessibility_text("DeprecatedApp", "DeprecatedWin", "deprecated UI query text", None)
-            .await
-            .unwrap();
+        db.insert_accessibility_text(
+            "DeprecatedApp",
+            "DeprecatedWin",
+            "deprecated UI query text",
+            None,
+        )
+        .await
+        .unwrap();
 
         // ContentType::UI should still work and return accessibility data (empty query)
         let results = db
