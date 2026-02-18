@@ -81,23 +81,6 @@ screenpipe turns your computer into a personal AI that knows everything you've d
 
 [download the desktop app](https://screenpi.pe) — one-time purchase, all features, auto-updates
 
-<details>
-<summary>linux: build from source</summary>
-
-```bash
-# ubuntu/debian
-sudo apt install libpulse0 libasound2-dev ffmpeg
-
-# fedora
-sudo dnf install pulseaudio-libs alsa-lib ffmpeg
-
-# arch
-sudo pacman -S libpulse alsa-lib ffmpeg
-```
-
-see [CONTRIBUTING.md](CONTRIBUTING.md) for build instructions.
-</details>
-
 ## specs
 
 - 10% cpu usage
