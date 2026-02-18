@@ -88,14 +88,15 @@ pub struct OCRResult {
 
 /// Content type for search queries.
 ///
-/// ## New API (recommended):
-/// - `vision` - Screen content (OCR text + accessibility)
+/// ## Primary modalities:
+/// - `ocr` - Screen text from screenshots
 /// - `audio` - Transcribed speech
 /// - `input` - User actions (clicks, keystrokes, clipboard)
+/// - `accessibility` - Accessibility tree text
 ///
-/// ## Deprecated (still supported):
-/// - `ocr` - Use `vision` instead
-/// - `ui` - Use `vision` instead (for accessibility text) or `input` (for events)
+/// ## Composite types:
+/// - `vision` - OCR + accessibility
+/// - `all` - OCR + audio + accessibility
 #[derive(OaSchema, Debug, Deserialize, PartialEq, Default, Clone)]
 #[serde(rename_all = "lowercase")]
 pub enum ContentType {
@@ -108,13 +109,18 @@ pub enum ContentType {
     /// User input actions: clicks, keystrokes, clipboard, app switches
     Input,
 
-    // === Deprecated (backwards compatible) ===
-    /// @deprecated Use `vision` instead
+    // === Primary modalities ===
+    /// Screen text from screenshots
     #[serde(alias = "ocr")]
     OCR,
-    /// Audio transcriptions (not deprecated, same name)
+    /// Audio transcriptions
     Audio,
-    /// @deprecated Use `vision` for text, `input` for events
+    /// Accessibility tree text (reads from accessibility table)
+    #[serde(alias = "accessibility")]
+    Accessibility,
+
+    // === Deprecated (backwards compatible) ===
+    /// @deprecated Use `accessibility` instead
     #[serde(alias = "ui")]
     UI,
 

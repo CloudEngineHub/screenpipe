@@ -945,7 +945,7 @@ impl DatabaseManager {
                                 speaker_ids,
                                 speaker_name,
                             ),
-                            self.search_ui_monitoring(
+                            self.search_accessibility(
                                 query,
                                 app_name,
                                 window_name,
@@ -973,7 +973,7 @@ impl DatabaseManager {
                                 browser_url,
                                 focused,
                             ),
-                            self.search_ui_monitoring(
+                            self.search_accessibility(
                                 query,
                                 app_name,
                                 window_name,
@@ -1029,9 +1029,9 @@ impl DatabaseManager {
                     results.extend(audio_results.into_iter().map(SearchResult::Audio));
                 }
             }
-            ContentType::UI => {
+            ContentType::UI | ContentType::Accessibility => {
                 let ui_results = self
-                    .search_ui_monitoring(
+                    .search_accessibility(
                         query,
                         app_name,
                         window_name,
@@ -1058,7 +1058,7 @@ impl DatabaseManager {
                     )
                     .await?;
                 let ui_results = self
-                    .search_ui_monitoring(
+                    .search_accessibility(
                         query,
                         app_name,
                         window_name,
@@ -1090,7 +1090,7 @@ impl DatabaseManager {
                     )
                     .await?;
                 let ui_results = self
-                    .search_ui_monitoring(
+                    .search_accessibility(
                         query,
                         app_name,
                         window_name,
@@ -1157,7 +1157,7 @@ impl DatabaseManager {
                     )
                     .await?;
                 let ui_results = self
-                    .search_ui_monitoring(
+                    .search_accessibility(
                         query,
                         app_name,
                         window_name,
@@ -1205,7 +1205,7 @@ impl DatabaseManager {
                     )
                     .await?;
                 let ui_results = self
-                    .search_ui_monitoring(
+                    .search_accessibility(
                         query,
                         app_name,
                         window_name,
@@ -1280,7 +1280,7 @@ impl DatabaseManager {
                     )
                     .await?;
                 let ui_results = self
-                    .search_ui_monitoring(
+                    .search_accessibility(
                         query,
                         app_name,
                         window_name,
@@ -1870,13 +1870,13 @@ impl DatabaseManager {
         if let Some(app) = app_name {
             if !app.is_empty() {
                 frame_fts_parts.push(format!("app_name:{}", app));
-                ui_fts_parts.push(format!("app:\"{}\"", app));
+                ui_fts_parts.push(format!("app_name:\"{}\"", app));
             }
         }
         if let Some(window) = window_name {
             if !window.is_empty() {
                 frame_fts_parts.push(format!("window_name:{}", window));
-                ui_fts_parts.push(format!("window:\"{}\"", window));
+                ui_fts_parts.push(format!("window_name:\"{}\"", window));
             }
         }
         if let Some(browser) = browser_url {
@@ -1916,23 +1916,23 @@ impl DatabaseManager {
                     "ocr_text_fts MATCH ?1"
                 }
             ),
-            ContentType::UI => format!(
-                r#"SELECT COUNT(DISTINCT ui_monitoring.id)
+            ContentType::UI | ContentType::Accessibility => format!(
+                r#"SELECT COUNT(DISTINCT accessibility.id)
                    FROM {table}
                    WHERE {match_condition}
-                       AND (?2 IS NULL OR timestamp >= ?2)
-                       AND (?3 IS NULL OR timestamp <= ?3)
-                       AND (?4 IS NULL OR COALESCE(text_length, LENGTH(ui_monitoring.text_output)) >= ?4)
-                       AND (?5 IS NULL OR COALESCE(text_length, LENGTH(ui_monitoring.text_output)) <= ?5)"#,
+                       AND (?2 IS NULL OR datetime(accessibility.timestamp) >= datetime(?2))
+                       AND (?3 IS NULL OR datetime(accessibility.timestamp) <= datetime(?3))
+                       AND (?4 IS NULL OR LENGTH(accessibility.text_content) >= ?4)
+                       AND (?5 IS NULL OR LENGTH(accessibility.text_content) <= ?5)"#,
                 table = if ui_query.is_empty() {
-                    "ui_monitoring"
+                    "accessibility"
                 } else {
-                    "ui_monitoring_fts JOIN ui_monitoring ON ui_monitoring_fts.ui_id = ui_monitoring.id"
+                    "accessibility_fts JOIN accessibility ON accessibility_fts.rowid = accessibility.id"
                 },
                 match_condition = if ui_query.is_empty() {
                     "1=1"
                 } else {
-                    "ui_monitoring_fts MATCH ?1"
+                    "accessibility_fts MATCH ?1"
                 }
             ),
             ContentType::Audio => format!(
@@ -1989,7 +1989,7 @@ impl DatabaseManager {
                     .fetch_one(&self.pool)
                     .await?
             }
-            ContentType::UI => {
+            ContentType::UI | ContentType::Accessibility => {
                 sqlx::query_scalar(&sql)
                     .bind(if ui_query.is_empty() { "*" } else { &ui_query })
                     .bind(start_time)
@@ -2503,6 +2503,86 @@ impl DatabaseManager {
                 AND (?3 IS NULL OR ui_monitoring.timestamp <= ?3)
             GROUP BY ui_monitoring.id
             ORDER BY ui_monitoring.timestamp DESC
+            LIMIT ?4 OFFSET ?5
+            "#,
+            base_sql, where_clause
+        );
+
+        sqlx::query_as(&sql)
+            .bind(if combined_query.is_empty() {
+                "*".to_owned()
+            } else {
+                combined_query
+            })
+            .bind(start_time)
+            .bind(end_time)
+            .bind(limit)
+            .bind(offset)
+            .fetch_all(&self.pool)
+            .await
+    }
+
+    /// Search accessibility table for accessibility tree text.
+    /// This reads from the `accessibility` table (written by the tree walker).
+    #[allow(clippy::too_many_arguments)]
+    pub async fn search_accessibility(
+        &self,
+        query: &str,
+        app_name: Option<&str>,
+        window_name: Option<&str>,
+        start_time: Option<DateTime<Utc>>,
+        end_time: Option<DateTime<Utc>>,
+        limit: u32,
+        offset: u32,
+    ) -> Result<Vec<UiContent>, sqlx::Error> {
+        let mut fts_parts = Vec::new();
+        if !query.is_empty() {
+            fts_parts.push(query.to_owned());
+        }
+        if let Some(app) = app_name {
+            fts_parts.push(format!("app_name:{}", app));
+        }
+        if let Some(window) = window_name {
+            fts_parts.push(format!("window_name:{}", window));
+        }
+        let combined_query = fts_parts.join(" ");
+
+        let base_sql = if combined_query.is_empty() {
+            "accessibility"
+        } else {
+            "accessibility_fts JOIN accessibility ON accessibility_fts.rowid = accessibility.id"
+        };
+
+        let where_clause = if combined_query.is_empty() {
+            "WHERE 1=1"
+        } else {
+            "WHERE accessibility_fts MATCH ?1"
+        };
+
+        let sql = format!(
+            r#"
+            SELECT
+                accessibility.id,
+                accessibility.text_content AS text_output,
+                accessibility.timestamp,
+                accessibility.app_name,
+                accessibility.window_name,
+                NULL as initial_traversal_at,
+                COALESCE(video_chunks.file_path, '') as file_path,
+                COALESCE(frames.offset_index, 0) as offset_index,
+                frames.name as frame_name,
+                accessibility.browser_url
+            FROM {}
+            LEFT JOIN frames ON
+                frames.timestamp BETWEEN
+                    datetime(accessibility.timestamp, '-1 seconds')
+                    AND datetime(accessibility.timestamp, '+1 seconds')
+            LEFT JOIN video_chunks ON frames.video_chunk_id = video_chunks.id
+            {}
+                AND (?2 IS NULL OR datetime(accessibility.timestamp) >= datetime(?2))
+                AND (?3 IS NULL OR datetime(accessibility.timestamp) <= datetime(?3))
+            GROUP BY accessibility.id
+            ORDER BY accessibility.timestamp DESC
             LIMIT ?4 OFFSET ?5
             "#,
             base_sql, where_clause

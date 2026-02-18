@@ -85,8 +85,8 @@ const BASE_TOOLS: Tool[] = [
         },
         content_type: {
           type: "string",
-          enum: ["all", "ocr", "audio", "ui"],
-          description: "Content type filter: 'ocr' (screen text), 'audio' (transcriptions), 'ui' (legacy UI monitoring), 'all'. Default: 'all'. For keyboard/mouse/accessibility events, use search-ui-events tool instead.",
+          enum: ["all", "ocr", "audio", "ui", "accessibility"],
+          description: "Content type filter: 'ocr' (screen text), 'audio' (transcriptions), 'accessibility' (accessibility tree text), 'ui' (legacy alias for accessibility), 'all'. Default: 'all'. For keyboard/mouse/input events, use search-ui-events tool instead.",
           default: "all",
         },
         limit: {
@@ -660,9 +660,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
               `${content.transcription || ""}` +
               tagsStr
             );
-          } else if (result.type === "UI") {
+          } else if (result.type === "UI" || result.type === "Accessibility") {
             formattedResults.push(
-              `[UI] ${content.app_name || "?"} | ${content.window_name || "?"}\n` +
+              `[Accessibility] ${content.app_name || "?"} | ${content.window_name || "?"}\n` +
               `${content.timestamp || ""}\n` +
               `${content.text || ""}`
             );
