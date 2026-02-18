@@ -37,6 +37,7 @@ import {
   normalizeAppTag,
   formatShortcutDisplay,
 } from "@/lib/chat-utils";
+import { useAutoSuggestions } from "@/lib/hooks/use-auto-suggestions";
 
 const SCREENPIPE_API = "http://localhost:3030";
 
@@ -450,6 +451,7 @@ export function StandaloneChat() {
   const { settings, updateSettings, isSettingsLoaded, reloadStore } = useSettings();
   const { isMac } = usePlatform();
   const { items: appItems } = useSqlAutocomplete("app");
+  const { suggestions: autoSuggestions } = useAutoSuggestions();
 
   const [input, setInput] = useState("");
   const [messages, setMessages] = useState<Message[]>([]);
@@ -2078,9 +2080,17 @@ export function StandaloneChat() {
             <p className="text-sm text-muted-foreground mb-6">
               Search your recordings, transcriptions, and interactions
             </p>
-            <div className="flex flex-wrap gap-2 justify-center max-w-sm mx-auto text-xs text-muted-foreground">
-              <span className="px-2 py-1 bg-muted/30 rounded border border-border/30 font-mono">&quot;What did I do in the last hour?&quot;</span>
-              <span className="px-2 py-1 bg-muted/30 rounded border border-border/30 font-mono">&quot;Find my Slack messages&quot;</span>
+            <div className="flex flex-wrap gap-2 justify-center max-w-md mx-auto">
+              {autoSuggestions.map((s, i) => (
+                <button
+                  key={i}
+                  type="button"
+                  onClick={() => sendMessage(s.text)}
+                  className="px-3 py-1.5 text-xs bg-muted/30 hover:bg-muted/60 rounded-full border border-border/30 hover:border-border/60 text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+                >
+                  {s.text}
+                </button>
+              ))}
             </div>
           </div>
         )}
@@ -2287,6 +2297,22 @@ export function StandaloneChat() {
                 <X className="w-2.5 h-2.5 ml-0.5" />
               </button>
             )}
+          </div>
+        )}
+
+        {/* Auto-suggestions above input */}
+        {messages.length > 0 && !isLoading && autoSuggestions.length > 0 && (
+          <div className="px-3 pt-2 flex flex-wrap gap-1.5">
+            {autoSuggestions.slice(0, 3).map((s, i) => (
+              <button
+                key={i}
+                type="button"
+                onClick={() => sendMessage(s.text)}
+                className="px-2.5 py-1 text-[11px] bg-muted/20 hover:bg-muted/50 rounded-full border border-border/20 hover:border-border/50 text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+              >
+                {s.text}
+              </button>
+            ))}
           </div>
         )}
 
