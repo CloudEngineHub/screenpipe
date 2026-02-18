@@ -1,8 +1,8 @@
 #[cfg(test)]
 mod tests {
     use chrono::{Duration, Utc};
-    use screenpipe_db::{DatabaseManager, OcrEngine, Order};
     use screenpipe_db::fts_indexer::index_all_tables;
+    use screenpipe_db::{DatabaseManager, OcrEngine, Order};
     use std::sync::Arc;
 
     async fn setup_test_db() -> DatabaseManager {

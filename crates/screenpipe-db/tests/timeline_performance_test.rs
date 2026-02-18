@@ -590,9 +590,14 @@ mod timeline_performance_tests {
                 .await
                 .unwrap();
 
-            db.insert_ocr_text(frame_id, &format!("OCR text for frame {}", i), "", Arc::new(OcrEngine::Tesseract))
-                .await
-                .unwrap();
+            db.insert_ocr_text(
+                frame_id,
+                &format!("OCR text for frame {}", i),
+                "",
+                Arc::new(OcrEngine::Tesseract),
+            )
+            .await
+            .unwrap();
         }
 
         // Insert an audio transcription that spans 6 seconds (should cover ~3 frames)
@@ -615,8 +620,8 @@ mod timeline_performance_tests {
                 device_type: DeviceType::Output,
             },
             None,
-            Some(0.0),  // start_time offset
-            Some(6.0),  // end_time offset (6 seconds)
+            Some(0.0), // start_time offset
+            Some(6.0), // end_time offset (6 seconds)
             Some(audio_start_time),
         )
         .await
@@ -655,10 +660,8 @@ mod timeline_performance_tests {
         );
 
         // Verify the audio is on the correct frames (frames 2, 3, 4 based on timestamps)
-        let frame_timestamps_with_audio: Vec<_> = frames_with_audio
-            .iter()
-            .map(|f| f.timestamp)
-            .collect();
+        let frame_timestamps_with_audio: Vec<_> =
+            frames_with_audio.iter().map(|f| f.timestamp).collect();
 
         let expected_start = audio_start_time;
         let expected_end = audio_start_time + Duration::seconds(6);
@@ -683,7 +686,7 @@ mod timeline_performance_tests {
 
         // Create frames at the beginning of the time range
         let start_time = Utc::now() - Duration::minutes(5);
-        
+
         let _ = db
             .insert_video_chunk("test_video.mp4", "test_device")
             .await
@@ -705,9 +708,14 @@ mod timeline_performance_tests {
                 .await
                 .unwrap();
 
-            db.insert_ocr_text(frame_id, &format!("OCR text for frame {}", i), "", Arc::new(OcrEngine::Tesseract))
-                .await
-                .unwrap();
+            db.insert_ocr_text(
+                frame_id,
+                &format!("OCR text for frame {}", i),
+                "",
+                Arc::new(OcrEngine::Tesseract),
+            )
+            .await
+            .unwrap();
         }
 
         // Insert audio that's AFTER all frames (should fall back to closest frame)

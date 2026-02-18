@@ -2245,7 +2245,7 @@ impl DatabaseManager {
             } else {
                 audio_timestamp
             };
-            
+
             let audio_end = if let Some(end) = end_offset {
                 audio_timestamp + chrono::Duration::milliseconds((end * 1000.0) as i64)
             } else {
