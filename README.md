@@ -79,35 +79,10 @@ screenpipe turns your computer into a personal AI that knows everything you've d
 
 ## install
 
-### cli (free, open source)
-
-```bash
-bunx screenpipe@latest record
-```
-
-or with npm:
-```bash
-npx screenpipe@latest record
-```
+[download the desktop app](https://screenpi.pe) — one-time purchase, all features, auto-updates
 
 <details>
-<summary>alternative: shell installer</summary>
-
-mac / linux:
-```bash
-curl -fsSL get.screenpi.pe/cli | sh
-screenpipe record
-```
-
-windows:
-```bash
-iwr get.screenpi.pe/cli.ps1 | iex
-screenpipe record
-```
-</details>
-
-<details>
-<summary>linux: additional dependencies</summary>
+<summary>linux: build from source</summary>
 
 ```bash
 # ubuntu/debian
@@ -119,11 +94,9 @@ sudo dnf install pulseaudio-libs alsa-lib ffmpeg
 # arch
 sudo pacman -S libpulse alsa-lib ffmpeg
 ```
+
+see [CONTRIBUTING.md](CONTRIBUTING.md) for build instructions.
 </details>
-
-### desktop app
-
-[download the desktop app](https://screenpi.pe) — one-time purchase, all features, auto-updates
 
 ## specs
 
@@ -195,7 +168,7 @@ Extensible plugin architecture for building custom automations. Popular plugins 
 - **Meeting assistant**: Automatic meeting notes with action items
 - **Daily journal**: AI-generated daily summaries of your activity
 
-Developers can build and publish plugins using TypeScript/JavaScript. Pipes require [bun](https://bun.sh) — bundled automatically in the desktop app, install separately for CLI usage (`curl -fsSL https://bun.sh/install | bash`).
+Developers can build and publish plugins using TypeScript/JavaScript. Pipes require [bun](https://bun.sh) — bundled automatically in the desktop app.
 
 ### MCP server (Model Context Protocol)
 screenpipe runs as an MCP server, allowing AI assistants to query your screen history:
@@ -236,7 +209,6 @@ On supported Macs, screenpipe uses Apple Intelligence for on-device AI processin
 
 - **macOS and Windows**: One-time purchase (~$300–400, dynamic pricing). Lifetime access, all future updates included.
 - **Linux**: $200 supporter license (build from source).
-- **Open source CLI**: Free forever (MIT license).
 - **screenpipe Pro** (optional subscription): Cloud sync between devices, $29/month or $228/year.
 
 ## Integrations
@@ -283,7 +255,7 @@ const results = await pipe.queryScreenpipe({
 ## Frequently asked questions
 
 **Is screenpipe free?**
-The core engine and CLI are free and open source (MIT license). The desktop app with GUI requires a one-time purchase. No recurring subscription for the core app.
+The core engine is open source (MIT license). The desktop app requires a one-time purchase. No recurring subscription for the core app.
 
 **Does screenpipe send my data to the cloud?**
 No. All data is stored locally by default. You can use fully local AI models via Ollama for complete privacy.

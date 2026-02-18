@@ -5,30 +5,11 @@ description: "Install screenpipe on macOS, Windows, or Linux. Start recording yo
 icon: "rocket"
 ---
 
-## desktop app (recommended)
+## desktop app
 
 download the [desktop app](https://screenpi.pe/onboarding) and follow the installation instructions. works on macOS, Windows, and Linux.
 
 the app manages recording, settings, and search — no terminal needed.
-
-## CLI
-
-```bash
-bunx screenpipe record
-```
-
-<Expandable title="linux: additional dependencies">
-```bash
-# ubuntu/debian
-sudo apt install libpulse0 libasound2-dev ffmpeg
-
-# fedora
-sudo dnf install pulseaudio-libs alsa-lib ffmpeg
-
-# arch
-sudo pacman -S libpulse alsa-lib ffmpeg
-```
-</Expandable>
 
 ## verify it's running
 
@@ -57,5 +38,5 @@ screenpipe works with any AI that supports MCP or HTTP APIs:
 
 - [search your screen history](/search-screen-history) — find anything you've seen
 - [set up pipes](/pipes) — scheduled AI agents on your data
-- [CLI reference](/cli-reference) — all commands and options
+- [API reference](/cli-reference) — REST API endpoints and parameters
 - [join our discord](https://discord.gg/dU9EBuw7Uq) — get help from the community

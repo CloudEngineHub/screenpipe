@@ -37,6 +37,7 @@
             "group": "reference",
             "pages": ["cli-reference"]
           },
+
           {
             "group": "compare",
             "pages": ["vs-rewind", "vs-recall", "vs-limitless"]

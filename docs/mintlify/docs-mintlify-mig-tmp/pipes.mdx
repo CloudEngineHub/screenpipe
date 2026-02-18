@@ -100,10 +100,13 @@ reference in prompt: source .env && curl -H "Authorization: Bearer $API_KEY" ...
 
 ## after creating the file
 
-install: bunx screenpipe pipe install ~/.screenpipe/pipes/my-pipe
-enable:  bunx screenpipe pipe enable my-pipe
-test:    bunx screenpipe pipe run my-pipe
-logs:    bunx screenpipe pipe logs my-pipe
+use the desktop app: go to **settings → pipes** to install, enable, run, and view logs.
+
+or use the REST API:
+install: curl -X POST http://localhost:3030/pipes/install -H "Content-Type: application/json" -d '{"source": "~/.screenpipe/pipes/my-pipe"}'
+enable:  curl -X POST http://localhost:3030/pipes/my-pipe/enable -H "Content-Type: application/json" -d '{"enabled": true}'
+test:    curl -X POST http://localhost:3030/pipes/my-pipe/run
+logs:    curl http://localhost:3030/pipes/my-pipe/logs
 ```
 </CodeGroup>
 
@@ -145,12 +148,11 @@ Query screenpipe at http://localhost:3030/search using the time range from the c
 Write the summary to ./output/<date>.md
 EOF
 
-# install and enable
-bunx screenpipe pipe install ~/.screenpipe/pipes/my-pipe
-bunx screenpipe pipe enable my-pipe
-
-# test it
-bunx screenpipe pipe run my-pipe
+# then use the desktop app (settings → pipes) to install, enable, and test
+# or use the REST API:
+# curl -X POST http://localhost:3030/pipes/install -H "Content-Type: application/json" -d '{"source": "~/.screenpipe/pipes/my-pipe"}'
+# curl -X POST http://localhost:3030/pipes/my-pipe/enable -H "Content-Type: application/json" -d '{"enabled": true}'
+# curl -X POST http://localhost:3030/pipes/my-pipe/run
 ```
 
 ## pipe.md format
@@ -197,30 +199,9 @@ the AI agent uses these values to query the right time range and format output c
 | cron | `0 */2 * * *` | standard 5-field cron expression |
 | manual | `manual` | only runs when triggered manually |
 
-## cli commands
+## manage pipes
 
-```bash
-# list all pipes
-bunx screenpipe pipe list
-
-# install a pipe from file, folder, or URL
-bunx screenpipe pipe install ./my-pipe.md
-bunx screenpipe pipe install https://raw.githubusercontent.com/user/repo/main/pipe.md
-
-# enable/disable
-bunx screenpipe pipe enable my-pipe
-bunx screenpipe pipe disable my-pipe
-
-# run once manually
-bunx screenpipe pipe run my-pipe
-
-# view run history
-bunx screenpipe pipe logs my-pipe
-bunx screenpipe pipe logs my-pipe -f  # follow
-
-# delete
-bunx screenpipe pipe delete my-pipe
-```
+use the desktop app (**settings → pipes**) or the REST API:
 
 ## http api
 
@@ -312,7 +293,7 @@ Write to ./output/<date>.md
 
 in the screenpipe app, go to **settings → AI settings** to configure presets (model + provider combinations). in **settings → pipes**, you can assign a preset to each pipe — this overrides the model/provider in the frontmatter.
 
-for CLI users, screenpipe auto-creates a default preset using screenpipe cloud.
+screenpipe auto-creates a default preset using screenpipe cloud.
 
 ## AI providers
 
