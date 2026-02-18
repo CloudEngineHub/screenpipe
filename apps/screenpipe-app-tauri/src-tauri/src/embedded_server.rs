@@ -14,13 +14,14 @@ use screenpipe_audio::audio_manager::builder::TranscriptionMode;
 use screenpipe_audio::audio_manager::AudioManagerBuilder;
 use screenpipe_audio::core::device::{default_input_device, default_output_device, parse_audio_device};
 use screenpipe_audio::core::engine::AudioTranscriptionEngine;
+use screenpipe_audio::meeting_detector::MeetingDetector;
 use screenpipe_audio::vad::{VadEngineEnum, VadSensitivity};
 use screenpipe_core::Language;
 use screenpipe_db::DatabaseManager;
 use screenpipe_server::{
     analytics,
-    ResourceMonitor, SCServer, start_continuous_recording, start_sleep_monitor,
-    start_ui_recording, UiRecorderConfig,
+    ResourceMonitor, SCServer, start_continuous_recording, start_meeting_watcher,
+    start_sleep_monitor, start_ui_recording, UiRecorderConfig,
     vision_manager::{VisionManager, VisionManagerConfig, start_monitor_watcher, stop_monitor_watcher},
 };
 use screenpipe_vision::OcrEngine;
@@ -314,8 +315,19 @@ pub async fn start_embedded_server(
         }
     }
 
+    // Create meeting detector for smart transcription mode.
+    // Shared between audio manager (checks state) and UI recorder (feeds events).
+    let meeting_detector: Option<Arc<MeetingDetector>> =
+        if config.transcription_mode == TranscriptionMode::Smart {
+            let detector = Arc::new(MeetingDetector::new());
+            info!("smart mode: meeting detector enabled — will defer Whisper during meetings");
+            Some(detector)
+        } else {
+            None
+        };
+
     // Build audio manager
-    let audio_manager = AudioManagerBuilder::new()
+    let mut audio_manager_builder = AudioManagerBuilder::new()
         .audio_chunk_duration(Duration::from_secs(config.audio_chunk_duration))
         .vad_engine(VadEngineEnum::Silero)
         .vad_sensitivity(match config.vad_sensitivity.as_str() {
@@ -332,7 +344,13 @@ pub async fn start_embedded_server(
         .use_system_default_audio(config.use_system_default_audio)
         .deepgram_api_key(config.deepgram_api_key.clone())
         .output_path(data_path.clone())
-        .transcription_mode(config.transcription_mode.clone())
+        .transcription_mode(config.transcription_mode.clone());
+
+    if let Some(ref detector) = meeting_detector {
+        audio_manager_builder = audio_manager_builder.meeting_detector(detector.clone());
+    }
+
+    let audio_manager = audio_manager_builder
         .build(db.clone())
         .await
         .map_err(|e| format!("Failed to build audio manager: {}", e))?;
@@ -598,7 +616,7 @@ pub async fn start_embedded_server(
         });
     }
 
-    // Start UI event recording (accessibility events)
+    // Start UI event recording (database recording of accessibility events)
     info!("UI events setting: enable_ui_events={}", config.enable_ui_events);
     if config.enable_ui_events {
         let ui_config = UiRecorderConfig {
@@ -621,6 +639,15 @@ pub async fn start_embedded_server(
                 }
             }
         });
+    }
+
+    // Start meeting watcher (standalone accessibility listener for smart mode)
+    // Independent of enable_ui_events toggle — only needs accessibility permission
+    if let Some(ref detector) = meeting_detector {
+        let detector_clone = detector.clone();
+        let _meeting_watcher = start_meeting_watcher(detector_clone);
+        // Handle kept alive by the spawned task — no need to store it
+        info!("meeting watcher started for smart transcription mode");
     }
 
     // Start background FTS indexer (replaces synchronous INSERT triggers)

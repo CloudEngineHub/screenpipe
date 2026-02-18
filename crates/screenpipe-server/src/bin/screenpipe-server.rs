@@ -15,6 +15,7 @@ use screenpipe_audio::{
     core::device::{
         default_input_device, default_output_device, list_audio_devices, parse_audio_device,
     },
+    meeting_detector::MeetingDetector,
 };
 use screenpipe_core::agents::AgentExecutor;
 use screenpipe_core::find_ffmpeg_path;
@@ -30,7 +31,7 @@ use screenpipe_server::{
     },
     cli_pipe::handle_pipe_command,
     cli_status::handle_status_command,
-    start_continuous_recording, start_sleep_monitor, start_ui_recording,
+    start_continuous_recording, start_meeting_watcher, start_sleep_monitor, start_ui_recording,
     sync_provider::ScreenpipeSyncProvider,
     vision_manager::{
         start_monitor_watcher, stop_monitor_watcher, VisionManager, VisionManagerConfig,
@@ -685,6 +686,19 @@ async fn main() -> anyhow::Result<()> {
 
     let audio_chunk_duration = Duration::from_secs(cli.audio_chunk_duration);
 
+    // Create meeting detector for smart transcription mode.
+    // Shared between audio manager (checks state) and UI recorder (feeds events).
+    let transcription_mode: screenpipe_audio::audio_manager::TranscriptionMode =
+        cli.transcription_mode.into();
+    let meeting_detector: Option<Arc<MeetingDetector>> =
+        if transcription_mode == screenpipe_audio::audio_manager::TranscriptionMode::Smart {
+            let detector = Arc::new(MeetingDetector::new());
+            info!("smart mode: meeting detector enabled — will defer Whisper during meetings");
+            Some(detector)
+        } else {
+            None
+        };
+
     let mut audio_manager_builder = AudioManagerBuilder::new()
         .audio_chunk_duration(audio_chunk_duration)
         .vad_engine(vad_engine.into())
@@ -697,7 +711,11 @@ async fn main() -> anyhow::Result<()> {
         .output_path(PathBuf::from(output_path_clone.clone().to_string()))
         .use_pii_removal(cli.use_pii_removal)
         .use_system_default_audio(cli.use_system_default_audio)
-        .transcription_mode(cli.transcription_mode.into());
+        .transcription_mode(transcription_mode);
+
+    if let Some(ref detector) = meeting_detector {
+        audio_manager_builder = audio_manager_builder.meeting_detector(detector.clone());
+    }
 
     let audio_manager = match audio_manager_builder.build(db.clone()).await {
         Ok(manager) => Arc::new(manager),
@@ -1213,7 +1231,7 @@ async fn main() -> anyhow::Result<()> {
         });
     }
 
-    // Start UI event recording
+    // Start UI event recording (database recording of accessibility events)
     let ui_recorder_handle = {
         if ui_recorder_config.enabled {
             info!("starting UI event capture");
@@ -1228,6 +1246,14 @@ async fn main() -> anyhow::Result<()> {
             debug!("UI event capture is disabled");
             None
         }
+    };
+
+    // Start meeting watcher (standalone accessibility listener for smart mode)
+    // Independent of enable_ui_events — only needs accessibility permission
+    let _meeting_watcher_handle = if let Some(ref detector) = meeting_detector {
+        Some(start_meeting_watcher(detector.clone()))
+    } else {
+        None
     };
 
     // Start background FTS indexer (replaces synchronous INSERT triggers)
