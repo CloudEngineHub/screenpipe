@@ -385,6 +385,15 @@ impl AudioManager {
         .expect("whisper model loading task panicked");
         info!("whisper model loaded successfully");
 
+        // Create a single WhisperState and reuse it across all segments.
+        // whisper_full_with_state() clears KV caches and results internally,
+        // so there is no stale data between calls. This avoids repeated
+        // Metal GPU buffer allocation/deallocation per segment.
+        let mut whisper_state = whisper_context
+            .create_state()
+            .map_err(|e| anyhow!("failed to create initial whisper state: {}", e))?;
+        info!("whisper state created (will be reused across segments)");
+
         Ok(tokio::spawn(async move {
             while let Ok(audio) = whisper_receiver.recv() {
                 info!("Received audio from device: {:?}", audio.device.name);
@@ -458,7 +467,7 @@ impl AudioManager {
                     deepgram_api_key.clone(),
                     languages.clone(),
                     &transcription_sender.clone(),
-                    whisper_context.clone(),
+                    &mut whisper_state,
                     metrics.clone(),
                 )
                 .await
