@@ -518,7 +518,7 @@ impl Default for SettingsStore {
             device_id: uuid::Uuid::new_v4().to_string(),
             adaptive_fps: false,
             enable_input_capture: false,
-            enable_accessibility: true,
+            enable_accessibility: false,
             auto_update: true,
             overlay_mode: "fullscreen".to_string(),
             show_overlay_in_screen_recording: false,

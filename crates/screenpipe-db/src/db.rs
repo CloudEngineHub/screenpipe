@@ -169,11 +169,12 @@ impl DatabaseManager {
 
         let db_manager = DatabaseManager {
             pool,
-            // 2 permits = at most 2 concurrent writers. SQLite WAL handles 2
-            // concurrent writers fine via busy_timeout retry. The cascade failure
-            // from issue #2181 only occurs at 3+ concurrent writers overwhelming
-            // the retry loop. This balances throughput vs safety.
-            write_semaphore: Arc::new(Semaphore::new(2)),
+            // 1 permit = writes are serialized at the application level.
+            // SQLite WAL only supports one writer at a time; with 2 permits the
+            // second writer's BEGIN IMMEDIATE would hit SQLITE_BUSY and retry,
+            // adding latency without improving throughput. Serializing here
+            // eliminates those BUSY retries entirely.
+            write_semaphore: Arc::new(Semaphore::new(1)),
         };
 
         // Run migrations after establishing the connection
@@ -232,11 +233,10 @@ impl DatabaseManager {
         Ok(())
     }
 
-    /// Acquire a connection with `BEGIN IMMEDIATE`, serialized via write semaphore.
+    /// Acquire a connection with `BEGIN IMMEDIATE`, serialized via a single-permit semaphore.
     ///
-    /// The semaphore ensures only one writer is active at a time, eliminating
-    /// application-level contention before it reaches SQLite. This means
-    /// `BEGIN IMMEDIATE` should succeed instantly (no other writer holds the lock).
+    /// Only one writer can hold the semaphore at a time, so `BEGIN IMMEDIATE`
+    /// should always succeed instantly (no SQLITE_BUSY contention at the DB level).
     ///
     /// Returns an `ImmediateTx` that automatically detaches the connection on drop
     /// if not committed (preventing dirty connections from poisoning the pool).
@@ -773,39 +773,32 @@ impl DatabaseManager {
         focused: bool,
         offset_index: Option<i64>,
     ) -> Result<i64, sqlx::Error> {
-        let mut tx = self.begin_immediate_with_retry().await?;
-        debug!("insert_frame Transaction started");
-
-        // Get the most recent video_chunk_id and file_path
+        // Read video_chunk OUTSIDE the write transaction (only needs shared read lock).
         let video_chunk: Option<(i64, String)> = sqlx::query_as(
             "SELECT id, file_path FROM video_chunks WHERE device_name = ?1 ORDER BY id DESC LIMIT 1",
         )
         .bind(device_name)
-        .fetch_optional(&mut **tx.conn())
+        .fetch_optional(&self.pool)
         .await?;
         debug!("Fetched most recent video_chunk: {:?}", video_chunk);
 
-        // If no video chunk is found, return 0
         let (video_chunk_id, file_path) = match video_chunk {
             Some((id, path)) => (id, path),
             None => {
-                debug!("No video chunk found, rolling back transaction");
-                // tx will rollback automatically on drop
+                debug!("No video chunk found, frame will not be inserted");
                 return Ok(0);
             }
         };
 
-        // Use provided offset_index or calculate from DB (legacy fallback)
+        // Calculate offset outside the write tx too (read-only query)
         let offset_index: i64 = match offset_index {
             Some(idx) => idx,
             None => {
-                // Legacy behavior: calculate from DB records
-                // NOTE: This can cause mismatches when multiple windows are captured per cycle
                 sqlx::query_scalar(
                     "SELECT COALESCE(MAX(offset_index), -1) + 1 FROM frames WHERE video_chunk_id = ?1",
                 )
                 .bind(video_chunk_id)
-                .fetch_one(&mut **tx.conn())
+                .fetch_one(&self.pool)
                 .await?
             }
         };
@@ -813,7 +806,8 @@ impl DatabaseManager {
 
         let timestamp = timestamp.unwrap_or_else(Utc::now);
 
-        // Insert the new frame with file_path as name and app/window metadata
+        // Only the INSERT needs the write lock
+        let mut tx = self.begin_immediate_with_retry().await?;
         let id = sqlx::query(
             "INSERT INTO frames (video_chunk_id, offset_index, timestamp, name, browser_url, app_name, window_name, focused, device_name) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
         )
@@ -831,7 +825,6 @@ impl DatabaseManager {
         .last_insert_rowid();
         debug!("insert_frame Inserted new frame with id: {}", id);
 
-        // Commit the transaction
         tx.commit().await?;
 
         Ok(id)
@@ -900,14 +893,14 @@ impl DatabaseManager {
         windows: &[FrameWindowData],
         ocr_engine: Arc<OcrEngine>,
     ) -> Result<Vec<(i64, usize)>, sqlx::Error> {
-        let mut tx = self.begin_immediate_with_retry().await?;
-
-        // Get the most recent video_chunk_id and file_path
+        // Read the latest video_chunk OUTSIDE the write transaction.
+        // This SELECT only needs a shared read lock, not the exclusive write lock.
+        // Moving it out reduces write lock hold time significantly.
         let video_chunk: Option<(i64, String)> = sqlx::query_as(
             "SELECT id, file_path FROM video_chunks WHERE device_name = ?1 ORDER BY id DESC LIMIT 1",
         )
         .bind(device_name)
-        .fetch_optional(&mut **tx.conn())
+        .fetch_optional(&self.pool)
         .await?;
 
         let (video_chunk_id, file_path) = match video_chunk {
@@ -917,7 +910,6 @@ impl DatabaseManager {
                     "No video chunk found for device '{}' — frames will not be inserted",
                     device_name
                 );
-                // tx will rollback automatically on drop
                 return Ok(vec![]);
             }
         };
@@ -925,6 +917,9 @@ impl DatabaseManager {
         let timestamp = timestamp.unwrap_or_else(Utc::now);
         let ocr_engine_str = format!("{:?}", *ocr_engine);
         let mut results = Vec::with_capacity(windows.len());
+
+        // Now acquire the write lock — only INSERTs run inside the transaction.
+        let mut tx = self.begin_immediate_with_retry().await?;
 
         for (idx, window) in windows.iter().enumerate() {
             // Insert frame
