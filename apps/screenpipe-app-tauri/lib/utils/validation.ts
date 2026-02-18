@@ -293,9 +293,7 @@ export const validateApiKey = (apiKey: string, provider: AIProviderType): FieldV
       }
       break;
     case "custom":
-      if (apiKey.length < 10) {
-        return { isValid: false, error: "API key seems too short" };
-      }
+      // No length check — local providers (e.g. Ollama) use short keys
       break;
   }
   
