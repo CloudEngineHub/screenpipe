@@ -41,7 +41,7 @@ reqwest-middleware = "0.4.1"
 
 [patch.crates-io]
 # enables chinese mirror (hf is banned in china) and native-tls
-hf-hub = { git = "https://github.com/neo773/hf-hub", features = ["native-tls"] }
+hf-hub = { git = "https://github.com/neo773/hf-hub" }
 
 [workspace.metadata.vcpkg]
 git = "https://github.com/microsoft/vcpkg"
