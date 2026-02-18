@@ -55,7 +55,7 @@ pub fn start_fts_indexer(db: Arc<DatabaseManager>) -> tokio::task::JoinHandle<()
 
 /// Index all FTS tables, returning total rows indexed.
 /// Adds a small delay between tables so frame inserts can interleave.
-async fn index_all_tables(db: &DatabaseManager) -> i64 {
+pub async fn index_all_tables(db: &DatabaseManager) -> i64 {
     let mut total = 0;
 
     let t0 = std::time::Instant::now();
