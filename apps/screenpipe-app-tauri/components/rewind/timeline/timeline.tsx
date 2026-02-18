@@ -194,14 +194,13 @@ export const TimelineSlider = ({
 	uiEventsCacheRef.current = uiEventsCache;
 	const uiEventsFetchingRef = useRef<Set<string>>(new Set());
 
-	const fetchUiEvents = useCallback((frameId: string | number, timestamp: string) => {
+	const fetchUiEvents = useCallback((timestamp: string) => {
 		const cacheKey = timestamp;
 		if (uiEventsCacheRef.current[cacheKey] || uiEventsFetchingRef.current.has(cacheKey)) return;
 		uiEventsFetchingRef.current.add(cacheKey);
 
-		const query = frameId
-			? `SELECT event_type, text_content, app_name, window_title, timestamp FROM ui_events WHERE frame_id = ${Number(frameId)} ORDER BY timestamp ASC LIMIT 10`
-			: `SELECT event_type, text_content, app_name, window_title, timestamp FROM ui_events WHERE timestamp BETWEEN datetime('${timestamp}', '-15 seconds') AND datetime('${timestamp}', '+15 seconds') ORDER BY timestamp ASC LIMIT 10`;
+		// Always use timestamp-based query: frame_id is never populated in ui_events
+		const query = `SELECT event_type, text_content, app_name, window_title, timestamp FROM ui_events WHERE timestamp BETWEEN datetime('${timestamp}', '-15 seconds') AND datetime('${timestamp}', '+15 seconds') ORDER BY timestamp ASC LIMIT 10`;
 
 		fetch("http://localhost:3030/raw_sql", {
 			method: "POST",
@@ -778,8 +777,7 @@ export const TimelineSlider = ({
 												setHoveredTimestamp(frame.timestamp);
 												handleDragOver(frameIndex);
 												// Fetch UI events for tooltip enrichment
-												const fId = frame.devices?.[0]?.frame_id;
-												if (fId) fetchUiEvents(fId, frame.timestamp);
+												fetchUiEvents(frame.timestamp);
 											}}
 											onMouseLeave={() => {
 												setHoveredTimestamp(null);
