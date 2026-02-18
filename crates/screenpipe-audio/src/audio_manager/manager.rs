@@ -398,6 +398,15 @@ impl AudioManager {
             while let Ok(audio) = whisper_receiver.recv() {
                 info!("Received audio from device: {:?}", audio.device.name);
 
+                // Audio-based call detection: update meeting detector with speech activity
+                if let Some(ref meeting) = meeting_detector {
+                    let rms = {
+                        let sum_sq: f32 = audio.data.iter().map(|&x| x * x).sum();
+                        (sum_sq / audio.data.len() as f32).sqrt()
+                    };
+                    meeting.on_audio_activity(&audio.device.device_type, rms > 0.01);
+                }
+
                 // Smart mode: defer Whisper during meetings, then check CPU idle
                 let mut deferred = false;
 
