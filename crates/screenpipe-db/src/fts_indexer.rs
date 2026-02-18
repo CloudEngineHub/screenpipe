@@ -183,7 +183,7 @@ async fn index_frames_fts(db: &DatabaseManager) -> Result<i64, sqlx::Error> {
     // tables or disk-bound DBs) doesn't hold the exclusive write lock.
     let rows: Vec<(i64, String, String, String, String, String)> = sqlx::query_as(
         "SELECT id, COALESCE(name, ''), COALESCE(browser_url, ''), \
-                COALESCE(app_name, ''), COALESCE(window_name, ''), COALESCE(focused, 0) \
+                COALESCE(app_name, ''), COALESCE(window_name, ''), CAST(COALESCE(focused, 0) AS TEXT) \
          FROM frames WHERE rowid > ?1 ORDER BY rowid LIMIT ?2",
     )
     .bind(last)
