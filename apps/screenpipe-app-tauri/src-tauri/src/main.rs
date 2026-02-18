@@ -1556,12 +1556,10 @@ async fn main() {
                         map.insert("vad_sensitivity".into(), serde_json::json!(store.vad_sensitivity));
                         map.insert("enable_input_capture".into(), serde_json::json!(store.enable_input_capture));
                         map.insert("enable_accessibility".into(), serde_json::json!(store.enable_accessibility));
-                        map.insert("enable_beta".into(), serde_json::json!(store.enable_beta));
                         map.insert("auto_start_enabled".into(), serde_json::json!(store.auto_start_enabled));
                         map.insert("platform".into(), serde_json::json!(store.platform));
                         map.insert("embedded_llm_enabled".into(), serde_json::json!(store.embedded_llm.enabled));
                         map.insert("embedded_llm_model".into(), serde_json::json!(store.embedded_llm.model));
-                        map.insert("restart_interval".into(), serde_json::json!(store.restart_interval));
                         // Only send counts for privacy-sensitive lists (not actual values)
                         map.insert("audio_device_count".into(), serde_json::json!(store.audio_devices.len()));
                         map.insert("ignored_windows_count".into(), serde_json::json!(store.ignored_windows.len()));

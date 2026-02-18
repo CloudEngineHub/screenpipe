@@ -128,8 +128,6 @@ pub struct SettingsStore {
     pub use_system_default_audio: bool,
     #[serde(rename = "usePiiRemoval")]
     pub use_pii_removal: bool,
-    #[serde(rename = "restartInterval")]
-    pub restart_interval: i32,
     #[serde(rename = "port")]
     pub port: u16,
     #[serde(rename = "dataDir")]
@@ -157,10 +155,6 @@ pub struct SettingsStore {
     pub languages: Vec<String>,
     #[serde(rename = "embeddedLLM")]
     pub embedded_llm: EmbeddedLLM,
-    #[serde(rename = "enableBeta")]
-    pub enable_beta: bool,
-    #[serde(rename = "isFirstTimeUser")]
-    pub is_first_time_user: bool,
     #[serde(rename = "autoStartEnabled")]
     pub auto_start_enabled: bool,
     #[serde(rename = "platform")]
@@ -459,7 +453,6 @@ impl Default for SettingsStore {
             audio_devices: vec!["default".to_string()],
             use_system_default_audio: true,
             use_pii_removal: true,
-            restart_interval: 0,
             port: 3030,
             data_dir: "default".to_string(),
             disable_audio: false,
@@ -474,8 +467,6 @@ impl Default for SettingsStore {
             use_chinese_mirror: false,
             languages: vec![],
             embedded_llm: EmbeddedLLM::default(),
-            enable_beta: false,
-            is_first_time_user: true,
             auto_start_enabled: true,
             platform: "unknown".to_string(),
             disabled_shortcuts: vec![],
@@ -554,18 +545,6 @@ impl SettingsStore {
                 }
             }
         }
-    }
-
-    #[allow(dead_code)]
-    pub fn update(app: &AppHandle, update: impl FnOnce(&mut SettingsStore)) -> Result<(), String> {
-        let Ok(store) = get_store(app, None) else {
-            return Err("Failed to get store".to_string());
-        };
-
-        let mut settings = Self::get(app)?.unwrap();
-        update(&mut settings);
-        store.set("settings", json!(settings));
-        Ok(())
     }
 
     pub fn save(&self,app: &AppHandle) -> Result<(), String> {

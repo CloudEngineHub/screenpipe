@@ -294,7 +294,6 @@ impl AnalyticsManager {
 
             // Other features
             "setting_use_pii_removal": get_bool("usePiiRemoval").unwrap_or(true),
-            "setting_enable_beta": get_bool("enableBeta").unwrap_or(false),
             "setting_auto_update": get_bool("autoUpdate").unwrap_or(true),
             "setting_languages_count": get_arr_len("languages"),
         })

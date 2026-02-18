@@ -83,13 +83,10 @@ export const settingsStoreSchema = z.object({
   // System Settings
   dataDir: z.string().min(1, "Data directory is required"),
   port: z.number().int().min(1024, "Port must be at least 1024").max(65535, "Port cannot exceed 65535"),
-  restartInterval: z.number().int().min(0, "Restart interval cannot be negative"),
   analyticsEnabled: z.boolean(),
   useChineseMirror: z.boolean(),
   usePiiRemoval: z.boolean(),
   devMode: z.boolean(),
-  enableBeta: z.boolean(),
-  isFirstTimeUser: z.boolean(),
   autoStartEnabled: z.boolean(),
   platform: z.string(),
   
@@ -176,7 +173,6 @@ export const validateSettings = (settings: Partial<SettingsStore>): ValidationRe
 export const sanitizeValue = (field: ExtendedSettingsKeys, value: any): any => {
   switch (field) {
     case "port":
-    case "restartInterval":
     case "audioChunkDuration":
       return Math.max(0, parseInt(String(value)) || 0);
     
