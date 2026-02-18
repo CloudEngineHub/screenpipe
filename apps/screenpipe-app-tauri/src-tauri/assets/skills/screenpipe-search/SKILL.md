@@ -204,3 +204,18 @@ Do NOT use markdown links or multi-line code blocks for videos.
 - If asked about meetings, use `content_type=audio`.
 - If asked about a specific app, always use the `app_name` filter.
 - Combine multiple searches to build a complete picture (e.g., screen + audio for a meeting).
+- **For aggregation over large datasets**, use raw SQL instead of paginating through search results. The `/search` endpoint returns paginated results (default limit 20), so summarizing thousands of events requires raw SQL. Examples:
+
+```bash
+# Count accessibility events by app (last 24h)
+curl -X POST http://localhost:3030/raw_sql -H "Content-Type: application/json" \
+  -d '{"query": "SELECT app_name, COUNT(*) as count FROM accessibility WHERE timestamp > datetime(\"now\", \"-24 hours\") GROUP BY app_name ORDER BY count DESC"}'
+
+# Count input events by type and app (last 24h)
+curl -X POST http://localhost:3030/raw_sql -H "Content-Type: application/json" \
+  -d '{"query": "SELECT app_name, event_type, COUNT(*) as count FROM ui_events WHERE timestamp > datetime(\"now\", \"-24 hours\") GROUP BY app_name, event_type ORDER BY count DESC"}'
+
+# App usage summary from OCR frames (last 24h)
+curl -X POST http://localhost:3030/raw_sql -H "Content-Type: application/json" \
+  -d '{"query": "SELECT app_name, COUNT(*) as frames FROM frames WHERE timestamp > datetime(\"now\", \"-24 hours\") GROUP BY app_name ORDER BY frames DESC"}'
+```

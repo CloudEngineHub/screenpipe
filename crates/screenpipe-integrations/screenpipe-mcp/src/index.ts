@@ -281,6 +281,7 @@ Screenpipe captures four types of data:
 1. Read screenpipe://context first to get current timestamps
 2. Use content_type=input for "what did I type?" queries
 3. Use content_type=accessibility for accessibility tree text
+4. For large aggregations (e.g. "what apps did I use today?"), paginate with offset or suggest the user run raw SQL via \`curl -X POST http://localhost:3030/raw_sql\` for efficient GROUP BY queries
 
 ## Timeline Deep Links
 When showing search results to users, create clickable links to specific moments:
