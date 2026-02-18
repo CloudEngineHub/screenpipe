@@ -810,6 +810,36 @@ jobs:
           tauriScript: bunx tauri -vvv
           retryAttempts: 3
 
+      - name: Notarize and staple DMGs (macOS)
+        if: matrix.os_type == 'macos'
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          TARGET="${{ matrix.target }}"
+          BUNDLE_DIR="apps/screenpipe-app-tauri/src-tauri/target/${TARGET}/release/bundle"
+
+          echo "=== Notarizing and stapling DMGs ==="
+          for dmg in "${BUNDLE_DIR}"/dmg/*.dmg; do
+            if [ -f "$dmg" ]; then
+              echo "Notarizing: $(basename "$dmg")"
+              xcrun notarytool submit "$dmg" \
+                --apple-id "$APPLE_ID" \
+                --password "$APPLE_PASSWORD" \
+                --team-id "$APPLE_TEAM_ID" \
+                --wait --timeout 15m
+
+              echo "Stapling: $(basename "$dmg")"
+              xcrun stapler staple "$dmg"
+
+              echo "Verifying: $(basename "$dmg")"
+              xcrun stapler validate "$dmg"
+              spctl --assess --type open --context context:primary-signature --verbose "$dmg" 2>&1 || true
+              echo "✅ $(basename "$dmg") notarized and stapled"
+            fi
+          done
+
       - name: Upload debug symbols to Sentry (Windows)
         if: matrix.os_type == 'windows'
         continue-on-error: true
