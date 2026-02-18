@@ -85,9 +85,6 @@ pub async fn start_embedded_server(
     );
     info!("Database initialized at {}", db_path);
 
-    // Languages are already parsed in RecordingConfig
-    let languages = config.languages.clone();
-
     // Set up audio devices
     let mut audio_devices = Vec::new();
     if !config.disable_audio {
@@ -141,9 +138,6 @@ pub async fn start_embedded_server(
     let (shutdown_tx, _) = broadcast::channel::<()>(1);
     let shutdown_tx_clone = shutdown_tx.clone();
 
-    // OCR engine is already typed in RecordingConfig
-    let ocr_engine = config.ocr_engine.clone();
-
     // Create a runtime handle for vision tasks
     let vision_handle = tokio::runtime::Handle::current();
 
@@ -154,14 +148,6 @@ pub async fn start_embedded_server(
     if !config.disable_vision {
         let db_clone = db.clone();
         let output_path = data_path.to_string_lossy().into_owned();
-        let fps = config.fps;
-        let video_chunk_duration = Duration::from_secs(60);
-        let ocr_engine = Arc::new(ocr_engine);
-        let use_pii_removal = config.use_pii_removal;
-        let ignored_windows = config.ignored_windows.clone();
-        let included_windows = config.included_windows.clone();
-        let ignored_urls = config.ignored_urls.clone();
-        let languages_clone = languages.clone();
 
         info!(
             "Monitor config: use_all_monitors={}, monitor_ids={:?}",
@@ -297,9 +283,8 @@ pub async fn start_embedded_server(
             info!("Using static monitor list: {:?}", monitor_ids);
             let output_path = Arc::new(output_path);
             let shutdown_rx = shutdown_tx_clone.subscribe();
-            let video_quality = config.video_quality.clone();
             let recording_metrics = vision_metrics.clone();
-            let disable_ocr = config.disable_ocr;
+            let config_clone = config.clone();
 
             tokio::spawn(async move {
                 let mut shutdown_rx = shutdown_rx;
@@ -308,21 +293,11 @@ pub async fn start_embedded_server(
                     let recording_future = start_continuous_recording(
                         db_clone.clone(),
                         output_path.clone(),
-                        fps,
-                        video_chunk_duration,
-                        ocr_engine.clone(),
+                        &config_clone,
                         monitor_ids.clone(),
-                        use_pii_removal,
-                        false,
                         &vision_handle,
-                        &ignored_windows,
-                        &included_windows,
-                        &ignored_urls,
-                        languages_clone.clone(),
                         None,
-                        video_quality.clone(),
                         recording_metrics.clone(),
-                        disable_ocr,
                     );
 
                     tokio::select! {

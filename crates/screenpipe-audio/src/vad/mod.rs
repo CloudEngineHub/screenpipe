@@ -77,3 +77,28 @@ pub async fn create_vad_engine(engine: VadEngineEnum) -> anyhow::Result<Box<dyn 
 
 unsafe impl Send for WebRtcVad {}
 unsafe impl Send for SileroVad {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn vad_sensitivity_from_str_low() {
+        assert!(matches!("low".parse::<VadSensitivity>().unwrap(), VadSensitivity::Low));
+    }
+
+    #[test]
+    fn vad_sensitivity_from_str_medium() {
+        assert!(matches!("medium".parse::<VadSensitivity>().unwrap(), VadSensitivity::Medium));
+    }
+
+    #[test]
+    fn vad_sensitivity_from_str_high() {
+        assert!(matches!("high".parse::<VadSensitivity>().unwrap(), VadSensitivity::High));
+    }
+
+    #[test]
+    fn vad_sensitivity_from_str_unknown_defaults_to_high() {
+        assert!(matches!("anything".parse::<VadSensitivity>().unwrap(), VadSensitivity::High));
+    }
+}

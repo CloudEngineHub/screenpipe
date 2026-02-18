@@ -520,7 +520,7 @@ async fn main() -> anyhow::Result<()> {
         }
     }
 
-    if !is_local_ipv4_port_free(cli.port) {
+    if !is_local_ipv4_port_free(config.port) {
         error!(
             "you're likely already running screenpipe instance in a different environment, e.g. terminal/ide, close it and restart or use different port"
         );
@@ -532,13 +532,12 @@ async fn main() -> anyhow::Result<()> {
     let mut audio_devices = Vec::new();
 
     // Auto-detect realtime audio: enable for cloud engines (Deepgram)
-    let enable_realtime_audio = matches!(
-        cli.audio_transcription_engine,
-        CliAudioTranscriptionEngine::Deepgram
-    );
+    use screenpipe_audio::core::engine::AudioTranscriptionEngine;
+    let enable_realtime_audio =
+        config.audio_transcription_engine == AudioTranscriptionEngine::Deepgram;
 
-    if !cli.disable_audio {
-        if cli.audio_device.is_empty() {
+    if !config.disable_audio {
+        if config.audio_devices.is_empty() {
             // Use default devices
             if let Ok(input_device) = default_input_device() {
                 audio_devices.push(input_device.to_string());
@@ -548,7 +547,7 @@ async fn main() -> anyhow::Result<()> {
             }
         } else {
             // Use specified devices
-            for d in &cli.audio_device {
+            for d in &config.audio_devices {
                 match parse_audio_device(d) {
                     Ok(device) => audio_devices.push(device.to_string()),
                     Err(e) => warn!("skipping unparseable audio device '{}': {}", d, e),
@@ -606,14 +605,17 @@ async fn main() -> anyhow::Result<()> {
 
     let warning_ocr_engine_clone = cli.ocr_engine.clone();
     let warning_audio_transcription_engine_clone = cli.audio_transcription_engine.clone();
-    let monitor_ids = if cli.monitor_id.is_empty() {
+    let monitor_ids: Vec<u32> = if config.monitor_ids.is_empty() {
         all_monitors.iter().map(|m| m.id()).collect::<Vec<_>>()
     } else {
-        cli.monitor_id.clone()
+        config
+            .monitor_ids
+            .iter()
+            .filter_map(|s| s.parse::<u32>().ok())
+            .collect()
     };
 
-    let languages = cli.unique_languages().unwrap();
-    let languages_clone = languages.clone();
+    let languages = config.languages.clone();
 
     let ocr_engine_clone = cli.ocr_engine.clone();
     let vad_engine = cli.vad_engine.clone();
@@ -631,13 +633,6 @@ async fn main() -> anyhow::Result<()> {
     let included_windows_clone = cli.included_windows.clone();
     // Create UI recorder config early before cli is moved
     let ui_recorder_config = config.to_ui_recorder_config();
-
-    let fps = if cli.fps.is_finite() && cli.fps > 0.0 {
-        cli.fps
-    } else {
-        eprintln!("invalid fps value: {}. using default of 1.0", cli.fps);
-        1.0
-    };
 
     // Create meeting detector for smart transcription mode.
     // Shared between audio manager (checks state) and UI recorder (feeds events).
@@ -673,13 +668,14 @@ async fn main() -> anyhow::Result<()> {
     let vision_metrics = Arc::new(screenpipe_vision::PipelineMetrics::new());
 
     // Create VisionManager for dynamic monitor detection if enabled
-    let vision_manager: Option<Arc<VisionManager>> = if cli.use_all_monitors && !cli.disable_vision
-    {
-        info!("Using dynamic monitor detection (--use-all-monitors)");
+    let vision_manager: Option<Arc<VisionManager>> =
+        if config.use_all_monitors && !config.disable_vision
+        {
+            info!("Using dynamic monitor detection (--use-all-monitors)");
 
-        // Create activity feed for adaptive FPS if enabled
-        #[cfg(feature = "adaptive-fps")]
-        let activity_feed: screenpipe_vision::ActivityFeedOption = if cli.adaptive_fps {
+            // Create activity feed for adaptive FPS if enabled
+            #[cfg(feature = "adaptive-fps")]
+            let activity_feed: screenpipe_vision::ActivityFeedOption = if config.adaptive_fps {
             info!("Starting activity feed for adaptive FPS");
             match screenpipe_accessibility::UiRecorder::with_defaults().start_activity_only() {
                 Ok(feed) => {
@@ -747,7 +743,7 @@ async fn main() -> anyhow::Result<()> {
     } else {
         // Create activity feed for adaptive FPS if enabled (for non-VisionManager path)
         #[cfg(feature = "adaptive-fps")]
-        let activity_feed_legacy: screenpipe_vision::ActivityFeedOption = if cli.adaptive_fps {
+        let activity_feed_legacy: screenpipe_vision::ActivityFeedOption = if config.adaptive_fps {
             info!("Starting activity feed for adaptive FPS (legacy path)");
             match screenpipe_accessibility::UiRecorder::with_defaults().start_activity_only() {
                 Ok(feed) => {
@@ -770,6 +766,7 @@ async fn main() -> anyhow::Result<()> {
         let activity_feed_legacy: screenpipe_vision::ActivityFeedOption = None;
 
         let vision_metrics_for_recording = vision_metrics.clone();
+        let config_clone = config.clone();
 
         // Use traditional start_continuous_recording
         let runtime = &tokio::runtime::Handle::current();
@@ -779,21 +776,11 @@ async fn main() -> anyhow::Result<()> {
                 let recording_future = start_continuous_recording(
                     db_clone.clone(),
                     output_path_clone.clone(),
-                    fps,
-                    Duration::from_secs(60),
-                    Arc::new(cli.ocr_engine.clone().into()),
+                    &config_clone,
                     monitor_ids_clone.clone(),
-                    cli.use_pii_removal,
-                    cli.disable_vision,
                     &vision_handle,
-                    &cli.ignored_windows,
-                    &cli.included_windows,
-                    &cli.ignored_urls,
-                    languages_clone.clone(),
                     activity_feed_legacy.clone(),
-                    cli.video_quality.clone(),
                     vision_metrics_for_recording.clone(),
-                    false, // disable_ocr: CLI doesn't support this yet
                 );
 
                 let result = tokio::select! {

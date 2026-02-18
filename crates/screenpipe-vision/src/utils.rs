@@ -70,6 +70,39 @@ impl std::str::FromStr for OcrEngine {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ocr_engine_from_str_tesseract() {
+        assert!(matches!("tesseract".parse::<OcrEngine>().unwrap(), OcrEngine::Tesseract));
+    }
+
+    #[test]
+    fn ocr_engine_from_str_windows_native() {
+        assert!(matches!("windows-native".parse::<OcrEngine>().unwrap(), OcrEngine::WindowsNative));
+    }
+
+    #[test]
+    fn ocr_engine_from_str_unstructured() {
+        assert!(matches!("unstructured".parse::<OcrEngine>().unwrap(), OcrEngine::Unstructured));
+    }
+
+    #[test]
+    fn ocr_engine_from_str_apple_native() {
+        assert!(matches!("apple-native".parse::<OcrEngine>().unwrap(), OcrEngine::AppleNative));
+    }
+
+    #[test]
+    fn ocr_engine_from_str_unknown_returns_platform_default() {
+        let engine = "something-else".parse::<OcrEngine>().unwrap();
+        // platform_default varies by OS, just ensure it doesn't error
+        let default = OcrEngine::platform_default();
+        assert_eq!(std::mem::discriminant(&engine), std::mem::discriminant(&default));
+    }
+}
+
 pub fn calculate_hash(image: &DynamicImage) -> u64 {
     let mut hasher = DefaultHasher::new();
     image.as_bytes().hash(&mut hasher);
