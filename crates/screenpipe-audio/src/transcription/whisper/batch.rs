@@ -11,7 +11,6 @@ pub async fn process_with_whisper(
     languages: Vec<Language>,
     whisper_state: &mut WhisperState,
 ) -> Result<String> {
-
     let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 0 });
 
     let mut audio = audio.to_vec();

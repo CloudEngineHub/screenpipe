@@ -235,8 +235,10 @@ async fn handle_stream_frames_socket(
 
     // Shared state for live frame polling
     // Stores (start_time, end_time, is_descending, last_polled_timestamp)
-    let active_request: Arc<Mutex<Option<(DateTime<Utc>, DateTime<Utc>, bool, DateTime<Utc>)>>> =
-        Arc::new(Mutex::new(None));
+    #[allow(clippy::type_complexity)]
+    let active_request: Arc<
+        Mutex<Option<(DateTime<Utc>, DateTime<Utc>, bool, DateTime<Utc>)>>,
+    > = Arc::new(Mutex::new(None));
     // Track sent frame IDs to avoid duplicates
     let sent_frame_ids: Arc<Mutex<std::collections::HashSet<i64>>> =
         Arc::new(Mutex::new(std::collections::HashSet::new()));

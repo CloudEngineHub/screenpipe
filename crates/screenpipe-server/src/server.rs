@@ -190,10 +190,7 @@ impl SCServer {
 
     /// Start the server with a pre-bound TcpListener.
     /// Use this when the caller needs to confirm the port is bound before proceeding.
-    pub async fn start_with_listener(
-        self,
-        listener: TcpListener,
-    ) -> Result<(), std::io::Error> {
+    pub async fn start_with_listener(self, listener: TcpListener) -> Result<(), std::io::Error> {
         let app = self.create_router().await;
         info!("Server listening on {}", self.addr);
 
@@ -301,8 +298,11 @@ impl SCServer {
             screenpipe_dir: self.screenpipe_dir.clone(),
             vision_disabled: self.vision_disabled,
             audio_disabled: self.audio_disabled,
-            frame_cache: match FrameCache::new(self.screenpipe_dir.clone().join("data"), self.db.clone())
-                .await
+            frame_cache: match FrameCache::new(
+                self.screenpipe_dir.clone().join("data"),
+                self.db.clone(),
+            )
+            .await
             {
                 Ok(cache) => Some(Arc::new(cache)),
                 Err(e) => {

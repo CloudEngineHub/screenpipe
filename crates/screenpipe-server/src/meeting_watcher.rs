@@ -64,7 +64,10 @@ pub fn start_meeting_watcher(detector: Arc<MeetingDetector>) -> tokio::task::Joi
         let handle = match recorder.start() {
             Ok(h) => h,
             Err(e) => {
-                error!("meeting watcher: failed to start accessibility listener: {}", e);
+                error!(
+                    "meeting watcher: failed to start accessibility listener: {}",
+                    e
+                );
                 return;
             }
         };
@@ -82,9 +85,7 @@ pub fn start_meeting_watcher(detector: Arc<MeetingDetector>) -> tokio::task::Joi
                                 .await;
                         }
                         EventData::WindowFocus { app, title } => {
-                            detector
-                                .on_app_switch(app, title.as_deref())
-                                .await;
+                            detector.on_app_switch(app, title.as_deref()).await;
                         }
                         _ => {
                             // Ignore other events — shouldn't arrive given our config
@@ -93,7 +94,10 @@ pub fn start_meeting_watcher(detector: Arc<MeetingDetector>) -> tokio::task::Joi
                 }
                 None => {
                     // Timeout — no events, just loop
-                    debug!("meeting watcher: tick (in_meeting={})", detector.is_in_meeting());
+                    debug!(
+                        "meeting watcher: tick (in_meeting={})",
+                        detector.is_in_meeting()
+                    );
                 }
             }
         }
@@ -106,8 +110,6 @@ pub fn start_meeting_watcher(detector: Arc<MeetingDetector>) -> tokio::task::Joi
 pub fn start_meeting_watcher(
     _detector: std::sync::Arc<screenpipe_audio::meeting_detector::MeetingDetector>,
 ) -> tokio::task::JoinHandle<()> {
-    tracing::warn!(
-        "meeting watcher: ui-events feature disabled, meeting detection unavailable"
-    );
+    tracing::warn!("meeting watcher: ui-events feature disabled, meeting detection unavailable");
     tokio::spawn(async {})
 }

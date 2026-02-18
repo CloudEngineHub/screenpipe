@@ -49,11 +49,17 @@ impl From<screenpipe_db::OcrEngine> for OcrEngine {
 impl OcrEngine {
     pub fn platform_default() -> Self {
         #[cfg(target_os = "macos")]
-        { Self::AppleNative }
+        {
+            Self::AppleNative
+        }
         #[cfg(target_os = "windows")]
-        { Self::WindowsNative }
+        {
+            Self::WindowsNative
+        }
         #[cfg(target_os = "linux")]
-        { Self::Tesseract }
+        {
+            Self::Tesseract
+        }
     }
 }
 
@@ -76,22 +82,34 @@ mod tests {
 
     #[test]
     fn ocr_engine_from_str_tesseract() {
-        assert!(matches!("tesseract".parse::<OcrEngine>().unwrap(), OcrEngine::Tesseract));
+        assert!(matches!(
+            "tesseract".parse::<OcrEngine>().unwrap(),
+            OcrEngine::Tesseract
+        ));
     }
 
     #[test]
     fn ocr_engine_from_str_windows_native() {
-        assert!(matches!("windows-native".parse::<OcrEngine>().unwrap(), OcrEngine::WindowsNative));
+        assert!(matches!(
+            "windows-native".parse::<OcrEngine>().unwrap(),
+            OcrEngine::WindowsNative
+        ));
     }
 
     #[test]
     fn ocr_engine_from_str_unstructured() {
-        assert!(matches!("unstructured".parse::<OcrEngine>().unwrap(), OcrEngine::Unstructured));
+        assert!(matches!(
+            "unstructured".parse::<OcrEngine>().unwrap(),
+            OcrEngine::Unstructured
+        ));
     }
 
     #[test]
     fn ocr_engine_from_str_apple_native() {
-        assert!(matches!("apple-native".parse::<OcrEngine>().unwrap(), OcrEngine::AppleNative));
+        assert!(matches!(
+            "apple-native".parse::<OcrEngine>().unwrap(),
+            OcrEngine::AppleNative
+        ));
     }
 
     #[test]
@@ -99,7 +117,10 @@ mod tests {
         let engine = "something-else".parse::<OcrEngine>().unwrap();
         // platform_default varies by OS, just ensure it doesn't error
         let default = OcrEngine::platform_default();
-        assert_eq!(std::mem::discriminant(&engine), std::mem::discriminant(&default));
+        assert_eq!(
+            std::mem::discriminant(&engine),
+            std::mem::discriminant(&default)
+        );
     }
 }
 

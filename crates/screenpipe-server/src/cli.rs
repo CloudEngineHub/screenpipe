@@ -6,10 +6,10 @@ use screenpipe_audio::{
     vad::{VadEngineEnum, VadSensitivity},
 };
 use screenpipe_core::Language;
-use std::path::PathBuf;
 use screenpipe_db::CustomOcrConfig as DBCustomOcrConfig;
 use screenpipe_db::OcrEngine as DBOcrEngine;
 use screenpipe_vision::{custom_ocr::CustomOcrConfig, utils::OcrEngine as CoreOcrEngine};
+use std::path::PathBuf;
 use std::sync::Arc;
 
 #[derive(Clone, Debug, ValueEnum, PartialEq)]
@@ -342,6 +342,7 @@ impl Cli {
 // =============================================================================
 
 #[derive(Subcommand)]
+#[allow(clippy::large_enum_variant)]
 pub enum Command {
     /// Start recording screen, audio, and optionally serve the API
     Record(RecordArgs),
@@ -612,7 +613,10 @@ impl RecordArgs {
     }
 
     /// Convert RecordArgs into a unified RecordingConfig.
-    pub fn into_recording_config(self, data_dir: PathBuf) -> crate::recording_config::RecordingConfig {
+    pub fn into_recording_config(
+        self,
+        data_dir: PathBuf,
+    ) -> crate::recording_config::RecordingConfig {
         let languages = self.unique_languages().unwrap_or_default();
         crate::recording_config::RecordingConfig {
             fps: self.fps,

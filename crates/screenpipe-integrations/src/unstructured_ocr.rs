@@ -110,4 +110,3 @@ fn calculate_overall_confidence(parsed_response: &[HashMap<String, serde_json::V
         0.0
     }
 }
-

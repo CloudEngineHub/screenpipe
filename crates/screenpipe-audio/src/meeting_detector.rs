@@ -40,6 +40,12 @@ struct MeetingState {
     directly_focused: bool,
 }
 
+impl Default for MeetingDetector {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MeetingDetector {
     pub fn new() -> Self {
         // Only apps that unambiguously indicate a live call.
@@ -112,11 +118,13 @@ impl MeetingDetector {
             let was_in_meeting = state.directly_focused;
             state.directly_focused = true;
             state.last_meeting_focus = Some(Instant::now());
-            state.current_app = Some(if let Some(pattern) = self.matching_browser_pattern(&app_lower, window_title) {
-                format!("{} ({})", app_name, pattern)
-            } else {
-                app_name.to_string()
-            });
+            state.current_app = Some(
+                if let Some(pattern) = self.matching_browser_pattern(&app_lower, window_title) {
+                    format!("{} ({})", app_name, pattern)
+                } else {
+                    app_name.to_string()
+                },
+            );
 
             if !was_in_meeting && !self.in_meeting.load(Ordering::Relaxed) {
                 debug!("meeting detected: app={}", app_name);
@@ -248,7 +256,10 @@ mod tests {
 
         // Switch away
         detector.on_app_switch("Finder", None).await;
-        assert!(detector.is_in_meeting(), "grace period should keep it active");
+        assert!(
+            detector.is_in_meeting(),
+            "grace period should keep it active"
+        );
 
         // Manually expire the grace period by backdating last_meeting_focus
         {

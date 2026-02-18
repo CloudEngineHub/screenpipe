@@ -60,7 +60,7 @@ pub fn strip_title_badge(title: &str) -> &str {
         let prefix = &trimmed[..pos];
         // If prefix is short and contains emoji + digits, strip it
         if prefix.chars().count() <= 5
-            && prefix.chars().any(|c| !c.is_ascii())
+            && !prefix.is_ascii()
             && prefix.chars().any(|c| c.is_ascii_digit())
         {
             return trimmed[pos + 3..].trim_start();
@@ -91,10 +91,8 @@ pub fn titles_match(sck_title: &str, browser_title: &str) -> bool {
     }
 
     // One contains the other (handles truncation, e.g., SCK may truncate long titles)
-    if a.len() >= 4 && b.len() >= 4 {
-        if a.contains(b) || b.contains(a) {
-            return true;
-        }
+    if a.len() >= 4 && b.len() >= 4 && (a.contains(b) || b.contains(a)) {
+        return true;
     }
 
     false

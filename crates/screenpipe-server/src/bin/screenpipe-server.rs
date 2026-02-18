@@ -32,9 +32,7 @@ use screenpipe_server::{
     cli_status::handle_status_command,
     start_continuous_recording, start_meeting_watcher, start_sleep_monitor, start_ui_recording,
     sync_provider::ScreenpipeSyncProvider,
-    vision_manager::{
-        start_monitor_watcher, stop_monitor_watcher, VisionManager,
-    },
+    vision_manager::{start_monitor_watcher, stop_monitor_watcher, VisionManager},
     watch_pid, ResourceMonitor, SCServer,
 };
 use screenpipe_vision::monitor::list_monitors;
@@ -329,8 +327,14 @@ async fn main() -> anyhow::Result<()> {
                         "vad_sensitivity".into(),
                         json!(format!("{:?}", cli.vad_sensitivity)),
                     );
-                    map.insert("enable_input_capture".into(), json!(cli.enable_input_capture));
-                    map.insert("enable_accessibility".into(), json!(cli.enable_accessibility));
+                    map.insert(
+                        "enable_input_capture".into(),
+                        json!(cli.enable_input_capture),
+                    );
+                    map.insert(
+                        "enable_accessibility".into(),
+                        json!(cli.enable_accessibility),
+                    );
                     map.insert("enable_sync".into(), json!(cli.enable_sync));
                     map.insert("sync_interval_secs".into(), json!(cli.sync_interval_secs));
                     map.insert("debug".into(), json!(cli.debug));
@@ -669,47 +673,46 @@ async fn main() -> anyhow::Result<()> {
 
     // Create VisionManager for dynamic monitor detection if enabled
     let vision_manager: Option<Arc<VisionManager>> =
-        if config.use_all_monitors && !config.disable_vision
-        {
+        if config.use_all_monitors && !config.disable_vision {
             info!("Using dynamic monitor detection (--use-all-monitors)");
 
             // Create activity feed for adaptive FPS if enabled
             #[cfg(feature = "adaptive-fps")]
             let activity_feed: screenpipe_vision::ActivityFeedOption = if config.adaptive_fps {
-            info!("Starting activity feed for adaptive FPS");
-            match screenpipe_accessibility::UiRecorder::with_defaults().start_activity_only() {
-                Ok(feed) => {
-                    info!("Activity feed started successfully");
-                    Some(feed)
+                info!("Starting activity feed for adaptive FPS");
+                match screenpipe_accessibility::UiRecorder::with_defaults().start_activity_only() {
+                    Ok(feed) => {
+                        info!("Activity feed started successfully");
+                        Some(feed)
+                    }
+                    Err(e) => {
+                        warn!(
+                            "Failed to start activity feed: {:?}. Adaptive FPS will be disabled.",
+                            e
+                        );
+                        None
+                    }
                 }
-                Err(e) => {
-                    warn!(
-                        "Failed to start activity feed: {:?}. Adaptive FPS will be disabled.",
-                        e
-                    );
-                    None
-                }
-            }
+            } else {
+                None
+            };
+
+            #[cfg(not(feature = "adaptive-fps"))]
+            let activity_feed: screenpipe_vision::ActivityFeedOption = None;
+
+            let vision_config = config.to_vision_manager_config(
+                output_path_clone.to_string(),
+                activity_feed,
+                vision_metrics.clone(),
+            );
+            Some(Arc::new(VisionManager::new(
+                vision_config,
+                db_clone.clone(),
+                vision_handle.clone(),
+            )))
         } else {
             None
         };
-
-        #[cfg(not(feature = "adaptive-fps"))]
-        let activity_feed: screenpipe_vision::ActivityFeedOption = None;
-
-        let vision_config = config.to_vision_manager_config(
-            output_path_clone.to_string(),
-            activity_feed,
-            vision_metrics.clone(),
-        );
-        Some(Arc::new(VisionManager::new(
-            vision_config,
-            db_clone.clone(),
-            vision_handle.clone(),
-        )))
-    } else {
-        None
-    };
 
     let handle = if let Some(ref vm) = vision_manager {
         // Use VisionManager for dynamic monitor detection
@@ -779,7 +782,7 @@ async fn main() -> anyhow::Result<()> {
                     &config_clone,
                     monitor_ids_clone.clone(),
                     &vision_handle,
-                    activity_feed_legacy.clone(),
+                    activity_feed_legacy,
                     vision_metrics_for_recording.clone(),
                 );
 
@@ -839,8 +842,12 @@ async fn main() -> anyhow::Result<()> {
             screenpipe_server::pipe_store::SqlitePipeStore::new(db.pool.clone()),
         ));
 
-    let mut pipe_manager =
-        screenpipe_core::pipes::PipeManager::new(pipes_dir, agent_executors, pipe_store, config.port);
+    let mut pipe_manager = screenpipe_core::pipes::PipeManager::new(
+        pipes_dir,
+        agent_executors,
+        pipe_store,
+        config.port,
+    );
     pipe_manager.set_on_run_complete(std::sync::Arc::new(|pipe_name, success, duration_secs| {
         analytics::capture_event_nonblocking(
             "pipe_scheduled_run",
@@ -1121,11 +1128,9 @@ async fn main() -> anyhow::Result<()> {
 
     // Start meeting watcher (standalone accessibility listener for smart mode)
     // Independent of enable_input_capture/enable_accessibility — only needs accessibility permission
-    let _meeting_watcher_handle = if let Some(ref detector) = meeting_detector {
-        Some(start_meeting_watcher(detector.clone()))
-    } else {
-        None
-    };
+    let _meeting_watcher_handle = meeting_detector
+        .as_ref()
+        .map(|detector| start_meeting_watcher(detector.clone()));
 
     // Start background FTS indexer (replaces synchronous INSERT triggers)
     let _fts_handle = screenpipe_db::fts_indexer::start_fts_indexer(db.clone());

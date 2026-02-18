@@ -57,7 +57,6 @@ pub async fn start_continuous_recording(
                 let activity_feed = activity_feed.clone();
                 let video_quality = video_quality.clone();
                 let vision_metrics = vision_metrics.clone();
-                let disable_ocr = disable_ocr;
 
                 debug!("Starting video recording for monitor {}", monitor_id);
                 vision_handle.spawn(async move {

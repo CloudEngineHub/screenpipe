@@ -333,7 +333,7 @@ impl AccessibilityNode {
 
     /// Count nodes that have a non-empty name (i.e., visible text content).
     pub fn named_node_count(&self) -> usize {
-        let self_count = if self.name.as_ref().map_or(false, |n| !n.is_empty()) {
+        let self_count = if self.name.as_ref().is_some_and(|n| !n.is_empty()) {
             1
         } else {
             0

@@ -700,7 +700,7 @@ async fn log_ffmpeg_output(stream: impl AsyncBufReadExt + Unpin, stream_name: &s
     }
 }
 
-#[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
 async fn save_frames_as_video(
     frame_queue: &Arc<ArrayQueue<Arc<RawCaptureResult>>>,
     output_path: &str,
@@ -912,6 +912,7 @@ fn spawn_ffmpeg_loggers(stderr: Option<ChildStderr>, stdout: Option<ChildStdout>
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn process_frames(
     frame_queue: &Arc<ArrayQueue<Arc<RawCaptureResult>>>,
     current_stdin: &mut Option<ChildStdin>,

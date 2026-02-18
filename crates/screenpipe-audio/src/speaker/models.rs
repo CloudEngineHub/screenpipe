@@ -58,10 +58,7 @@ pub async fn get_or_download_model(model_type: PyannoteModel) -> Result<PathBuf>
         .is_ok()
     {
         info!("initiating {} model download...", filename);
-        let model_type_clone = match model_type {
-            PyannoteModel::Segmentation => PyannoteModel::Segmentation,
-            PyannoteModel::Embedding => PyannoteModel::Embedding,
-        };
+        let model_type_clone = model_type;
         let flag = downloading_flag;
         tokio::spawn(async move {
             match download_model(model_type_clone).await {

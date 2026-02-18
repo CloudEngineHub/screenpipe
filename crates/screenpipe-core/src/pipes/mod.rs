@@ -148,6 +148,7 @@ pub struct SchedulerState {
 /// `PipeManager` works without a store (CLI mode) — all methods are guarded
 /// by `Option<Arc<dyn PipeStore>>`.
 #[async_trait::async_trait]
+#[allow(clippy::too_many_arguments)]
 pub trait PipeStore: Send + Sync {
     /// Insert a new execution row with status='queued'. Returns the row id.
     async fn create_execution(
@@ -628,15 +629,15 @@ impl PipeManager {
         }
 
         // Resolve preset
-        let (run_model, run_provider, run_provider_url) =
-            if let Some(ref preset_id) = config.preset {
-                match resolve_preset(&self.pipes_dir, preset_id) {
-                    Some(resolved) => (resolved.model, resolved.provider, resolved.url),
-                    None => (config.model.clone(), config.provider.clone(), None),
-                }
-            } else {
-                (config.model.clone(), config.provider.clone(), None)
-            };
+        let (run_model, run_provider, run_provider_url) = if let Some(ref preset_id) = config.preset
+        {
+            match resolve_preset(&self.pipes_dir, preset_id) {
+                Some(resolved) => (resolved.model, resolved.provider, resolved.url),
+                None => (config.model.clone(), config.provider.clone(), None),
+            }
+        } else {
+            (config.model.clone(), config.provider.clone(), None)
+        };
 
         // Create DB execution row
         let exec_id = if let Some(ref store) = self.store {
@@ -750,7 +751,11 @@ impl PipeManager {
                     } else {
                         (None, None)
                     };
-                    let status = if output.success { "completed" } else { "failed" };
+                    let status = if output.success {
+                        "completed"
+                    } else {
+                        "failed"
+                    };
                     if let (Some(ref store), Some(id)) = (&store_ref, exec_id) {
                         let _ = store
                             .finish_execution(
@@ -765,7 +770,9 @@ impl PipeManager {
                             .await;
                     }
                     if let Some(ref store) = store_ref {
-                        let _ = store.upsert_scheduler_state(&pipe_name, output.success).await;
+                        let _ = store
+                            .upsert_scheduler_state(&pipe_name, output.success)
+                            .await;
                     }
                     PipeRunLog {
                         pipe_name: pipe_name.clone(),
@@ -780,7 +787,12 @@ impl PipeManager {
                     if let (Some(ref store), Some(id)) = (&store_ref, exec_id) {
                         let _ = store
                             .finish_execution(
-                                id, "failed", "", &e.to_string(), None, Some("crash"),
+                                id,
+                                "failed",
+                                "",
+                                &e.to_string(),
+                                None,
+                                Some("crash"),
                                 Some(&e.to_string()),
                             )
                             .await;
@@ -808,8 +820,16 @@ impl PipeManager {
                     if let (Some(ref store), Some(id)) = (&store_ref, exec_id) {
                         let _ = store
                             .finish_execution(
-                                id, "timed_out", "", "", None, Some("timeout"),
-                                Some(&format!("execution timed out after {}s", DEFAULT_TIMEOUT_SECS)),
+                                id,
+                                "timed_out",
+                                "",
+                                "",
+                                None,
+                                Some("timeout"),
+                                Some(&format!(
+                                    "execution timed out after {}s",
+                                    DEFAULT_TIMEOUT_SECS
+                                )),
                             )
                             .await;
                     }
@@ -830,8 +850,7 @@ impl PipeManager {
             // Write log to disk
             let log_dir = pipes_dir_for_log.join(&log.pipe_name).join("logs");
             let _ = std::fs::create_dir_all(&log_dir);
-            let log_file =
-                log_dir.join(format!("{}.json", log.started_at.format("%Y%m%d_%H%M%S")));
+            let log_file = log_dir.join(format!("{}.json", log.started_at.format("%Y%m%d_%H%M%S")));
             let _ = std::fs::write(
                 &log_file,
                 serde_json::to_string_pretty(&log).unwrap_or_default(),
@@ -1256,7 +1275,7 @@ impl PipeManager {
 
         if source_path.exists() {
             // Local file or directory
-            if source_path.is_file() && source_path.extension().map_or(false, |e| e == "md") {
+            if source_path.is_file() && source_path.extension().is_some_and(|e| e == "md") {
                 // Single .md file — derive name from filename
                 let name = source_path
                     .file_stem()
@@ -1909,7 +1928,7 @@ Screenpipe API: http://localhost:{api_port}
 /// Parsed schedule — either a fixed interval or a cron expression.
 pub enum ParsedSchedule {
     Interval(std::time::Duration),
-    Cron(CronSchedule),
+    Cron(Box<CronSchedule>),
 }
 
 /// Parse a schedule string into an interval or cron expression.
@@ -1939,7 +1958,7 @@ pub fn parse_schedule(schedule: &str) -> Option<ParsedSchedule> {
         _ => s.to_string(),
     };
     if let Ok(cron) = CronSchedule::from_str(&padded) {
-        return Some(ParsedSchedule::Cron(cron));
+        return Some(ParsedSchedule::Cron(Box::new(cron)));
     }
     None
 }

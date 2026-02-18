@@ -170,6 +170,7 @@ async fn update_last_indexed(
 }
 
 /// Index new rows from `frames` into `frames_fts` using bulk INSERT...SELECT.
+#[allow(clippy::explicit_auto_deref)]
 async fn index_frames_fts(db: &DatabaseManager) -> Result<i64, sqlx::Error> {
     let last = get_last_indexed(db, "frames").await?;
 
@@ -210,6 +211,7 @@ async fn index_frames_fts(db: &DatabaseManager) -> Result<i64, sqlx::Error> {
 }
 
 /// Index new rows from `ocr_text` into `ocr_text_fts` using bulk INSERT...SELECT.
+#[allow(clippy::explicit_auto_deref)]
 async fn index_ocr_text_fts(db: &DatabaseManager) -> Result<i64, sqlx::Error> {
     let last = get_last_indexed(db, "ocr_text").await?;
 
@@ -252,6 +254,7 @@ async fn index_ocr_text_fts(db: &DatabaseManager) -> Result<i64, sqlx::Error> {
 }
 
 /// Index new rows from `audio_transcriptions` into `audio_transcriptions_fts` using bulk INSERT...SELECT.
+#[allow(clippy::explicit_auto_deref)]
 async fn index_audio_transcriptions_fts(db: &DatabaseManager) -> Result<i64, sqlx::Error> {
     let last = get_last_indexed(db, "audio_transcriptions").await?;
 
@@ -296,6 +299,7 @@ async fn index_audio_transcriptions_fts(db: &DatabaseManager) -> Result<i64, sql
 }
 
 /// Index new rows from `accessibility` into `accessibility_fts` using bulk INSERT...SELECT.
+#[allow(clippy::explicit_auto_deref)]
 async fn index_accessibility_fts(db: &DatabaseManager) -> Result<i64, sqlx::Error> {
     let last = get_last_indexed(db, "accessibility").await?;
 
