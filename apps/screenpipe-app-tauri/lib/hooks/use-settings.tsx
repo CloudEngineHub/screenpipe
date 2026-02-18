@@ -250,7 +250,7 @@ export function createDefaultSettingsObject(): Settings {
 		DEFAULT_SETTINGS.fps = p === "macos" ? 0.5 : 1;
 		DEFAULT_SETTINGS.showScreenpipeShortcut = p === "windows" ? "Alt+S" : "Control+Super+S";
 		DEFAULT_SETTINGS.showChatShortcut = p === "windows" ? "Alt+L" : "Control+Super+L";
-		DEFAULT_SETTINGS.searchShortcut = p === "windows" ? "Control+Alt+K" : "Control+Super+K";
+		DEFAULT_SETTINGS.searchShortcut = p === "windows" ? "Alt+K" : "Control+Super+K";
 
 		return DEFAULT_SETTINGS;
 	} catch (e) {
