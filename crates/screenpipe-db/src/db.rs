@@ -792,14 +792,12 @@ impl DatabaseManager {
         // Calculate offset outside the write tx too (read-only query)
         let offset_index: i64 = match offset_index {
             Some(idx) => idx,
-            None => {
-                sqlx::query_scalar(
-                    "SELECT COALESCE(MAX(offset_index), -1) + 1 FROM frames WHERE video_chunk_id = ?1",
-                )
-                .bind(video_chunk_id)
-                .fetch_one(&self.pool)
-                .await?
-            }
+            None => sqlx::query_scalar(
+                "SELECT COALESCE(MAX(offset_index), -1) + 1 FROM frames WHERE video_chunk_id = ?1",
+            )
+            .bind(video_chunk_id)
+            .fetch_one(&self.pool)
+            .await?,
         };
         debug!("insert_frame Using offset_index: {}", offset_index);
 
