@@ -150,6 +150,22 @@
         {
           "path": "$HOME/.cursor/**",
           "requireLiteralLeadingDot": false
+        },
+        {
+          "path": "$HOME/Library/Application Support/Claude",
+          "requireLiteralLeadingDot": false
+        },
+        {
+          "path": "$HOME/Library/Application Support/Claude/**",
+          "requireLiteralLeadingDot": false
+        },
+        {
+          "path": "$APPDATA/Claude",
+          "requireLiteralLeadingDot": false
+        },
+        {
+          "path": "$APPDATA/Claude/**",
+          "requireLiteralLeadingDot": false
         }
       ]
     },
