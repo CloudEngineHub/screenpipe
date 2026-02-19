@@ -25,8 +25,8 @@ const FTS_INTER_TABLE_DELAY: Duration = Duration::from_secs(1);
 
 /// Interval between FTS indexing cycles. Search uses FTS5 MATCH so
 /// unindexed rows won't appear in results until the next cycle.
-/// 30 min is fine — onboarding doesn't use search, and users rarely
-/// search for content they just captured seconds ago.
+/// 30 min is fine — onboarding triggers POST /fts/index explicitly,
+/// and users rarely search for content captured seconds ago.
 /// This eliminates the FTS indexer as a source of write contention
 /// (was 555 slow batches in 3 hours at the old 30s interval).
 const FTS_INDEX_INTERVAL: Duration = Duration::from_secs(30 * 60);
