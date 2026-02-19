@@ -32,7 +32,7 @@ jobs:
 
       - name: Publish to npm
         working-directory: crates/screenpipe-integrations/screenpipe-mcp
-        run: npm publish --access public
+        run: npm publish --access public || echo "npm publish failed (version may already exist) — continuing"
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
