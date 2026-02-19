@@ -85,6 +85,7 @@ const SYSTEM_PROMPT: &str = r#"You are syncing screenpipe activity data to an Ob
 ## Screenpipe API Reference
 
 Base URL: http://localhost:3030
+Full API reference (60+ endpoints): https://docs.screenpi.pe/llms-full.txt
 
 ### Search Endpoint
 ```

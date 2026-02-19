@@ -22,6 +22,8 @@ Content types: `ocr` (screen text), `audio` (speech), `input` (clicks/keystrokes
 
 Extra params: `q` (keyword), `app_name`, `speaker_name`, `offset` (pagination).
 
+Full API reference (60+ endpoints): https://docs.screenpi.pe/llms-full.txt
+
 Query each modality separately per chunk for richer results:
 1. `content_type=ocr&min_length=50` — what was on screen
 2. `content_type=audio` — what was said
