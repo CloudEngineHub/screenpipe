@@ -142,6 +142,14 @@
         {
           "path": "$RESOURCE/.screenpipe/**",
           "requireLiteralLeadingDot": false
+        },
+        {
+          "path": "$HOME/.cursor",
+          "requireLiteralLeadingDot": false
+        },
+        {
+          "path": "$HOME/.cursor/**",
+          "requireLiteralLeadingDot": false
         }
       ]
     },
