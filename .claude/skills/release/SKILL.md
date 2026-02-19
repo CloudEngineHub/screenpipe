@@ -121,7 +121,7 @@ gh run view <RUN_ID> --json status,conclusion,jobs --jq '{status: .status, concl
 - Verify updater artifacts exist (.tar.gz, .sig files)
 
 ### 8. Publish Release
-After testing, publish manually via CrabNebula Cloud dashboard, OR commit with magic words:
+After testing, publish via the Cloudflare R2 / backend dashboard, OR commit with magic words:
 ```bash
 git commit --allow-empty -m "release-app-publish" && git push
 ```
