@@ -129,7 +129,7 @@ async function getInstalledMcpVersion(): Promise<string | null> {
   }
 }
 
-const CLAUDE_CODE_COMMAND = "claude mcp add screenpipe --transport stdio -- npx -y screenpipe-mcp";
+const CLAUDE_CODE_COMMAND = "claude mcp add screenpipe -- npx -y screenpipe-mcp";
 
 function ClaudeCodeCard() {
   const [copied, setCopied] = useState(false);
