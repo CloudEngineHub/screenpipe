@@ -321,7 +321,9 @@ function MarkdownBlock({ text, isUser }: { text: string; isUser: boolean }) {
     <MemoizedReactMarkdown
       className={cn(
         "prose prose-sm max-w-none break-words overflow-hidden",
-        isUser ? "prose-invert" : "dark:prose-invert"
+        isUser
+          ? "prose-invert dark:prose dark:text-background"
+          : "dark:prose-invert"
       )}
       remarkPlugins={[remarkGfm]}
       components={{
