@@ -23,11 +23,13 @@ const FTS_MICRO_BATCH_DELAY: Duration = Duration::from_millis(50);
 /// Delay between indexing each table to let frame inserts interleave.
 const FTS_INTER_TABLE_DELAY: Duration = Duration::from_secs(1);
 
-/// Interval between FTS indexing cycles. All keyword search goes through
-/// FTS5 MATCH, so unindexed rows are invisible to search. 5 min strikes
-/// a balance: 10x less write contention than the old 30s interval, but
-/// search results are at most 5 min stale.
-const FTS_INDEX_INTERVAL: Duration = Duration::from_secs(5 * 60);
+/// Interval between FTS indexing cycles. Search uses FTS5 MATCH so
+/// unindexed rows won't appear in results until the next cycle.
+/// 30 min is fine — onboarding doesn't use search, and users rarely
+/// search for content they just captured seconds ago.
+/// This eliminates the FTS indexer as a source of write contention
+/// (was 555 slow batches in 3 hours at the old 30s interval).
+const FTS_INDEX_INTERVAL: Duration = Duration::from_secs(30 * 60);
 
 /// Start the background FTS indexer that periodically indexes new rows
 /// into FTS5 tables. This replaces the synchronous AFTER INSERT triggers
