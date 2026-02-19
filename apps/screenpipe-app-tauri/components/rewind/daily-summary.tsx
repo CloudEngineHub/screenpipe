@@ -124,6 +124,7 @@ export function DailySummaryCard({
   const [isVisible, setIsVisible] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const autoTriggeredRef = useRef<string>("");
+  const isGeneratingRef = useRef(false);
 
   const dateStr =
     currentDate.getFullYear() +
@@ -132,7 +133,14 @@ export function DailySummaryCard({
     "-" +
     String(currentDate.getDate()).padStart(2, "0");
 
-  // Check AI availability
+  // Refs to hold latest values so the auto-trigger interval doesn't need
+  // to re-mount whenever availability or date changes.
+  const aiAvailableRef = useRef(false);
+  const dateStrRef = useRef(dateStr);
+  aiAvailableRef.current = aiAvailable;
+  dateStrRef.current = dateStr;
+
+  // Check AI availability (once on mount)
   useEffect(() => {
     const os = platform();
     if (os !== "macos") return;
@@ -151,42 +159,11 @@ export function DailySummaryCard({
     setError(null);
   }, [dateStr]);
 
-  // Auto-trigger at 6pm for today
-  useEffect(() => {
-    if (!aiAvailable || !isVisible) return;
-
-    const checkAutoTrigger = async () => {
-      const now = new Date();
-      const todayStr =
-        now.getFullYear() +
-        "-" +
-        String(now.getMonth() + 1).padStart(2, "0") +
-        "-" +
-        String(now.getDate()).padStart(2, "0");
-
-      // Only auto-trigger for today, after 6pm, once per day
-      if (dateStr !== todayStr) return;
-      if (now.getHours() < 18) return;
-      if (autoTriggeredRef.current === todayStr) return;
-      if (loadSummary(todayStr)) return;
-
-      // Check if plugged in
-      const plugged = await isPluggedIn();
-      if (!plugged) return;
-
-      autoTriggeredRef.current = todayStr;
-      generateSummary();
-    };
-
-    checkAutoTrigger();
-    const interval = setInterval(checkAutoTrigger, 60000); // check every minute
-    return () => clearInterval(interval);
-  }, [aiAvailable, isVisible, dateStr]);
-
   // ─── Generate Summary ─────────────────────────────────────────────────
 
   const generateSummary = useCallback(async () => {
-    if (isGenerating) return;
+    if (isGeneratingRef.current) return;
+    isGeneratingRef.current = true;
     setIsGenerating(true);
     setError(null);
 
@@ -288,9 +265,43 @@ export function DailySummaryCard({
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to generate summary");
     } finally {
+      isGeneratingRef.current = false;
       setIsGenerating(false);
     }
-  }, [isGenerating, dateStr]);
+  }, [dateStr]);
+
+  // Auto-trigger at 6pm for today — single stable interval that reads
+  // current values via refs to avoid re-mounting on every state change.
+  useEffect(() => {
+    const checkAutoTrigger = async () => {
+      if (!aiAvailableRef.current) return;
+
+      const now = new Date();
+      const todayStr =
+        now.getFullYear() +
+        "-" +
+        String(now.getMonth() + 1).padStart(2, "0") +
+        "-" +
+        String(now.getDate()).padStart(2, "0");
+
+      // Only auto-trigger for today, after 6pm, once per day
+      if (dateStrRef.current !== todayStr) return;
+      if (now.getHours() < 18) return;
+      if (autoTriggeredRef.current === todayStr) return;
+      if (loadSummary(todayStr)) return;
+
+      // Check if plugged in
+      const plugged = await isPluggedIn();
+      if (!plugged) return;
+
+      autoTriggeredRef.current = todayStr;
+      generateSummary();
+    };
+
+    checkAutoTrigger();
+    const interval = setInterval(checkAutoTrigger, 60000); // check every minute
+    return () => clearInterval(interval);
+  }, [generateSummary]);
 
   // ─── Copy ───────────────────────────────────────────────────────────────
 
