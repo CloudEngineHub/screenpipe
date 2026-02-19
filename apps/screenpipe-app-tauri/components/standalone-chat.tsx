@@ -1365,18 +1365,40 @@ export function StandaloneChat() {
           const errorStr = data.finalError || "Request failed after retries";
           console.error("[Pi] Auto-retry failed:", errorStr);
 
-          // Detect daily_limit_exceeded from the error
-          if (errorStr.includes("daily_limit_exceeded") || errorStr.includes("429")) {
+          // Detect rate limit or daily limit from the error
+          if (errorStr.includes("daily_limit_exceeded") || errorStr.includes("429") || errorStr.includes("rate limit")) {
+            // Distinguish between daily limit and per-minute rate limit
+            const isDailyLimit = errorStr.includes("daily_limit_exceeded");
+            const isPerMinuteRate = errorStr.includes("rate limit exceeded") || errorStr.includes("requests per minute");
+
+            // Extract reset time if available
             try {
-              const match = errorStr.match(/"resets_at":\s*"([^"]+)"/);
-              if (match) setUpgradeResetsAt(match[1]);
+              const resetMatch = errorStr.match(/"reset_in":\s*(\d+)/);
+              const resetsAtMatch = errorStr.match(/"resets_at":\s*"([^"]+)"/);
+              if (resetsAtMatch) setUpgradeResetsAt(resetsAtMatch[1]);
+              else if (resetMatch) setUpgradeResetsAt(`${resetMatch[1]} seconds`);
             } catch {}
-            setUpgradeReason("daily_limit");
-            posthog.capture("wall_hit", { reason: "daily_limit", source: "chat" });
+
+            if (isDailyLimit) {
+              setUpgradeReason("daily_limit");
+              posthog.capture("wall_hit", { reason: "daily_limit", source: "chat" });
+            } else {
+              setUpgradeReason("rate_limit");
+            }
 
             if (piMessageIdRef.current) {
               const msgId = piMessageIdRef.current;
-              const content = "You've used all your free queries for today.";
+              let content: string;
+              if (isDailyLimit) {
+                content = "You've used all your free queries for today.";
+              } else if (isPerMinuteRate) {
+                // Extract wait time from error
+                const waitMatch = errorStr.match(/wait (\d+) seconds/i);
+                const waitTime = waitMatch ? waitMatch[1] : "a moment";
+                content = `Rate limited — please wait ${waitTime} seconds and try again.`;
+              } else {
+                content = "Rate limited — try again in a moment or switch to a different model.";
+              }
               setMessages((prev) =>
                 prev.map((m) => m.id === msgId ? { ...m, content } : m)
               );
@@ -1401,15 +1423,29 @@ export function StandaloneChat() {
             const msgId = piMessageIdRef.current;
             const fullError = `${reason} ${errorDetail}`.trim();
 
-            if (fullError.includes("daily_limit_exceeded") || fullError.includes("429")) {
-              try {
-                const match = fullError.match(/"resets_at":\s*"([^"]+)"/);
-                if (match) setUpgradeResetsAt(match[1]);
-              } catch {}
-              setUpgradeReason("daily_limit");
-              setMessages((prev) =>
-                prev.map((m) => m.id === msgId ? { ...m, content: "You've used all your free queries for today." } : m)
-              );
+            if (fullError.includes("daily_limit_exceeded") || fullError.includes("429") || fullError.includes("rate limit")) {
+              const isDailyLimit = fullError.includes("daily_limit_exceeded");
+              const isPerMinuteRate = fullError.includes("rate limit exceeded") || fullError.includes("requests per minute");
+              if (isDailyLimit) {
+                try {
+                  const match = fullError.match(/"resets_at":\s*"([^"]+)"/);
+                  if (match) setUpgradeResetsAt(match[1]);
+                } catch {}
+                setUpgradeReason("daily_limit");
+                setMessages((prev) =>
+                  prev.map((m) => m.id === msgId ? { ...m, content: "You've used all your free queries for today." } : m)
+                );
+              } else {
+                setUpgradeReason("rate_limit");
+                const waitMatch = fullError.match(/wait (\d+) seconds/i);
+                const waitTime = waitMatch ? waitMatch[1] : "a moment";
+                const content = isPerMinuteRate
+                  ? `Rate limited — please wait ${waitTime} seconds and try again.`
+                  : "Rate limited — try again in a moment or switch to a different model.";
+                setMessages((prev) =>
+                  prev.map((m) => m.id === msgId ? { ...m, content } : m)
+                );
+              }
             } else if (fullError.includes("model_not_allowed")) {
               setUpgradeReason("model_not_allowed");
               setMessages((prev) =>
@@ -1447,6 +1483,8 @@ export function StandaloneChat() {
               // Don't overwrite error messages with "Done" or empty content
               const isErrorMessage = existing?.content?.includes("used all your free queries") ||
                 existing?.content?.includes("requires an upgrade") ||
+                existing?.content?.includes("Rate limited") ||
+                existing?.content?.includes("rate limit") ||
                 existing?.content?.startsWith("Error:");
               if (isErrorMessage) {
                 return prev;
@@ -1488,15 +1526,29 @@ export function StandaloneChat() {
           if (piMessageIdRef.current) {
             const msgId = piMessageIdRef.current;
 
-            if (errorStr.includes("daily_limit_exceeded") || errorStr.includes("429")) {
-              try {
-                const match = errorStr.match(/"resets_at":\s*"([^"]+)"/);
-                if (match) setUpgradeResetsAt(match[1]);
-              } catch {}
-              setUpgradeReason("daily_limit");
-              setMessages((prev) =>
-                prev.map((m) => m.id === msgId ? { ...m, content: "You've used all your free queries for today." } : m)
-              );
+            if (errorStr.includes("daily_limit_exceeded") || errorStr.includes("429") || errorStr.includes("rate limit")) {
+              const isDailyLimit = errorStr.includes("daily_limit_exceeded");
+              const isPerMinuteRate = errorStr.includes("rate limit exceeded") || errorStr.includes("requests per minute");
+              if (isDailyLimit) {
+                try {
+                  const match = errorStr.match(/"resets_at":\s*"([^"]+)"/);
+                  if (match) setUpgradeResetsAt(match[1]);
+                } catch {}
+                setUpgradeReason("daily_limit");
+                setMessages((prev) =>
+                  prev.map((m) => m.id === msgId ? { ...m, content: "You've used all your free queries for today." } : m)
+                );
+              } else {
+                setUpgradeReason("rate_limit");
+                const waitMatch = errorStr.match(/wait (\d+) seconds/i);
+                const waitTime = waitMatch ? waitMatch[1] : "a moment";
+                const content = isPerMinuteRate
+                  ? `Rate limited — please wait ${waitTime} seconds and try again.`
+                  : "Rate limited — try again in a moment or switch to a different model.";
+                setMessages((prev) =>
+                  prev.map((m) => m.id === msgId ? { ...m, content } : m)
+                );
+              }
             } else if (errorStr.includes("model_not_allowed")) {
               setUpgradeReason("model_not_allowed");
               setMessages((prev) =>

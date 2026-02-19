@@ -144,9 +144,12 @@ export function SummaryCards({
           </div>
           <div className="grid grid-cols-2 gap-2">
             {customTemplates.map((ct) => (
-              <button
+              <div
                 key={ct.id}
+                role="button"
+                tabIndex={0}
                 onClick={() => handleCustomTemplateClick(ct)}
+                onKeyDown={(e) => e.key === "Enter" && handleCustomTemplateClick(ct)}
                 className="group text-left p-3 rounded-xl border border-border/30 bg-muted/10 hover:bg-muted/40 hover:border-border/60 transition-all duration-150 cursor-pointer relative"
               >
                 <div className="text-lg mb-1">📌</div>
@@ -166,7 +169,7 @@ export function SummaryCards({
                 >
                   <Plus className="w-3 h-3 rotate-45" />
                 </button>
-              </button>
+              </div>
             ))}
           </div>
         </div>
