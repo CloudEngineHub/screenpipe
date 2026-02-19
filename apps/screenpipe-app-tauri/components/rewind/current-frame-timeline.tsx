@@ -696,8 +696,17 @@ export const CurrentFrameTimeline: FC<CurrentFrameTimelineProps> = ({
 				</div>
 			)}
 
-			{/* Canvas snapshot — back buffer holding last good frame for crossfades */}
-			<div className="absolute inset-0 flex items-center justify-center" style={{ zIndex: 0 }}>
+			{/* Canvas snapshot — back buffer for crossfades. Hidden when the
+			     video/img layer is ready to prevent ghosting/doubling artifacts. */}
+			<div
+				className="absolute inset-0 flex items-center justify-center"
+				style={{
+					zIndex: 0,
+					opacity: frameReady ? 0 : 1,
+					transition: "opacity 100ms ease-out",
+					pointerEvents: "none",
+				}}
+			>
 				<canvas ref={canvasRef} className="max-w-full max-h-full" />
 			</div>
 
@@ -711,7 +720,7 @@ export const CurrentFrameTimeline: FC<CurrentFrameTimelineProps> = ({
 				style={{
 					zIndex: 1,
 					opacity: frameReady ? 1 : 0,
-					transition: "opacity 150ms ease-out",
+					transition: "opacity 100ms ease-out",
 				}}
 				onError={() => {
 					const err = videoRef.current?.error;
@@ -733,7 +742,7 @@ export const CurrentFrameTimeline: FC<CurrentFrameTimelineProps> = ({
 					style={{
 						zIndex: 2,
 						opacity: frameReady ? 1 : 0,
-						transition: "opacity 150ms ease-out",
+						transition: "opacity 100ms ease-out",
 					}}
 					alt="Current frame"
 					draggable={false}

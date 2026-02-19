@@ -8122,7 +8122,6 @@ dependencies = [
  "image 0.25.9",
  "ini",
  "lazy_static",
- "libc",
  "log",
  "md5",
  "nokhwa-bindings-macos",
