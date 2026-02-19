@@ -32,18 +32,24 @@ interface DailySummary {
   oneLiner: string;
 }
 
-const SUMMARY_PROMPT = `Analyze this audio transcript data from the user's day. Respond with ONLY a valid JSON object (no other text).
+const SUMMARY_PROMPT = `Analyze this audio transcript data. Respond with ONLY a single valid JSON object on one line (no other text, no line breaks between fields).
 
-The JSON must have this exact structure:
-{"oneLiner":"casual 1-sentence summary","keyMoments":[{"time":"2:30 PM","description":"what happened"}],"actionItems":[{"text":"thing to do","urgency":"high"}],"peopleMentioned":[{"name":"Name","context":"what about them"}]}
+Format: {"oneLiner":"...","keyMoments":[{"time":"2:30 PM","description":"..."}],"actionItems":[{"text":"...","urgency":"high"}],"peopleMentioned":[{"name":"...","context":"..."}]}
 
-Rules:
-- oneLiner: casual summary of the day in one sentence
-- keyMoments: max 5 most important events from the transcripts
-- actionItems: things to do mentioned in conversations, urgency is "high"/"medium"/"low"
-- peopleMentioned: real people names only (not apps), with context
+CRITICAL rules for oneLiner:
+- MUST be under 15 words, ALL LOWERCASE, no period at the end
+- casual like texting a friend, reference SPECIFIC topics from transcripts
+- Good: "mostly debugging auth, quick call with sarah about launch"
+- Good: "deep api refactor morning, slack catchup afternoon"
+- Bad: "Had a productive day with various activities" (formal, generic)
+- Bad: "Louis brainstorms potential features for the PipeStore, like user-driven sales" (too long, formal)
+
+Other rules:
+- keyMoments: max 5, with real timestamps from the data, specific descriptions
+- actionItems: only real tasks mentioned in speech, urgency "high"/"medium"/"low"
+- peopleMentioned: real people names ONLY (not apps/products), with context
 - Empty arrays are fine if nothing found
-- Output ONLY the JSON object, nothing else`;
+- Output the JSON object on a SINGLE LINE, nothing else`;
 
 function getStorageKey(date: string) {
   return `daily-summary-${date}`;
