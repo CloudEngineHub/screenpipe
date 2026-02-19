@@ -436,19 +436,34 @@ export function ConnectionsSection() {
 
       await writeFile(filePath, uint8Array);
 
-      // Open Claude first, then open the .mcpb file to trigger the install modal
+      // Open Claude first, wait for it to be ready, then trigger the .mcpb install
       const os = platform();
       if (os === "macos") {
-        // Open Claude Desktop first
+        // Open Claude Desktop
         const openClaude = Command.create("open", ["-a", "Claude"]);
         await openClaude.execute();
 
-        // Wait for Claude to open
-        await new Promise(resolve => setTimeout(resolve, 1500));
+        // Poll until Claude is actually running (up to 15s)
+        for (let i = 0; i < 30; i++) {
+          await new Promise(resolve => setTimeout(resolve, 500));
+          try {
+            const check = Command.create("sh", ["-c", "pgrep -x Claude"]);
+            const result = await check.execute();
+            if (result.code === 0) break;
+          } catch { /* keep waiting */ }
+        }
+        // Extra grace period for the UI to finish loading
+        await new Promise(resolve => setTimeout(resolve, 2000));
 
-        // Then open the .mcpb file - Claude will show the install modal
-        const openFile = Command.create("open", [filePath]);
-        await openFile.execute();
+        // Open the .mcpb file — retry up to 3 times in case Claude isn't ready
+        for (let attempt = 0; attempt < 3; attempt++) {
+          const openFile = Command.create("open", [filePath]);
+          await openFile.execute();
+          // Wait and check if Claude config was updated (install modal accepted)
+          await new Promise(resolve => setTimeout(resolve, 2000));
+          const installed = await getInstalledMcpVersion();
+          if (installed) break;
+        }
       } else if (os === "windows") {
         // Find Claude Desktop at known install location
         const claudeExe = await findClaudeExeOnWindows();
@@ -458,12 +473,26 @@ export function ConnectionsSection() {
           const openClaude = Command.create("cmd", ["/c", "start", "", claudeExe]);
           await openClaude.execute();
 
-          // Wait for Claude to initialize
+          // Poll until Claude process is running (up to 15s)
+          for (let i = 0; i < 30; i++) {
+            await new Promise(resolve => setTimeout(resolve, 500));
+            try {
+              const check = Command.create("cmd", ["/c", "tasklist /FI \"IMAGENAME eq Claude.exe\" /NH"]);
+              const result = await check.execute();
+              if (result.stdout.includes("Claude.exe")) break;
+            } catch { /* keep waiting */ }
+          }
+          // Extra grace period for UI to finish loading
           await new Promise(resolve => setTimeout(resolve, 2000));
 
-          // Open the .mcpb file — Claude handles the install modal
-          const openFile = Command.create("cmd", ["/c", "start", "", filePath]);
-          await openFile.execute();
+          // Open the .mcpb file — retry up to 3 times
+          for (let attempt = 0; attempt < 3; attempt++) {
+            const openFile = Command.create("cmd", ["/c", "start", "", filePath]);
+            await openFile.execute();
+            await new Promise(resolve => setTimeout(resolve, 2000));
+            const installed = await getInstalledMcpVersion();
+            if (installed) break;
+          }
         } else {
           // Claude not found — tell user where the file is
           await message(
