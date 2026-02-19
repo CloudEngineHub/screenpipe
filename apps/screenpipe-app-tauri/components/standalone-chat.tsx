@@ -38,6 +38,8 @@ import {
   formatShortcutDisplay,
 } from "@/lib/chat-utils";
 import { useAutoSuggestions } from "@/lib/hooks/use-auto-suggestions";
+import { SummaryCards } from "@/components/chat/summary-cards";
+import { type CustomTemplate } from "@/lib/summary-templates";
 
 const SCREENPIPE_API = "http://localhost:3030";
 
@@ -151,6 +153,7 @@ interface Message {
   id: string;
   role: "user" | "assistant";
   content: string; // full text for copy/history
+  displayContent?: string; // short label shown in chat (e.g. template name)
   timestamp: number;
   contentBlocks?: ContentBlock[];
 }
@@ -450,7 +453,9 @@ function MessageContent({ message }: { message: Message }) {
   }
 
   // Fallback: plain text message (user messages, non-Pi assistant messages)
-  return <MarkdownBlock text={message.content} isUser={isUser} />;
+  // For user messages with a display label, show the short label instead of the full prompt
+  const text = isUser && message.displayContent ? message.displayContent : message.content;
+  return <MarkdownBlock text={text} isUser={isUser} />;
 }
 
 export function StandaloneChat() {
@@ -458,6 +463,32 @@ export function StandaloneChat() {
   const { isMac } = usePlatform();
   const { items: appItems } = useSqlAutocomplete("app");
   const { suggestions: autoSuggestions } = useAutoSuggestions();
+
+  // Custom summary templates (persisted in settings)
+  const [customTemplates, setCustomTemplates] = useState<CustomTemplate[]>([]);
+
+  // Load custom templates from settings
+  useEffect(() => {
+    if (isSettingsLoaded && (settings as any).customSummaryTemplates) {
+      try {
+        setCustomTemplates((settings as any).customSummaryTemplates);
+      } catch {
+        // ignore corrupt data
+      }
+    }
+  }, [isSettingsLoaded]);
+
+  const saveCustomTemplate = async (template: CustomTemplate) => {
+    const updated = [...customTemplates, template];
+    setCustomTemplates(updated);
+    await updateSettings({ customSummaryTemplates: updated } as any);
+  };
+
+  const deleteCustomTemplate = async (id: string) => {
+    const updated = customTemplates.filter((t) => t.id !== id);
+    setCustomTemplates(updated);
+    await updateSettings({ customSummaryTemplates: updated } as any);
+  };
 
   const [input, setInput] = useState("");
   const [messages, setMessages] = useState<Message[]>([]);
@@ -496,6 +527,12 @@ export function StandaloneChat() {
   const piRestartCountRef = useRef(0);
   const piStoppedIntentionallyRef = useRef(false);
   const piThinkingStartRef = useRef<number | null>(null);
+
+  // Follow-up suggestions state (TikTok-style)
+  const [followUpSuggestions, setFollowUpSuggestions] = useState<string[]>([]);
+  const followUpAbortRef = useRef<AbortController | null>(null);
+  const followUpFiredRef = useRef(false);
+  const lastUserMessageRef = useRef<string>("");
 
   // Ref to sendMessage so useEffect callbacks can call it without stale closures
   const sendMessageRef = useRef<(msg: string) => Promise<void>>();
@@ -1231,6 +1268,18 @@ export function StandaloneChat() {
                 prev.map((m) => m.id === msgId ? { ...m, content, contentBlocks } : m)
               );
             }
+
+            // Trigger follow-up generation after enough content
+            if (
+              piStreamingTextRef.current.length > 500 &&
+              !followUpFiredRef.current
+            ) {
+              followUpFiredRef.current = true;
+              generateFollowUps(
+                lastUserMessageRef.current,
+                piStreamingTextRef.current
+              );
+            }
           } else if (evt.type === "thinking_start") {
             piThinkingStartRef.current = Date.now();
             const blocks = piContentBlocksRef.current;
@@ -1431,6 +1480,7 @@ export function StandaloneChat() {
           piMessageIdRef.current = null;
           piContentBlocksRef.current = [];
           piThinkingStartRef.current = null;
+          followUpFiredRef.current = false;
           setIsLoading(false);
           setIsStreaming(false);
         } else if (data.type === "response" && data.success === false) {
@@ -1574,8 +1624,69 @@ export function StandaloneChat() {
     };
   }, []);
 
+  // Generate follow-up suggestions using Apple Intelligence
+  async function generateFollowUps(userMsg: string, partialResponse: string) {
+    try {
+      // Check if Apple Intelligence is available
+      const statusResp = await fetch("http://localhost:3030/ai/status");
+      if (!statusResp.ok) return;
+      const statusData = await statusResp.json();
+      if (!statusData.available) return;
+
+      const controller = new AbortController();
+      followUpAbortRef.current = controller;
+
+      const resp = await fetch("http://localhost:3030/ai/chat/completions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        signal: controller.signal,
+        body: JSON.stringify({
+          messages: [
+            {
+              role: "system",
+              content:
+                "Suggest 1-2 short follow-up questions the user might want to ask next. Respond with ONLY a JSON array of strings, nothing else.",
+            },
+            {
+              role: "user",
+              content: `User asked: ${userMsg.slice(0, 200)}\n\nAssistant responded: ${partialResponse.slice(0, 500)}`,
+            },
+          ],
+        }),
+      });
+
+      if (!resp.ok || controller.signal.aborted) return;
+
+      const data = await resp.json();
+      const content =
+        data?.choices?.[0]?.message?.content || "";
+
+      // Parse JSON array
+      let questions: string[] = [];
+      try {
+        questions = JSON.parse(content);
+      } catch {
+        // Try extracting array from wrapped text
+        const match = content.match(/\[[\s\S]*\]/);
+        if (match) {
+          try {
+            questions = JSON.parse(match[0]);
+          } catch {
+            return;
+          }
+        }
+      }
+
+      if (!controller.signal.aborted && Array.isArray(questions) && questions.length > 0) {
+        setFollowUpSuggestions(questions.filter((q: unknown) => typeof q === "string").slice(0, 2));
+      }
+    } catch {
+      // Silently fail — no UI impact
+    }
+  }
+
   // Send message using Pi agent
-  async function sendPiMessage(userMessage: string) {
+  async function sendPiMessage(userMessage: string, displayLabel?: string) {
     if (!piInfo?.running) {
       toast({ title: "Pi not running", description: "Please wait for Pi to start", variant: "destructive" });
       return;
@@ -1591,6 +1702,7 @@ export function StandaloneChat() {
       id: Date.now().toString(),
       role: "user",
       content: userMessage,
+      ...(displayLabel ? { displayContent: displayLabel } : {}),
       timestamp: Date.now(),
     };
 
@@ -1599,6 +1711,15 @@ export function StandaloneChat() {
     piStreamingTextRef.current = "";
     piMessageIdRef.current = assistantMessageId;
     piContentBlocksRef.current = [];
+
+    // Clear follow-ups for new message
+    setFollowUpSuggestions([]);
+    followUpFiredRef.current = false;
+    if (followUpAbortRef.current) {
+      followUpAbortRef.current.abort();
+      followUpAbortRef.current = null;
+    }
+    lastUserMessageRef.current = userMessage;
 
     setMessages((prev) => [...prev, newUserMessage]);
     setInput("");
@@ -1802,11 +1923,11 @@ export function StandaloneChat() {
     }
   }
 
-  async function sendMessage(userMessage: string) {
+  async function sendMessage(userMessage: string, displayLabel?: string) {
     if (!canChat || !activePreset) return;
 
     // All providers route through Pi agent
-    return sendPiMessage(userMessage);
+    return sendPiMessage(userMessage, displayLabel);
   }
 
   // Keep ref in sync so useEffect callbacks can call sendMessage
@@ -2076,29 +2197,14 @@ export function StandaloneChat() {
           </div>
         )}
         {messages.length === 0 && canChat && (
-          <div className="relative text-center py-12">
-            <div className="relative mx-auto mb-6 w-fit">
-              <div className="absolute -inset-4 border border-dashed border-border/50 rounded-xl" />
-              <div className="absolute -inset-2 border border-border/30 rounded-lg" />
-              <PipeAIIconLarge size={56} thinking={false} className="relative text-foreground/80" />
-            </div>
-            <h3 className="text-base font-medium mb-2 text-foreground">Ask about your screen activity</h3>
-            <p className="text-sm text-muted-foreground mb-6">
-              Search your recordings, transcriptions, and interactions
-            </p>
-            <div className="flex flex-wrap gap-2 justify-center max-w-md mx-auto">
-              {autoSuggestions.map((s, i) => (
-                <button
-                  key={i}
-                  type="button"
-                  onClick={() => sendMessage(s.text)}
-                  className="px-3 py-1.5 text-xs bg-muted/30 hover:bg-muted/60 rounded-full border border-border/30 hover:border-border/60 text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
-                >
-                  {s.text}
-                </button>
-              ))}
-            </div>
-          </div>
+          <SummaryCards
+            onSendMessage={sendMessage}
+            autoSuggestions={autoSuggestions}
+            customTemplates={customTemplates}
+            onSaveCustomTemplate={saveCustomTemplate}
+            onDeleteCustomTemplate={deleteCustomTemplate}
+            userName={settings.userName}
+          />
         )}
         <AnimatePresence mode="popLayout">
           {messages
@@ -2305,6 +2411,33 @@ export function StandaloneChat() {
             )}
           </div>
         )}
+
+        {/* Follow-up suggestions (TikTok-style) */}
+        <AnimatePresence>
+          {!isLoading && followUpSuggestions.length > 0 && messages.length > 0 && (
+            <motion.div
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 8 }}
+              transition={{ duration: 0.2 }}
+              className="px-3 pt-2 flex flex-col gap-1"
+            >
+              <span className="text-[10px] text-muted-foreground/60 uppercase tracking-wider font-medium">follow up</span>
+              <div className="flex flex-wrap gap-1.5">
+                {followUpSuggestions.map((q, i) => (
+                  <button
+                    key={i}
+                    type="button"
+                    onClick={() => sendMessage(q)}
+                    className="px-2.5 py-1 text-[11px] bg-primary/10 hover:bg-primary/20 rounded-full border border-primary/20 hover:border-primary/40 text-primary hover:text-primary transition-colors cursor-pointer"
+                  >
+                    {q}
+                  </button>
+                ))}
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         {/* Auto-suggestions above input */}
         {messages.length > 0 && !isLoading && autoSuggestions.length > 0 && (
