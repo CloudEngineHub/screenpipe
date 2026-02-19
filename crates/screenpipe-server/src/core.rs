@@ -375,9 +375,12 @@ pub async fn record_video(
                     monitor_id
                 );
             }
-            // Don't sleep if we have pending frames that need flushing
+            // Sleep before checking flush — without this, the loop busy-spins
+            // when pending_frames exist but aren't ready to flush yet (e.g. at
+            // 0.5 FPS there's a 2s gap between frames, causing millions of
+            // no-op iterations that burn CPU and bloat logs).
+            tokio::time::sleep(Duration::from_millis(50)).await;
             if pending_frames.is_empty() {
-                tokio::time::sleep(Duration::from_millis(50)).await;
                 continue;
             }
         }
