@@ -237,14 +237,26 @@ export function TimelineControls({
 				</div>
 
 				{onSearchClick && (
-					<button
-						type="button"
-						onClick={onSearchClick}
-						className="flex items-center h-10 gap-1.5 bg-background border border-border px-4 font-mono hover:bg-foreground hover:text-background transition-colors duration-150 cursor-pointer group"
-					>
-						<span className="text-xs text-muted-foreground group-hover:text-background">{searchShortcutDisplay}</span>
-						<span className="text-xs text-foreground group-hover:text-background">search</span>
-					</button>
+					embedded ? (
+						<Button
+							variant="ghost"
+							size="icon"
+							onClick={onSearchClick}
+							className="h-10 w-10 bg-background border border-border text-foreground hover:bg-foreground hover:text-background transition-colors duration-150"
+							title="Search"
+						>
+							<Search className="h-4 w-4" />
+						</Button>
+					) : (
+						<button
+							type="button"
+							onClick={onSearchClick}
+							className="flex items-center h-10 gap-1.5 bg-background border border-border px-4 font-mono hover:bg-foreground hover:text-background transition-colors duration-150 cursor-pointer group"
+						>
+							<span className="text-xs text-muted-foreground group-hover:text-background">{searchShortcutDisplay}</span>
+							<span className="text-xs text-foreground group-hover:text-background">search</span>
+						</button>
+					)
 				)}
 
 				{onChatClick && (

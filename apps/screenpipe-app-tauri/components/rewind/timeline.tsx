@@ -1379,6 +1379,7 @@ export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 						onJumpToday={handleJumpToday}
 						onSearchClick={() => setShowSearchModal(true)}
 						onChatClick={embedded ? undefined : () => commands.showWindow("Chat")}
+						embedded={embedded}
 					/>
 					{/* Top right buttons */}
 					<div className="absolute top-[calc(env(safe-area-inset-top)+16px)] right-4 flex items-center gap-2">
