@@ -289,6 +289,7 @@ export function SearchModal({ isOpen, onClose, onNavigateToTimestamp }: SearchMo
   const [allTags, setAllTags] = useState<string[]>([]); // distinct tags for autocomplete
   const [isSearchingTags, setIsSearchingTags] = useState(false);
   const isTagSearch = query.startsWith("#");
+  const isPeopleSearch = query.startsWith("@");
 
   // App filter
   const [appFilter, setAppFilter] = useState<string | null>(null);
@@ -381,8 +382,8 @@ export function SearchModal({ isOpen, onClose, onNavigateToTimestamp }: SearchMo
       return;
     }
 
-    // Skip keyword search for #tag queries (handled by tag search effect)
-    if (debouncedQuery.startsWith("#")) {
+    // Skip keyword search for # and @ queries (handled by dedicated effects)
+    if (debouncedQuery.startsWith("#") || debouncedQuery.startsWith("@")) {
       resetSearch();
       setSpeakerResults([]);
       return;
@@ -475,9 +476,18 @@ export function SearchModal({ isOpen, onClose, onNavigateToTimestamp }: SearchMo
     return () => { cancelled = true; };
   }, [debouncedQuery]);
 
-  // Search speakers in parallel
+  // Search speakers — triggered by @query or normal text query (>= 2 chars)
   useEffect(() => {
-    if (!debouncedQuery.trim() || debouncedQuery.length < 2 || selectedSpeaker) {
+    if (selectedSpeaker) {
+      setSpeakerResults([]);
+      return;
+    }
+
+    const isAtQuery = debouncedQuery.startsWith("@");
+    const searchTerm = isAtQuery ? debouncedQuery.slice(1).trim() : debouncedQuery.trim();
+
+    // For normal queries, require >= 2 chars; for @, show all speakers immediately
+    if (!isAtQuery && (searchTerm.length < 2 || debouncedQuery.startsWith("#"))) {
       setSpeakerResults([]);
       return;
     }
@@ -488,13 +498,16 @@ export function SearchModal({ isOpen, onClose, onNavigateToTimestamp }: SearchMo
     (async () => {
       setIsSearchingSpeakers(true);
       try {
-        const resp = await fetch(
-          `http://localhost:3030/speakers/search?name=${encodeURIComponent(debouncedQuery)}`,
-          { signal: AbortSignal.any([controller.signal, AbortSignal.timeout(3000)]) }
-        );
+        // For @ with no text, fetch all speakers; otherwise search by name
+        const url = searchTerm.length > 0
+          ? `http://localhost:3030/speakers/search?name=${encodeURIComponent(searchTerm)}`
+          : `http://localhost:3030/speakers/search?name=`;
+        const resp = await fetch(url, {
+          signal: AbortSignal.any([controller.signal, AbortSignal.timeout(3000)]),
+        });
         if (resp.ok && !cancelled) {
           const speakers: SpeakerResult[] = await resp.json();
-          setSpeakerResults(speakers.filter(s => s.name).slice(0, 5));
+          setSpeakerResults(speakers.filter(s => s.name).slice(0, isAtQuery ? 20 : 5));
         }
       } catch {
         // ignore
@@ -751,7 +764,7 @@ export function SearchModal({ isOpen, onClose, onNavigateToTimestamp }: SearchMo
   if (!isOpen) return null;
 
   const hasResults = searchResults.length > 0 || speakerResults.length > 0 || tagResults.length > 0;
-  const showEmpty = !isSearching && !isSearchingSpeakers && !isSearchingTags && debouncedQuery && !hasResults && !selectedSpeaker && !isTagSearch;
+  const showEmpty = !isSearching && !isSearchingSpeakers && !isSearchingTags && debouncedQuery && !hasResults && !selectedSpeaker && !isTagSearch && !isPeopleSearch;
   const activeIndex = hoveredIndex ?? selectedIndex;
 
   return (
@@ -796,7 +809,7 @@ export function SearchModal({ isOpen, onClose, onNavigateToTimestamp }: SearchMo
                 setHasMoreTranscriptions(true);
               }
             }}
-            placeholder="Search your memory... (# for tags)"
+            placeholder="Search your memory... (# tags, @ people)"
             className="flex-1 bg-transparent text-foreground placeholder:text-muted-foreground text-sm outline-none"
             autoComplete="off"
             autoCorrect="off"
@@ -1007,8 +1020,26 @@ export function SearchModal({ isOpen, onClose, onNavigateToTimestamp }: SearchMo
                 </div>
               )}
 
+              {/* @ people search loading */}
+              {isPeopleSearch && isSearchingSpeakers && speakerResults.length === 0 && (
+                <div className="space-y-3">
+                  {Array.from({ length: 4 }).map((_, i) => (
+                    <div key={i} className="bg-muted animate-pulse rounded p-3 h-10" />
+                  ))}
+                </div>
+              )}
+
+              {/* @ people search empty */}
+              {isPeopleSearch && !isSearchingSpeakers && speakerResults.length === 0 && (
+                <div className="py-12 text-center text-sm text-muted-foreground">
+                  {query.slice(1).trim()
+                    ? <>no people matching &quot;{query.slice(1).trim()}&quot;</>
+                    : "no speakers found"}
+                </div>
+              )}
+
               {/* Loading skeleton */}
-              {!isTagSearch && isSearching && searchResults.length === 0 && speakerResults.length === 0 && (
+              {!isTagSearch && !isPeopleSearch && isSearching && searchResults.length === 0 && speakerResults.length === 0 && (
                 <div className="grid grid-cols-4 gap-3">
                   {Array.from({ length: 8 }).map((_, i) => (
                     <div key={i} className="bg-muted animate-pulse rounded overflow-hidden">
