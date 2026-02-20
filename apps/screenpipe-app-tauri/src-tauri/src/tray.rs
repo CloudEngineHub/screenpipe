@@ -16,7 +16,7 @@ use std::sync::Mutex;
 use tauri::tray::{TrayIcon, TrayIconBuilder};
 use tauri::Emitter;
 use tauri::{
-    menu::{MenuBuilder, MenuItem, MenuItemBuilder, PredefinedMenuItem},
+    menu::{IconMenuItemBuilder, MenuBuilder, MenuItem, MenuItemBuilder, NativeIcon, PredefinedMenuItem},
     AppHandle, Manager, Wry,
 };
 use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
@@ -275,7 +275,8 @@ fn create_dynamic_menu(
     // Open screenpipe (settings window) at the top
     menu_builder = menu_builder
         .item(
-            &MenuItemBuilder::with_id("settings", "Open screenpipe")
+            &IconMenuItemBuilder::with_id("settings", "Open screenpipe")
+                .native_icon(NativeIcon::Home)
                 .build(app)?,
         )
         .item(&PredefinedMenuItem::separator(app)?);
@@ -283,24 +284,27 @@ fn create_dynamic_menu(
     // Show timeline, search, and chat items with shortcuts
     menu_builder = menu_builder
         .item(
-            &MenuItemBuilder::with_id(
+            &IconMenuItemBuilder::with_id(
                 "show",
                 format!("Show timeline ({})", format_shortcut(&show_shortcut)),
             )
+            .native_icon(NativeIcon::FlowView)
             .build(app)?,
         )
         .item(
-            &MenuItemBuilder::with_id(
+            &IconMenuItemBuilder::with_id(
                 "show_search",
                 format!("Show search ({})", format_shortcut(&search_shortcut)),
             )
+            .native_icon(NativeIcon::RevealFreestanding)
             .build(app)?,
         )
         .item(
-            &MenuItemBuilder::with_id(
+            &IconMenuItemBuilder::with_id(
                 "show_chat",
                 format!("Show chat ({})", format_shortcut(&chat_shortcut)),
             )
+            .native_icon(NativeIcon::QuickLook)
             .build(app)?,
         );
 
@@ -345,7 +349,8 @@ fn create_dynamic_menu(
             || !perms.microphone.permitted();
         if has_permission_issue {
             menu_builder = menu_builder.item(
-                &MenuItemBuilder::with_id("fix_permissions", "⚠ Fix permissions")
+                &IconMenuItemBuilder::with_id("fix_permissions", "Fix permissions")
+                    .native_icon(NativeIcon::Caution)
                     .build(app)?,
             );
         }
@@ -366,7 +371,7 @@ fn create_dynamic_menu(
                 .build(app)?,
         )
         .item(update_item)
-        .item(&MenuItemBuilder::with_id("releases", "Changelog").build(app)?);
+        .item(&IconMenuItemBuilder::with_id("releases", "Changelog").native_icon(NativeIcon::Bookmarks).build(app)?);
 
     // Only show recording controls if not in dev mode
     let dev_mode = store
@@ -376,18 +381,18 @@ fn create_dynamic_menu(
     if !dev_mode {
         menu_builder = menu_builder
             .item(&PredefinedMenuItem::separator(app)?)
-            .item(&MenuItemBuilder::with_id("start_recording", "Start recording").build(app)?)
-            .item(&MenuItemBuilder::with_id("stop_recording", "Stop recording").build(app)?);
+            .item(&IconMenuItemBuilder::with_id("start_recording", "Start recording").native_icon(NativeIcon::StatusAvailable).build(app)?)
+            .item(&IconMenuItemBuilder::with_id("stop_recording", "Stop recording").native_icon(NativeIcon::StopProgress).build(app)?);
     }
 
-    // Feedback and quit
+    // Help and quit
     menu_builder = menu_builder
         .item(&PredefinedMenuItem::separator(app)?)
-        .item(&MenuItemBuilder::with_id("feedback", "Send feedback").build(app)?)
-        .item(&MenuItemBuilder::with_id("book_call", "Book a call with founder").build(app)?)
-        .item(&MenuItemBuilder::with_id("onboarding", "Onboarding").build(app)?)
+        .item(&IconMenuItemBuilder::with_id("feedback", "Help").native_icon(NativeIcon::Info).build(app)?)
+        .item(&IconMenuItemBuilder::with_id("book_call", "Book a call with founder").native_icon(NativeIcon::UserAccounts).build(app)?)
+        .item(&IconMenuItemBuilder::with_id("onboarding", "Onboarding").native_icon(NativeIcon::GoRight).build(app)?)
         .item(&PredefinedMenuItem::separator(app)?)
-        .item(&MenuItemBuilder::with_id("quit", "Quit screenpipe").build(app)?);
+        .item(&IconMenuItemBuilder::with_id("quit", "Quit screenpipe").native_icon(NativeIcon::StopProgressFreestanding).build(app)?);
 
     menu_builder.build().map_err(Into::into)
 }
@@ -493,7 +498,7 @@ fn handle_menu_event(app_handle: &AppHandle, event: tauri::menu::MenuEvent) {
         }
         "feedback" => {
             let app = app_handle.clone();
-            let page = Some("feedback".to_string());
+            let page = Some("help".to_string());
             let _ = app_handle.run_on_main_thread(move || {
                 let _ = ShowRewindWindow::Settings { page }.show(&app);
             });

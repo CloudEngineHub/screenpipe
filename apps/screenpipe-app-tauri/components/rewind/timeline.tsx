@@ -23,6 +23,7 @@ import { useTimelineStore } from "@/lib/hooks/use-timeline-store";
 import { hasFramesForDate } from "@/lib/actions/has-frames-date";
 import { CurrentFrameTimeline } from "@/components/rewind/current-frame-timeline";
 import { usePlatform } from "@/lib/hooks/use-platform";
+import { useAudioPlayback } from "@/lib/hooks/use-audio-playback";
 
 import posthog from "posthog-js";
 import { toast } from "@/components/ui/use-toast";
@@ -159,6 +160,21 @@ export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 	// Meeting detection from existing frame data
 	const { meetings } = useMeetings(frames);
 
+	// Audio playback engine
+	const {
+		isPlaying,
+		playbackSpeed,
+		hasAudioNearby,
+		togglePlayPause,
+		cycleSpeed,
+		pause: pausePlayback,
+	} = useAudioPlayback({
+		frames,
+		currentIndex,
+		setCurrentIndex,
+		setCurrentFrame,
+	});
+
 	// Track if user is at "live edge" (viewing newest frame, index 0)
 	const isAtLiveEdge = currentIndex === 0;
 	const prevFramesLengthRef = useRef(frames.length);
@@ -201,6 +217,9 @@ export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 					debounceTimer = null;
 					console.log("Window focused, refreshing timeline...");
 
+					// Pause any active playback
+					pausePlayback();
+
 					// Reset position to latest (index 0 = newest frame)
 					// Window is hidden/shown not destroyed, so old position persists
 					setCurrentIndex(0);
@@ -211,6 +230,9 @@ export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 
 					onWindowFocus();
 				}, 500);
+			} else {
+				// Window lost focus / hidden — stop audio immediately
+				pausePlayback();
 			}
 		});
 
@@ -218,7 +240,18 @@ export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 			if (debounceTimer) clearTimeout(debounceTimer);
 			unlisten.then((fn) => fn());
 		};
-	}, [onWindowFocus, frames, setCurrentFrame]);
+	}, [onWindowFocus, frames, setCurrentFrame, pausePlayback]);
+
+	// Pause audio when page becomes hidden (covers embedded mode + browser tab switch)
+	useEffect(() => {
+		const handleVisibilityChange = () => {
+			if (document.hidden) {
+				pausePlayback();
+			}
+		};
+		document.addEventListener("visibilitychange", handleVisibilityChange);
+		return () => document.removeEventListener("visibilitychange", handleVisibilityChange);
+	}, [pausePlayback]);
 
 	// Hide timeline when mouse moves to a different screen (skip in embedded mode)
 	useEffect(() => {
@@ -258,6 +291,7 @@ export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 							if (isOutside) {
 								console.log("Cursor left screen, hiding timeline");
 								alreadyHidden = true;
+								pausePlayback();
 								commands.closeWindow("Main");
 							}
 						} catch (e) {
@@ -712,6 +746,7 @@ export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 				setShowSearchModal(false);
 				return;
 			}
+			pausePlayback();
 			commands.closeWindow("Main");
 		});
 		return () => { unlisten.then((fn) => fn()); };
@@ -732,6 +767,7 @@ export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 			const isAlt = e.altKey;
 			if (e.key === "ArrowLeft") {
 				e.preventDefault();
+				pausePlayback();
 				if (isAlt) {
 					// Alt+ArrowLeft = prev app boundary
 					setCurrentIndex((prev) => {
@@ -756,6 +792,7 @@ export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 				}
 			} else if (e.key === "ArrowRight") {
 				e.preventDefault();
+				pausePlayback();
 				if (isAlt) {
 					// Alt+ArrowRight = next app boundary
 					setCurrentIndex((prev) => {
@@ -881,6 +918,9 @@ export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 		() =>
 			throttle(
 				(e: WheelEvent) => {
+					// Pause playback on manual scroll
+					pausePlayback();
+
 					// Pinch gesture on trackpad sends ctrlKey=true
 					// Cmd+Scroll on mouse sends metaKey=true — handle as zoom
 					if (e.ctrlKey || e.metaKey) {
@@ -942,7 +982,7 @@ export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 				{ leading: true, trailing: false },
 			),
 			// eslint-disable-next-line react-hooks/exhaustive-deps
-	[frames, zoomLevel], // Re-create when zoom changes
+	[frames, zoomLevel, pausePlayback], // Re-create when zoom changes
 	);
 
 	// Attach scroll/zoom handler so pinch-to-zoom and scroll-to-navigate work.
@@ -951,23 +991,22 @@ export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 	// sidebar and other page areas still scroll normally.
 	useEffect(() => {
 		const onWheel = (e: WheelEvent) => {
-			if (!embedded) {
-				const isWithinAiPanel = document
-					.querySelector(".ai-panel")
-					?.contains(e.target as Node);
-				const isWithinAudioPanel = document
-					.querySelector(".audio-transcript-panel")
-					?.contains(e.target as Node);
-				const isWithinTimelineDialog = document
-					.querySelector('[role="dialog"]')
-					?.contains(e.target as Node);
-				const isWithinSettingsDialog = document
-					.querySelector('[data-settings-dialog]')
-					?.contains(e.target as Node);
+			// Allow normal scrolling inside panels/dialogs in both overlay and embedded mode
+			const isWithinAiPanel = document
+				.querySelector(".ai-panel")
+				?.contains(e.target as Node);
+			const isWithinAudioPanel = document
+				.querySelector(".audio-transcript-panel")
+				?.contains(e.target as Node);
+			const isWithinTimelineDialog = document
+				.querySelector('[role="dialog"]')
+				?.contains(e.target as Node);
+			const isWithinSettingsDialog = document
+				.querySelector('[data-settings-dialog]')
+				?.contains(e.target as Node);
 
-				if (isWithinAiPanel || isWithinAudioPanel || isWithinTimelineDialog || isWithinSettingsDialog) {
-					return;
-				}
+			if (isWithinAiPanel || isWithinAudioPanel || isWithinTimelineDialog || isWithinSettingsDialog) {
+				return;
 			}
 
 			// preventDefault to block native browser zoom
@@ -1079,6 +1118,9 @@ export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 	};
 
 	const handleDateChange = async (newDate: Date) => {
+		// Pause playback on date change
+		pausePlayback();
+
 		// Set navigation flag to prevent frame-date sync from fighting
 		isNavigatingRef.current = true;
 
@@ -1256,7 +1298,7 @@ export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 				}}
 			>
 				{/* Main Image - Full Screen - Should fill entire viewport */}
-				<div className="absolute inset-0 z-10 bg-black">
+				<div className={`absolute inset-0 z-10 ${embedded ? "bg-background" : "bg-black"}`}>
 					{currentFrame ? (
 						<CurrentFrameTimeline
 							currentFrame={currentFrame}
@@ -1365,13 +1407,13 @@ export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 				</div>
 
 				{/* Top Gradient Overlay - Very subtle */}
-				<div className="absolute top-0 left-0 right-0 h-20 bg-gradient-to-b from-black/20 via-black/5 to-transparent z-30 pointer-events-none" />
+				{!embedded && <div className="absolute top-0 left-0 right-0 h-20 bg-gradient-to-b from-black/20 via-black/5 to-transparent z-30 pointer-events-none" />}
 
 				{/* Bottom Gradient Overlay - Very subtle, only where timeline is */}
-				<div className="absolute bottom-0 left-0 right-0 h-16 bg-gradient-to-t from-black/10 via-black/2 to-transparent z-30 pointer-events-none" />
+				{!embedded && <div className="absolute bottom-0 left-0 right-0 h-16 bg-gradient-to-t from-black/10 via-black/2 to-transparent z-30 pointer-events-none" />}
 
 				{/* Top Controls */}
-				<div className="absolute top-0 left-0 right-0 z-40 px-4 pb-4 pt-[calc(env(safe-area-inset-top)+16px)]">
+				<div className={`absolute top-0 left-0 right-0 z-40 px-4 pb-4 ${embedded ? "pt-2" : "pt-[calc(env(safe-area-inset-top)+16px)]"}`}>
 					<TimelineControls
 						currentDate={currentDate}
 						startAndEndDates={startAndEndDates}
@@ -1380,9 +1422,14 @@ export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 						onSearchClick={() => setShowSearchModal(true)}
 						onChatClick={embedded ? undefined : () => commands.showWindow("Chat")}
 						embedded={embedded}
+						isPlaying={isPlaying}
+						playbackSpeed={playbackSpeed}
+						hasAudioNearby={hasAudioNearby}
+						onTogglePlayPause={togglePlayPause}
+						onCycleSpeed={cycleSpeed}
 					/>
 					{/* Top right buttons */}
-					<div className="absolute top-[calc(env(safe-area-inset-top)+16px)] right-4 flex items-center gap-2">
+					<div className={`absolute ${embedded ? "top-2" : "top-[calc(env(safe-area-inset-top)+16px)]"} right-4 flex items-center gap-2`}>
 						{/* Refresh button */}
 						<button
 							onClick={handleRefresh}
@@ -1395,7 +1442,7 @@ export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 				</div>
 
 				{/* Daily Summary — top right, below controls */}
-				<div className="absolute top-[calc(env(safe-area-inset-top)+56px)] right-4 z-40">
+				<div className={`absolute ${embedded ? "top-12" : "top-[calc(env(safe-area-inset-top)+56px)]"} right-4 z-40`}>
 					<DailySummaryCard currentDate={currentDate} />
 				</div>
 
@@ -1487,6 +1534,7 @@ export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 							groupingWindowMs={30000} // 30 seconds window
 							meetings={meetings}
 							onClose={() => setShowAudioTranscript(false)}
+							isPlaying={isPlaying}
 							onJumpToTime={(timestamp) => {
 								const targetTime = timestamp.getTime();
 								let bestIdx = 0;
@@ -1516,6 +1564,7 @@ export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 							frames={frames}
 							currentIndex={currentIndex}
 							onFrameChange={(index) => {
+								pausePlayback();
 								setCurrentIndex(index);
 								if (frames[index]) {
 									setCurrentFrame(frames[index]);
@@ -1531,6 +1580,8 @@ export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 							targetZoom={targetZoom}
 							setTargetZoom={setTargetZoom}
 							onAskAI={sendSelectionToChat}
+							isPlaying={isPlaying}
+							onTogglePlayPause={togglePlayPause}
 						/>
 					) : (
 						<div className="bg-card/80 backdrop-blur-sm p-4 border-t border-border">

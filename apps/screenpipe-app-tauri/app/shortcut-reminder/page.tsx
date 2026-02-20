@@ -219,7 +219,7 @@ export default function ShortcutReminderPage() {
           </div>
 
           {/* Row 2, Col 2: Screen animation */}
-          <div className="border-t border-white/10 py-1 min-w-0 overflow-hidden">
+          <div className="border-t border-l border-white/10 py-1 min-w-0 overflow-hidden">
             <ScreenMatrix
               active={overlayData.screenActive}
               captureFps={overlayData.captureFps}

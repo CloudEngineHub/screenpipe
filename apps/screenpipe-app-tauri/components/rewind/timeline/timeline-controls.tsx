@@ -5,7 +5,7 @@
 "use client";
 
 import { Button } from "@/components/ui/button";
-import { ChevronLeft, ChevronRight, RefreshCw, CalendarIcon, Search } from "lucide-react";
+import { ChevronLeft, ChevronRight, RefreshCw, CalendarIcon, Search, Play, Pause } from "lucide-react";
 import {
 	endOfDay,
 	format,
@@ -100,6 +100,11 @@ interface TimelineControlsProps {
 	onChatClick?: () => void;
 	embedded?: boolean;
 	className?: string;
+	isPlaying?: boolean;
+	playbackSpeed?: number;
+	hasAudioNearby?: boolean;
+	onTogglePlayPause?: () => void;
+	onCycleSpeed?: () => void;
 }
 
 export function TimelineControls({
@@ -111,6 +116,11 @@ export function TimelineControls({
 	onChatClick,
 	embedded,
 	className,
+	isPlaying,
+	playbackSpeed,
+	hasAudioNearby,
+	onTogglePlayPause,
+	onCycleSpeed,
 }: TimelineControlsProps) {
 	const { isMac } = usePlatform();
 	const { settings } = useSettings();
@@ -164,7 +174,7 @@ export function TimelineControls({
 			
 			
 			{/* Center section - Timeline controls */}
-			<div className="flex items-center gap-2 mt-8">
+			<div className={`flex items-center gap-2 ${embedded ? "mt-1" : "mt-8"}`}>
 				<div className="flex items-center h-10 bg-background border border-border px-1">
 					<Button
 						variant="ghost"
@@ -235,6 +245,34 @@ export function TimelineControls({
 						<RefreshCw className="h-4 w-4" />
 					</Button>
 				</div>
+
+				{hasAudioNearby && onTogglePlayPause && (
+					<div className="flex items-center h-10 bg-background border border-border px-1 gap-0.5">
+						<Button
+							variant="ghost"
+							size="icon"
+							onClick={onTogglePlayPause}
+							className="h-8 w-8 text-foreground hover:bg-foreground hover:text-background transition-colors duration-150"
+							title={isPlaying ? "Pause (Space)" : "Play (Space)"}
+						>
+							{isPlaying ? (
+								<Pause className="h-4 w-4" />
+							) : (
+								<Play className="h-4 w-4" />
+							)}
+						</Button>
+						{onCycleSpeed && (
+							<button
+								type="button"
+								onClick={onCycleSpeed}
+								className="px-2 h-8 text-xs font-mono text-foreground hover:bg-foreground hover:text-background transition-colors duration-150 min-w-[36px] text-center"
+								title="Playback speed"
+							>
+								{playbackSpeed ?? 1}x
+							</button>
+						)}
+					</div>
+				)}
 
 				{onSearchClick && (
 					embedded ? (

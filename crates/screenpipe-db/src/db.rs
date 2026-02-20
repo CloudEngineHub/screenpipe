@@ -41,6 +41,18 @@ const DEDUP_TIME_WINDOW_SECS: i64 = 45;
 /// Higher = stricter matching, lower = more aggressive deduplication.
 const DEDUP_SIMILARITY_THRESHOLD: f64 = 0.85;
 
+pub struct DeleteTimeRangeResult {
+    pub frames_deleted: u64,
+    pub ocr_deleted: u64,
+    pub audio_transcriptions_deleted: u64,
+    pub audio_chunks_deleted: u64,
+    pub video_chunks_deleted: u64,
+    pub accessibility_deleted: u64,
+    pub ui_events_deleted: u64,
+    pub video_files: Vec<String>,
+    pub audio_files: Vec<String>,
+}
+
 /// A transaction wrapper that uses `BEGIN IMMEDIATE` to acquire the write lock upfront,
 /// preventing WAL deadlocks. Automatically rolls back on drop if not committed.
 ///
@@ -2911,6 +2923,151 @@ impl DatabaseManager {
 
         debug!("Successfully committed speaker deletion transaction");
         Ok(())
+    }
+
+    pub async fn delete_time_range(
+        &self,
+        start: DateTime<Utc>,
+        end: DateTime<Utc>,
+    ) -> Result<DeleteTimeRangeResult, sqlx::Error> {
+        let mut tx = self.begin_immediate_with_retry().await?;
+
+        let start_str = start.to_rfc3339();
+        let end_str = end.to_rfc3339();
+
+        // 1. Collect video file paths for chunks that become fully orphaned
+        // ?1 and ?2 are numbered params — reused automatically, only need 2 binds
+        let video_files: Vec<String> = sqlx::query_scalar(
+            r#"SELECT file_path FROM video_chunks
+               WHERE id IN (SELECT DISTINCT video_chunk_id FROM frames WHERE timestamp BETWEEN ?1 AND ?2)
+               AND id NOT IN (SELECT DISTINCT video_chunk_id FROM frames WHERE timestamp NOT BETWEEN ?1 AND ?2)"#,
+        )
+        .bind(&start_str)
+        .bind(&end_str)
+        .fetch_all(&mut **tx.conn())
+        .await?;
+
+        // 2. Collect audio file paths for chunks that become fully orphaned
+        let audio_files: Vec<String> = sqlx::query_scalar(
+            r#"SELECT file_path FROM audio_chunks
+               WHERE id IN (SELECT DISTINCT audio_chunk_id FROM audio_transcriptions WHERE timestamp BETWEEN ?1 AND ?2)
+               AND id NOT IN (SELECT DISTINCT audio_chunk_id FROM audio_transcriptions WHERE timestamp NOT BETWEEN ?1 AND ?2)"#,
+        )
+        .bind(&start_str)
+        .bind(&end_str)
+        .fetch_all(&mut **tx.conn())
+        .await?;
+
+        // 3. Delete chunked_text_entries (no CASCADE) — by frame_id
+        sqlx::query(
+            "DELETE FROM chunked_text_entries WHERE frame_id IN (SELECT id FROM frames WHERE timestamp BETWEEN ?1 AND ?2)",
+        )
+        .bind(&start_str)
+        .bind(&end_str)
+        .execute(&mut **tx.conn())
+        .await?;
+
+        // Also delete chunked_text_entries by audio_chunk_id for orphaned audio chunks
+        sqlx::query(
+            r#"DELETE FROM chunked_text_entries WHERE audio_chunk_id IN (
+                SELECT id FROM audio_chunks
+                WHERE id IN (SELECT DISTINCT audio_chunk_id FROM audio_transcriptions WHERE timestamp BETWEEN ?1 AND ?2)
+                AND id NOT IN (SELECT DISTINCT audio_chunk_id FROM audio_transcriptions WHERE timestamp NOT BETWEEN ?1 AND ?2)
+            )"#,
+        )
+        .bind(&start_str)
+        .bind(&end_str)
+        .execute(&mut **tx.conn())
+        .await?;
+
+        // 4. Delete ocr_text — triggers ocr_text_delete -> cleans ocr_text_fts
+        let ocr_result = sqlx::query(
+            "DELETE FROM ocr_text WHERE frame_id IN (SELECT id FROM frames WHERE timestamp BETWEEN ?1 AND ?2)",
+        )
+        .bind(&start_str)
+        .bind(&end_str)
+        .execute(&mut **tx.conn())
+        .await?;
+        let ocr_deleted = ocr_result.rows_affected();
+
+        // 5. Delete frames — triggers frames_fts delete; vision_tags CASCADE'd automatically
+        let frames_result = sqlx::query(
+            "DELETE FROM frames WHERE timestamp BETWEEN ?1 AND ?2",
+        )
+        .bind(&start_str)
+        .bind(&end_str)
+        .execute(&mut **tx.conn())
+        .await?;
+        let frames_deleted = frames_result.rows_affected();
+
+        // 6. Delete orphaned video_chunks (no frames reference them anymore)
+        let video_chunks_result = sqlx::query(
+            "DELETE FROM video_chunks WHERE id NOT IN (SELECT DISTINCT video_chunk_id FROM frames)",
+        )
+        .execute(&mut **tx.conn())
+        .await?;
+        let video_chunks_deleted = video_chunks_result.rows_affected();
+
+        // 7. Delete audio_transcriptions — triggers audio_transcriptions_fts delete
+        let audio_transcriptions_result = sqlx::query(
+            "DELETE FROM audio_transcriptions WHERE timestamp BETWEEN ?1 AND ?2",
+        )
+        .bind(&start_str)
+        .bind(&end_str)
+        .execute(&mut **tx.conn())
+        .await?;
+        let audio_transcriptions_deleted = audio_transcriptions_result.rows_affected();
+
+        // 8. Delete orphaned audio_chunks — audio_tags CASCADE'd automatically
+        let audio_chunks_result = sqlx::query(
+            "DELETE FROM audio_chunks WHERE id NOT IN (SELECT DISTINCT audio_chunk_id FROM audio_transcriptions)",
+        )
+        .execute(&mut **tx.conn())
+        .await?;
+        let audio_chunks_deleted = audio_chunks_result.rows_affected();
+
+        // 9. Delete accessibility — triggers accessibility_fts delete
+        let accessibility_result = sqlx::query(
+            "DELETE FROM accessibility WHERE timestamp BETWEEN ?1 AND ?2",
+        )
+        .bind(&start_str)
+        .bind(&end_str)
+        .execute(&mut **tx.conn())
+        .await?;
+        let accessibility_deleted = accessibility_result.rows_affected();
+
+        // 10. Delete ui_events — triggers ui_events_fts delete
+        let ui_events_result = sqlx::query(
+            "DELETE FROM ui_events WHERE timestamp BETWEEN ?1 AND ?2",
+        )
+        .bind(&start_str)
+        .bind(&end_str)
+        .execute(&mut **tx.conn())
+        .await?;
+        let ui_events_deleted = ui_events_result.rows_affected();
+
+        // 11. Commit — if this fails, no files are touched (auto-rollback)
+        tx.commit().await.map_err(|e| {
+            error!("failed to commit delete_time_range transaction: {}", e);
+            e
+        })?;
+
+        debug!(
+            "delete_time_range committed: frames={}, ocr={}, audio_transcriptions={}, audio_chunks={}, video_chunks={}, accessibility={}, ui_events={}",
+            frames_deleted, ocr_deleted, audio_transcriptions_deleted, audio_chunks_deleted, video_chunks_deleted, accessibility_deleted, ui_events_deleted
+        );
+
+        Ok(DeleteTimeRangeResult {
+            frames_deleted,
+            ocr_deleted,
+            audio_transcriptions_deleted,
+            audio_chunks_deleted,
+            video_chunks_deleted,
+            accessibility_deleted,
+            ui_events_deleted,
+            video_files,
+            audio_files,
+        })
     }
 
     pub async fn get_similar_speakers(

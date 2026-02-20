@@ -22,6 +22,7 @@ use crate::{
             add_tags, add_to_database, execute_raw_sql, get_tags_batch, merge_frames_handler,
             remove_tags, validate_media_handler,
         },
+        data::delete_time_range_handler,
         frames::{get_frame_data, get_frame_metadata, get_frame_ocr_data, get_next_valid_frame},
         health::{
             api_list_monitors, api_vision_status, audio_metrics_handler, health_check,
@@ -410,7 +411,12 @@ impl SCServer {
             .route("/vision/status", get(api_vision_status))
             // Vision pipeline metrics (not in OpenAPI spec)
             .route("/vision/metrics", get(vision_metrics_handler))
-            .route("/audio/metrics", get(audio_metrics_handler));
+            .route("/audio/metrics", get(audio_metrics_handler))
+            // Data management (not in OpenAPI spec)
+            .route(
+                "/data/delete-range",
+                axum::routing::post(delete_time_range_handler),
+            );
 
         // Apple Intelligence — generic OpenAI-compatible endpoint (macOS only)
         #[cfg(feature = "apple-intelligence")]

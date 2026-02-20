@@ -26,6 +26,8 @@ import {
   Languages,
   Mic,
   Monitor,
+  Volume2,
+  Headphones,
   Folder,
   AppWindowMac,
   EyeOff,
@@ -84,13 +86,16 @@ import * as Sentry from "@sentry/react";
 import { defaultOptions } from "tauri-plugin-sentry-api";
 import { useLoginDialog } from "../login-dialog";
 import { ValidatedInput } from "../ui/validated-input";
-import { 
-  validateField, 
-  sanitizeValue, 
-  debounce, 
+import {
+  validateField,
+  sanitizeValue,
+  debounce,
   validateUrl,
-  FieldValidationResult 
+  FieldValidationResult
 } from "@/lib/utils/validation";
+import { AudioEqualizer } from "@/app/shortcut-reminder/audio-equalizer";
+
+import { useOverlayData } from "@/app/shortcut-reminder/use-overlay-data";
 
 type PermissionsStatus = {
   screenRecording: string;
@@ -171,9 +176,26 @@ const createUrlOptions = (
   return [...urlOptions, ...customOptions];
 };
 
+const getAudioDeviceType = (name: string): "input" | "output" => {
+  if (name.endsWith("(input)")) return "input";
+  return "output";
+};
+
+const getAudioDeviceDisplayName = (name: string): string => {
+  return name.replace(/\s*\((input|output)\)\s*$/i, "");
+};
+
+const getAudioDeviceIcon = (name: string) => {
+  const lower = name.toLowerCase();
+  if (lower.includes("bluetooth") || lower.includes("airpods") || lower.includes("headphone")) {
+    return Headphones;
+  }
+  if (getAudioDeviceType(name) === "input") return Mic;
+  return Volume2;
+};
+
 export function RecordingSettings() {
   const { settings, updateSettings, getDataDir, loadUser } = useSettings();
-  const [openAudioDevices, setOpenAudioDevices] = React.useState(false);
   const [openLanguages, setOpenLanguages] = React.useState(false);
   const [dataDirInputVisible, setDataDirInputVisible] = React.useState(false);
   const [clickTimeout, setClickTimeout] = useState<ReturnType<
@@ -208,6 +230,7 @@ export function RecordingSettings() {
   const isTeamAdmin = !!team.team && team.role === "admin";
   const [pushingFilter, setPushingFilter] = useState<string | null>(null);
   const [filterView, setFilterView] = useState<"all" | "personal" | "team">("all");
+  const overlayData = useOverlayData();
 
   const handlePushFilterToTeam = async (configType: string, key: string, filters: string[]) => {
     setPushingFilter(key);
@@ -1190,36 +1213,57 @@ Your screen is a pipe. Everything you see, hear, and type flows through it. Scre
         {!settings.useSystemDefaultAudio && (
           <Card className="border-border bg-card">
             <CardContent className="px-3 py-2.5">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center space-x-2.5">
-                  <Mic className="h-4 w-4 text-muted-foreground shrink-0" />
-                  <h3 className="text-sm font-medium text-foreground">Audio devices</h3>
-                </div>
-                <Popover open={openAudioDevices} onOpenChange={setOpenAudioDevices}>
-                  <PopoverTrigger asChild>
-                    <Button variant="outline" size="sm" className="h-7 text-xs">
-                      {settings.audioDevices.length > 0 ? `${settings.audioDevices.length} selected` : "Select..."}
-                      <ChevronsUpDown className="ml-1 h-3 w-3 opacity-50" />
-                    </Button>
-                  </PopoverTrigger>
-                  <PopoverContent className="w-[300px] p-0">
-                    <Command>
-                      <CommandInput placeholder="Search devices..." />
-                      <CommandList>
-                        <CommandEmpty>No devices found.</CommandEmpty>
-                        <CommandGroup>
-                          {availableAudioDevices.map((device) => (
-                            <CommandItem key={device.name} value={device.name} onSelect={() => handleAudioDeviceChange(device.name)}>
-                              <Check className={cn("mr-2 h-3 w-3", settings.audioDevices.includes(device.name) ? "opacity-100" : "opacity-0")} />
-                              <span className="text-xs">{device.name}</span>
-                              {device.isDefault && <Badge variant="secondary" className="ml-1 text-[10px] h-4">Default</Badge>}
-                            </CommandItem>
-                          ))}
-                        </CommandGroup>
-                      </CommandList>
-                    </Command>
-                  </PopoverContent>
-                </Popover>
+              <div className="flex items-center space-x-2.5 mb-2">
+                <Mic className="h-4 w-4 text-muted-foreground shrink-0" />
+                <h3 className="text-sm font-medium text-foreground">Audio devices</h3>
+              </div>
+              <div className="grid grid-cols-2 gap-1.5">
+                {availableAudioDevices.map((device) => {
+                  const isSelected = settings.audioDevices.includes(device.name);
+                  const DeviceIcon = getAudioDeviceIcon(device.name);
+                  const deviceType = getAudioDeviceType(device.name);
+                  const displayName = getAudioDeviceDisplayName(device.name);
+                  return (
+                    <div
+                      key={device.name}
+                      className={cn(
+                        "relative rounded-lg border cursor-pointer transition-all overflow-hidden",
+                        isSelected
+                          ? "border-foreground bg-foreground/5"
+                          : "border-border opacity-70 hover:opacity-100 hover:bg-accent/50"
+                      )}
+                      onClick={() => handleAudioDeviceChange(device.name)}
+                    >
+                      <div className="px-2.5 py-2 flex items-start gap-2">
+                        <DeviceIcon className="h-3.5 w-3.5 text-muted-foreground shrink-0 mt-0.5" />
+                        <div className="min-w-0 flex-1">
+                          <p className="text-xs font-medium truncate">{displayName}</p>
+                          <div className="flex items-center gap-1 mt-0.5">
+                            <span className="text-[10px] text-muted-foreground capitalize">{deviceType}</span>
+                            {device.isDefault && (
+                              <Badge variant="secondary" className="text-[9px] h-3.5 px-1">Default</Badge>
+                            )}
+                          </div>
+                        </div>
+                        {isSelected && (
+                          <Check className="h-3 w-3 text-foreground shrink-0 mt-0.5" />
+                        )}
+                      </div>
+
+                      {/* Apple-style audio level meter */}
+                      {isSelected && (
+                        <div className="px-2.5 pb-2">
+                          <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden">
+                            <div
+                              className="h-full rounded-full bg-foreground/60 transition-all duration-75"
+                              style={{ width: `${Math.min(100, Math.pow(overlayData.speechRatio, 3) * 100)}%` }}
+                            />
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             </CardContent>
           </Card>
@@ -1441,45 +1485,68 @@ Your screen is a pipe. Everything you see, hear, and type flows through it. Scre
 
         {/* Monitor Selection */}
         {!settings.useAllMonitors && (
-          <Card className="border-border bg-card">
+          <Card className="border-border bg-card overflow-hidden">
             <CardContent className="px-3 py-2.5">
-              <div className="flex items-center space-x-2.5 mb-2">
+              <div className="flex items-center space-x-2.5 mb-3">
                 <Monitor className="h-4 w-4 text-muted-foreground shrink-0" />
                 <h3 className="text-sm font-medium text-foreground">Monitors</h3>
               </div>
-              <div className="grid grid-cols-2 gap-1.5 ml-[26px]">
-                <div
-                  className={cn(
-                    "flex items-center justify-between rounded-md border px-2.5 py-1.5 cursor-pointer transition-colors text-xs",
-                    settings.monitorIds.includes("default") ? "border-foreground bg-foreground/5" : "border-border hover:bg-accent"
-                  )}
+
+              <div className="flex items-end justify-center gap-6 py-2">
+                {/* Default option as a monitor */}
+                <button
+                  className="flex flex-col items-center gap-1.5 group"
                   onClick={() => {
                     const isDefaultSelected = settings.monitorIds.includes("default");
                     if (isDefaultSelected) { handleSettingsChange({ monitorIds: settings.monitorIds.filter(id => id !== "default") }, true); }
                     else { handleSettingsChange({ monitorIds: ["default"] }, true); }
                   }}
                 >
-                  <span>Default</span>
-                  <Check className={cn("h-3 w-3", settings.monitorIds.includes("default") ? "opacity-100" : "opacity-0")} />
-                </div>
-                {availableMonitors.map((monitor) => (
-                  <div
-                    key={monitor.stableId}
-                    className={cn(
-                      "flex items-center justify-between rounded-md border px-2.5 py-1.5 cursor-pointer transition-colors text-xs",
-                      settings.monitorIds.includes(monitor.stableId) ? "border-foreground bg-foreground/5" : "border-border hover:bg-accent"
+                  {/* Monitor SVG */}
+                  <svg width="80" height="56" viewBox="0 0 80 56" fill="none" className={cn("transition-opacity", settings.monitorIds.includes("default") ? "opacity-100" : "opacity-40 group-hover:opacity-60")}>
+                    <rect x="4" y="2" width="72" height="42" rx="3" className="fill-muted stroke-border" strokeWidth="1.5" />
+                    <rect x="8" y="6" width="64" height="34" rx="1" className={cn(settings.monitorIds.includes("default") ? "fill-foreground/10" : "fill-background")} />
+                    <path d="M30 44 L30 50 L50 50 L50 44" className="stroke-border" strokeWidth="1.5" fill="none" />
+                    <line x1="24" y1="50" x2="56" y2="50" className="stroke-border" strokeWidth="1.5" strokeLinecap="round" />
+                    {settings.monitorIds.includes("default") && (
+                      <path d="M32 20 L37 25 L48 14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-foreground" />
                     )}
-                    onClick={() => {
-                      const currentIds = settings.monitorIds.filter(id => id !== "default");
-                      const monitorId = monitor.stableId;
-                      const updatedIds = currentIds.includes(monitorId) ? currentIds.filter(id => id !== monitorId) : [...currentIds, monitorId];
-                      handleSettingsChange({ monitorIds: updatedIds }, true);
-                    }}
-                  >
-                    <span>{monitor.name} <span className="text-muted-foreground">{monitor.width}x{monitor.height}</span></span>
-                    <Check className={cn("h-3 w-3", settings.monitorIds.includes(monitor.stableId) ? "opacity-100" : "opacity-0")} />
-                  </div>
-                ))}
+                  </svg>
+                  <span className={cn("text-[11px] font-medium", settings.monitorIds.includes("default") ? "text-foreground" : "text-muted-foreground")}>
+                    Default
+                  </span>
+                </button>
+
+                {availableMonitors.map((monitor) => {
+                  const isSelected = settings.monitorIds.includes(monitor.stableId);
+                  return (
+                    <button
+                      key={monitor.stableId}
+                      className="flex flex-col items-center gap-1.5 group"
+                      onClick={() => {
+                        const currentIds = settings.monitorIds.filter(id => id !== "default");
+                        const monitorId = monitor.stableId;
+                        const updatedIds = currentIds.includes(monitorId) ? currentIds.filter(id => id !== monitorId) : [...currentIds, monitorId];
+                        handleSettingsChange({ monitorIds: updatedIds }, true);
+                      }}
+                    >
+                      {/* Monitor SVG */}
+                      <svg width="80" height="56" viewBox="0 0 80 56" fill="none" className={cn("transition-opacity", isSelected ? "opacity-100" : "opacity-40 group-hover:opacity-60")}>
+                        <rect x="4" y="2" width="72" height="42" rx="3" className="fill-muted stroke-border" strokeWidth="1.5" />
+                        <rect x="8" y="6" width="64" height="34" rx="1" className={cn(isSelected ? "fill-foreground/10" : "fill-background")} />
+                        <path d="M30 44 L30 50 L50 50 L50 44" className="stroke-border" strokeWidth="1.5" fill="none" />
+                        <line x1="24" y1="50" x2="56" y2="50" className="stroke-border" strokeWidth="1.5" strokeLinecap="round" />
+                        {isSelected && (
+                          <path d="M32 20 L37 25 L48 14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-foreground" />
+                        )}
+                      </svg>
+                      <div className="text-center">
+                        <p className={cn("text-[11px] font-medium", isSelected ? "text-foreground" : "text-muted-foreground")}>{monitor.name}</p>
+                        <p className="text-[10px] text-muted-foreground">{monitor.width}x{monitor.height}</p>
+                      </div>
+                    </button>
+                  );
+                })}
               </div>
             </CardContent>
           </Card>

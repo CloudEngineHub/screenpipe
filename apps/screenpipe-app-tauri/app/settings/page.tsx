@@ -22,7 +22,12 @@ import {
   Gift,
   HelpCircle,
   UserPlus,
+  Monitor,
+  Mic,
+  Volume2,
+  Headphones,
 } from "lucide-react";
+import { useOverlayData } from "@/app/shortcut-reminder/use-overlay-data";
 import { cn } from "@/lib/utils";
 import { AccountSection } from "@/components/settings/account-section";
 import ShortcutSection from "@/components/settings/shortcut-section";
@@ -82,6 +87,42 @@ function SettingsPageContent() {
   const { settings } = useSettings();
   const posthog = usePostHog();
   const showCloudSync = useMemo(() => posthog?.isFeatureEnabled("cloud-sync") ?? false, [posthog]);
+  const overlayData = useOverlayData();
+
+  // Fetch actual recording devices (monitors + audio)
+  const [monitors, setMonitors] = useState<{ id: number; name: string }[]>([]);
+  const [audioDevices, setAudioDevices] = useState<{ name: string; displayName: string; isInput: boolean; isBluetooth: boolean }[]>([]);
+
+  useEffect(() => {
+    // Fetch monitors
+    fetch("http://localhost:3030/vision/list")
+      .then((r) => r.ok ? r.json() : [])
+      .then((data: { id: number; name: string }[]) => {
+        if (Array.isArray(data)) setMonitors(data);
+      })
+      .catch(() => {});
+    // Fetch audio devices — filter to only default/selected ones
+    fetch("http://localhost:3030/audio/list")
+      .then((r) => r.ok ? r.json() : [])
+      .then((data: { name: string; is_default: boolean }[]) => {
+        if (!Array.isArray(data)) return;
+        const selected = settings.audioDevices ?? ["default"];
+        const useDefault = selected.includes("default");
+        const active = data.filter((d) =>
+          useDefault ? d.is_default : selected.includes(d.name)
+        );
+        setAudioDevices(active.map((d) => {
+          const lower = d.name.toLowerCase();
+          return {
+            name: d.name,
+            displayName: d.name.replace(/\s*\((input|output)\)\s*$/i, ""),
+            isInput: lower.includes("(input)"),
+            isBluetooth: lower.includes("bluetooth") || lower.includes("airpods") || lower.includes("headphone"),
+          };
+        }));
+      })
+      .catch(() => {});
+  }, [settings.audioDevices]);
 
   // Settings modal state
   const [settingsModalOpen, setSettingsModalOpen] = useState(false);
@@ -202,8 +243,38 @@ function SettingsPageContent() {
         <div className="flex h-[calc(100vh-2rem)] min-h-0">
           {/* Sidebar */}
           <div className="w-56 border-r bg-background flex flex-col min-h-0 rounded-tl-lg">
-            <div className="px-4 py-3 border-b">
-              <h1 className="text-lg font-bold text-foreground">Screenpipe</h1>
+            <div className="px-4 py-3 border-b flex items-center justify-between">
+              <h1 className="text-lg font-bold text-foreground">screenpipe</h1>
+              <div className="flex items-center gap-2">
+                {(() => {
+                  const monitorCount = Math.max(monitors.length, 1);
+                  const monitorNames = monitors.length > 0 ? monitors.map((m) => m.name).join(", ") : "screen";
+                  const screenOpacity = overlayData.screenActive ? 0.5 + Math.min(overlayData.captureFps / 2, 0.5) : 0.2;
+                  const inputs = audioDevices.filter((d) => d.isInput && !d.isBluetooth);
+                  const outputs = audioDevices.filter((d) => !d.isInput && !d.isBluetooth);
+                  const bt = audioDevices.filter((d) => d.isBluetooth);
+                  const audioOpacity = overlayData.audioActive ? 0.5 + Math.min(overlayData.speechRatio, 0.5) : 0.2;
+
+                  const groups: { icon: typeof Monitor; count: number; title: string; opacity: number }[] = [
+                    { icon: Monitor, count: monitorCount, title: monitorNames, opacity: screenOpacity },
+                  ];
+                  if (inputs.length > 0) groups.push({ icon: Mic, count: inputs.length, title: inputs.map((d) => d.displayName).join(", "), opacity: audioOpacity });
+                  if (outputs.length > 0) groups.push({ icon: Volume2, count: outputs.length, title: outputs.map((d) => d.displayName).join(", "), opacity: audioOpacity });
+                  if (bt.length > 0) groups.push({ icon: Headphones, count: bt.length, title: bt.map((d) => d.displayName).join(", "), opacity: audioOpacity });
+
+                  return groups.map(({ icon: Icon, count, title, opacity }) => (
+                    <span key={title} className="flex items-center gap-0.5" title={title}>
+                      <Icon
+                        className="h-3.5 w-3.5 text-foreground transition-opacity duration-500"
+                        style={{ opacity }}
+                      />
+                      {count > 1 && (
+                        <span className="text-[9px] text-foreground/50 font-medium leading-none">{count}</span>
+                      )}
+                    </span>
+                  ));
+                })()}
+              </div>
             </div>
 
             {/* Navigation */}
@@ -421,16 +492,10 @@ function SettingsPageContent() {
                   {/* Modal content */}
                   <div className="flex-1 flex flex-col min-w-0">
                     {/* Modal header */}
-                    <div className="flex items-center justify-between px-6 py-3 border-b border-border flex-shrink-0">
+                    <div className="flex items-center px-6 py-3 border-b border-border flex-shrink-0">
                       <h2 className="text-sm font-medium text-foreground">
                         {settingsModalSections.find(s => s.id === modalSection)?.label}
                       </h2>
-                      <button
-                        onClick={closeModal}
-                        className="p-1 text-muted-foreground hover:text-foreground transition-colors duration-150"
-                      >
-                        <X className="h-4 w-4" />
-                      </button>
                     </div>
 
                     {/* Modal body */}

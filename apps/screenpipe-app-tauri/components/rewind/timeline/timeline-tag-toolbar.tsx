@@ -4,10 +4,20 @@
 import { useTimelineSelection } from "@/lib/hooks/use-timeline-selection";
 import { cn } from "@/lib/utils";
 import { format } from "date-fns";
-import { Tag, Plus, MessageSquare } from "lucide-react";
+import { Tag, Plus, MessageSquare, Trash2 } from "lucide-react";
 import { useState, useRef, useMemo, useCallback, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { toast } from "@/components/ui/use-toast";
+import {
+	AlertDialog,
+	AlertDialogAction,
+	AlertDialogCancel,
+	AlertDialogContent,
+	AlertDialogDescription,
+	AlertDialogFooter,
+	AlertDialogHeader,
+	AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import posthog from "posthog-js";
 
 const DEFAULT_TAGS = ["deep work", "meeting", "admin", "break"];
@@ -29,6 +39,8 @@ export function TimelineTagToolbar({ anchorRect, onAskAI }: TimelineTagToolbarPr
 	const [customTag, setCustomTag] = useState("");
 	const [isApplying, setIsApplying] = useState(false);
 	const [frequentTags, setFrequentTags] = useState<FrequentTag[]>([]);
+	const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+	const [isDeleting, setIsDeleting] = useState(false);
 	const inputRef = useRef<HTMLInputElement>(null);
 
 	// eslint-disable-next-line react-hooks/exhaustive-deps
@@ -119,6 +131,38 @@ export function TimelineTagToolbar({ anchorRect, onAskAI }: TimelineTagToolbarPr
 		handleApplyTag(customTag);
 	}, [handleApplyTag, customTag]);
 
+	const handleDeleteRange = useCallback(async () => {
+		if (!selectionRange || isDeleting) return;
+		setIsDeleting(true);
+		try {
+			const resp = await fetch("http://localhost:3030/data/delete-range", {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({
+					start: selectionRange.start.toISOString(),
+					end: selectionRange.end.toISOString(),
+				}),
+			});
+			if (!resp.ok) throw new Error(await resp.text());
+			const data = await resp.json();
+			toast({
+				title: "deleted",
+				description: `removed ${data.frames_deleted} frames, ${data.audio_transcriptions_deleted} audio segments`,
+			});
+			posthog.capture("timeline_range_deleted", {
+				duration_ms: selectionRange.end.getTime() - selectionRange.start.getTime(),
+				frames_deleted: data.frames_deleted,
+			});
+			setSelectionRange(null);
+			setShowDeleteConfirm(false);
+			window.location.reload();
+		} catch (e) {
+			toast({ title: "deletion failed", description: String(e), variant: "destructive" });
+		} finally {
+			setIsDeleting(false);
+		}
+	}, [selectionRange, isDeleting, setSelectionRange]);
+
 	// Early return AFTER all hooks
 	if (!selectionRange || !anchorRect || frameIds.length === 0) {
 		return null;
@@ -141,6 +185,7 @@ export function TimelineTagToolbar({ anchorRect, onAskAI }: TimelineTagToolbarPr
 	const top = anchorRect.y;
 
 	return createPortal(
+		<>
 		<div
 			className="fixed z-[9999] pointer-events-auto"
 			style={{
@@ -158,15 +203,24 @@ export function TimelineTagToolbar({ anchorRect, onAskAI }: TimelineTagToolbarPr
 							{startTime} → {endTime} ({durationStr})
 						</span>
 					</div>
-					{onAskAI && (
+					<div className="flex items-stretch gap-1 flex-shrink-0">
+						{onAskAI && (
+							<button
+								onClick={onAskAI}
+								className="flex items-center gap-1 text-xs px-2 py-1 rounded-md bg-foreground text-background hover:bg-foreground/90 transition-colors font-medium flex-shrink-0"
+							>
+								<MessageSquare className="w-3 h-3" />
+								ask ai
+							</button>
+						)}
 						<button
-							onClick={onAskAI}
-							className="flex items-center gap-1 text-xs px-2 py-1 rounded-md bg-foreground text-background hover:bg-foreground/90 transition-colors font-medium flex-shrink-0"
+							onClick={() => setShowDeleteConfirm(true)}
+							className="flex items-center justify-center text-xs px-2 rounded-md text-destructive hover:bg-destructive hover:text-destructive-foreground transition-colors flex-shrink-0"
+							title="delete selected range"
 						>
-							<MessageSquare className="w-3 h-3" />
-							ask ai
+							<Trash2 className="w-3.5 h-3.5" />
 						</button>
-					)}
+					</div>
 				</div>
 
 				{/* Existing tags on selection */}
@@ -224,7 +278,30 @@ export function TimelineTagToolbar({ anchorRect, onAskAI }: TimelineTagToolbarPr
 					</button>
 				</form>
 			</div>
-		</div>,
+		</div>
+		<AlertDialog open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}>
+			<AlertDialogContent>
+				<AlertDialogHeader>
+					<AlertDialogTitle>delete time range?</AlertDialogTitle>
+					<AlertDialogDescription>
+						this will permanently delete all screen recordings, audio, and
+						transcriptions from {startTime} to {endTime} ({durationStr}).
+						this cannot be undone.
+					</AlertDialogDescription>
+				</AlertDialogHeader>
+				<AlertDialogFooter>
+					<AlertDialogCancel disabled={isDeleting}>cancel</AlertDialogCancel>
+					<AlertDialogAction
+						className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+						disabled={isDeleting}
+						onClick={handleDeleteRange}
+					>
+						{isDeleting ? "deleting..." : "delete permanently"}
+					</AlertDialogAction>
+				</AlertDialogFooter>
+			</AlertDialogContent>
+		</AlertDialog>
+		</>,
 		document.body
 	);
 }
