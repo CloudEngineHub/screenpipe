@@ -619,11 +619,31 @@ export function StandaloneChat({ className }: { className?: string } = {}) {
             .map((b: any) => b.text)
             .join("\n") || "(tool result)";
         }
+        // Persist contentBlocks so tool calls/results survive reload.
+        // Strip isRunning (stale) and cap result length to keep store small.
+        const blocks = m.contentBlocks?.map((b: any) => {
+          if (b.type === "tool") {
+            const { isRunning, ...rest } = b.toolCall;
+            return {
+              type: "tool",
+              toolCall: {
+                ...rest,
+                isRunning: false,
+                result: rest.result?.slice(0, 4000),
+              },
+            };
+          }
+          if (b.type === "thinking") {
+            return { ...b, isThinking: false };
+          }
+          return b;
+        });
         return {
           id: m.id,
           role: m.role,
           content,
           timestamp: m.timestamp,
+          ...(blocks?.length ? { contentBlocks: blocks } : {}),
         };
       }),
       createdAt: existingIndex >= 0 ? history.conversations[existingIndex].createdAt : Date.now(),
@@ -712,6 +732,7 @@ export function StandaloneChat({ className }: { className?: string } = {}) {
       role: m.role,
       content: m.content,
       timestamp: m.timestamp,
+      ...(m.contentBlocks?.length ? { contentBlocks: m.contentBlocks } : {}),
     })));
     setConversationId(conv.id);
     setShowHistory(false);
