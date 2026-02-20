@@ -340,9 +340,9 @@ function SettingsPageContent() {
 
             {/* Settings modal overlay */}
             {settingsModalOpen && (
-              <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/50">
+              <div className="absolute inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm">
                 <div
-                  className="bg-background border border-border flex w-[800px] max-w-[calc(100%-2rem)] max-h-[calc(100%-2rem)] overflow-hidden"
+                  className="bg-background border border-border flex w-[960px] max-w-[calc(100%-2rem)] h-[calc(100%-2rem)] overflow-hidden"
                   onClick={(e) => e.stopPropagation()}
                 >
                   {/* Modal sidebar */}
