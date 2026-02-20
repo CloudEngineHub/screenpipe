@@ -487,13 +487,11 @@ pub async fn default_output_device() -> Result<AudioDevice> {
                      output audio capture requires a display device"
                 ))
             }
-            Err(e) => {
-                Err(anyhow!(
-                    "ScreenCaptureKit unavailable for output audio capture: {} — \
+            Err(e) => Err(anyhow!(
+                "ScreenCaptureKit unavailable for output audio capture: {} — \
                      output audio capture is not possible without it",
-                    e
-                ))
-            }
+                e
+            )),
         }
     }
 

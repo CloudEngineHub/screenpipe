@@ -191,11 +191,10 @@ async fn index_frames_fts(db: &DatabaseManager) -> Result<i64, sqlx::Error> {
     let last = get_last_indexed(db, "frames").await?;
 
     // Cheap existence check — avoid slow full SELECT on 3GB+ DB when nothing to index
-    let has_rows: bool =
-        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM frames WHERE rowid > ?1)")
-            .bind(last)
-            .fetch_one(&db.pool)
-            .await?;
+    let has_rows: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM frames WHERE rowid > ?1)")
+        .bind(last)
+        .fetch_one(&db.pool)
+        .await?;
     if !has_rows {
         return Ok(0);
     }

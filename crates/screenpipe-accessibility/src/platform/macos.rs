@@ -490,10 +490,8 @@ extern "C" fn tap_callback(
             }
 
             if state.config.capture_scroll {
-                let dy =
-                    event.field_i64(cg::EventField::SCROLL_WHEEL_EVENT_DELTA_AXIS1) as i16;
-                let dx =
-                    event.field_i64(cg::EventField::SCROLL_WHEEL_EVENT_DELTA_AXIS2) as i16;
+                let dy = event.field_i64(cg::EventField::SCROLL_WHEEL_EVENT_DELTA_AXIS1) as i16;
+                let dx = event.field_i64(cg::EventField::SCROLL_WHEEL_EVENT_DELTA_AXIS2) as i16;
                 if dx != 0 || dy != 0 {
                     let ui_event = UiEvent {
                         id: None,

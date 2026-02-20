@@ -184,12 +184,8 @@ pub async fn start_device_monitor(
                                     match audio_manager.start_device(&default_output).await {
                                         Ok(()) => {
                                             failed_devices.remove(&device_name);
-                                            default_tracker.last_output =
-                                                Some(device_name.clone());
-                                            info!(
-                                                "started missing output device: {}",
-                                                device_name
-                                            );
+                                            default_tracker.last_output = Some(device_name.clone());
+                                            info!("started missing output device: {}", device_name);
                                         }
                                         Err(e) => {
                                             let count = failed_devices
