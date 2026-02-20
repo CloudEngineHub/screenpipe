@@ -51,6 +51,8 @@ pub struct UiRecorderConfig {
     pub capture_app_switch: bool,
     /// Capture window focus changes
     pub capture_window_focus: bool,
+    /// Capture scroll events
+    pub capture_scroll: bool,
     /// Capture element context via accessibility
     pub capture_context: bool,
     /// Additional apps to exclude
@@ -85,7 +87,8 @@ impl Default for UiRecorderConfig {
             capture_clipboard: true,
             capture_clipboard_content: true,
             capture_app_switch: true,
-            capture_window_focus: true,
+            capture_window_focus: false,
+            capture_scroll: false,
             capture_context: true,
             excluded_apps: Vec::new(),
             excluded_windows: Vec::new(),
@@ -114,6 +117,7 @@ impl UiRecorderConfig {
         config.capture_clipboard_content = self.capture_clipboard_content;
         config.capture_app_switch = self.capture_app_switch;
         config.capture_window_focus = self.capture_window_focus;
+        config.capture_scroll = self.capture_scroll;
         config.capture_context = self.capture_context;
 
         // Add excluded apps
