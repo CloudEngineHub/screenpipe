@@ -283,6 +283,7 @@ export function SearchModal({ isOpen, onClose, onNavigateToTimestamp }: SearchMo
   const [speakerTranscriptions, setSpeakerTranscriptions] = useState<AudioTranscription[]>([]);
   const [isLoadingTranscriptions, setIsLoadingTranscriptions] = useState(false);
   const [selectedTranscriptionIndex, setSelectedTranscriptionIndex] = useState(0);
+  const [transcriptionFrames, setTranscriptionFrames] = useState<Map<string, number>>(new Map());
 
   // Tag search state
   const [tagResults, setTagResults] = useState<TaggedFrame[]>([]);
@@ -523,6 +524,7 @@ export function SearchModal({ isOpen, onClose, onNavigateToTimestamp }: SearchMo
   useEffect(() => {
     if (!selectedSpeaker) {
       setSpeakerTranscriptions([]);
+      setTranscriptionFrames(new Map());
       setTranscriptionOffset(0);
       setHasMoreTranscriptions(true);
       return;
@@ -546,7 +548,7 @@ export function SearchModal({ isOpen, onClose, onNavigateToTimestamp }: SearchMo
         );
         if (resp.ok && !cancelled) {
           const data = await resp.json();
-          const items = (data?.data || []).map((item: any) => ({
+          const items: AudioTranscription[] = (data?.data || []).map((item: any) => ({
             timestamp: item.content?.timestamp || "",
             transcription: item.content?.transcription || "",
             device_name: item.content?.device_name || "",
@@ -556,6 +558,37 @@ export function SearchModal({ isOpen, onClose, onNavigateToTimestamp }: SearchMo
           }));
           if (items.length < TRANSCRIPTION_PAGE_SIZE) setHasMoreTranscriptions(false);
           setSpeakerTranscriptions(items);
+
+          // Fetch nearest frame for each transcription timestamp (in parallel batches)
+          const uniqueTimestamps = [...new Set(items.map(i => i.timestamp).filter(Boolean))];
+          if (uniqueTimestamps.length > 0 && !cancelled) {
+            try {
+              const map = new Map<string, number>();
+              // Batch fetch: find closest frame within ±30s for each timestamp
+              const promises = uniqueTimestamps.map(async (ts) => {
+                const d = new Date(ts);
+                const lo = new Date(d.getTime() - 30_000).toISOString();
+                const hi = new Date(d.getTime() + 30_000).toISOString();
+                const escaped = ts.replace(/'/g, "''");
+                const resp = await fetch("http://localhost:3030/raw_sql", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({
+                    query: `SELECT id as frame_id FROM frames WHERE timestamp >= '${lo}' AND timestamp <= '${hi}' ORDER BY ABS(julianday(timestamp) - julianday('${escaped}')) LIMIT 1`,
+                  }),
+                  signal: AbortSignal.timeout(3000),
+                });
+                if (resp.ok) {
+                  const rows: { frame_id: number }[] = await resp.json();
+                  if (rows.length > 0) map.set(ts, rows[0].frame_id);
+                }
+              });
+              await Promise.all(promises);
+              if (!cancelled) setTranscriptionFrames(map);
+            } catch {
+              // frames are optional, ignore errors
+            }
+          }
         }
       } catch {
         // ignore
@@ -870,42 +903,53 @@ export function SearchModal({ isOpen, onClose, onNavigateToTimestamp }: SearchMo
               )}
 
               {speakerTranscriptions.length > 0 && (
-                <div className="space-y-1">
-                  {speakerTranscriptions.map((t, index) => (
-                    <div
-                      key={`${t.timestamp}-${index}`}
-                      data-index={index}
-                      onClick={() => {
-                        if (t.timestamp) {
-                          onNavigateToTimestamp(t.timestamp);
-                          onClose();
-                        }
-                      }}
-                      className={cn(
-                        "px-3 py-2.5 rounded cursor-pointer transition-all duration-100",
-                        index === selectedTranscriptionIndex
-                          ? "bg-foreground/10 ring-1 ring-foreground/20"
-                          : "hover:bg-muted"
-                      )}
-                    >
-                      <p className="text-sm text-foreground leading-relaxed line-clamp-2">
-                        {t.transcription || "(empty)"}
-                      </p>
-                      <div className="flex items-center gap-3 mt-1.5 text-xs text-muted-foreground">
-                        <span className="flex items-center gap-1 font-mono">
-                          <Clock className="w-3 h-3" />
-                          {t.timestamp ? formatRelativeTime(t.timestamp) : "unknown"}
-                        </span>
-                        <span className="flex items-center gap-1">
-                          {t.is_input ? <Mic className="w-3 h-3" /> : <Volume2 className="w-3 h-3" />}
-                          {t.is_input ? "mic" : "speaker"}
-                        </span>
-                        {t.duration_secs > 0 && (
-                          <span>{Math.round(t.duration_secs)}s</span>
+                <div className="grid grid-cols-4 gap-3">
+                  {speakerTranscriptions.map((t, index) => {
+                    const frameId = transcriptionFrames.get(t.timestamp);
+                    return (
+                      <div
+                        key={`${t.timestamp}-${index}`}
+                        data-index={index}
+                        onClick={() => {
+                          if (t.timestamp) {
+                            onNavigateToTimestamp(t.timestamp);
+                            onClose();
+                          }
+                        }}
+                        className={cn(
+                          "cursor-pointer rounded overflow-hidden border transition-all duration-150",
+                          index === selectedTranscriptionIndex
+                            ? "ring-2 ring-foreground border-foreground scale-[1.02] shadow-lg z-10"
+                            : "border-border hover:border-foreground/50"
                         )}
+                      >
+                        {frameId ? (
+                          <FrameThumbnail
+                            frameId={frameId}
+                            alt={t.transcription || t.speaker_name}
+                          />
+                        ) : (
+                          <div className="aspect-video bg-muted flex items-center justify-center">
+                            <Mic className="w-5 h-5 text-muted-foreground/40" />
+                          </div>
+                        )}
+                        <div className="p-2 bg-card">
+                          <p className="text-xs text-foreground line-clamp-2 leading-relaxed mb-1">
+                            {t.transcription || "(empty)"}
+                          </p>
+                          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                            <span className="flex items-center gap-1 font-mono">
+                              <Clock className="w-3 h-3" />
+                              {t.timestamp ? formatRelativeTime(t.timestamp) : "unknown"}
+                            </span>
+                            <span className="flex items-center gap-0.5">
+                              {t.is_input ? <Mic className="w-2.5 h-2.5" /> : <Volume2 className="w-2.5 h-2.5" />}
+                            </span>
+                          </div>
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
 
