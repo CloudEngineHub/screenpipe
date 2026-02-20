@@ -193,6 +193,7 @@ function GridDissolveLoader({ label = "analyzing..." }: { label?: string }) {
       });
     }, 120);
     return () => window.clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   return (
@@ -484,7 +485,7 @@ function CollapsibleUserMessage({ label, fullContent }: { label: string; fullCon
   );
 }
 
-export function StandaloneChat() {
+export function StandaloneChat({ className }: { className?: string } = {}) {
   const { settings, updateSettings, isSettingsLoaded, reloadStore } = useSettings();
   const { isMac } = usePlatform();
   const { items: appItems } = useSqlAutocomplete("app");
@@ -502,6 +503,7 @@ export function StandaloneChat() {
         // ignore corrupt data
       }
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isSettingsLoaded]);
 
   const saveCustomTemplate = async (template: CustomTemplate) => {
@@ -659,6 +661,7 @@ export function StandaloneChat() {
       saveConversation(messages);
     }
     prevIsLoadingRef.current = isLoading;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isLoading, messages]);
 
   // Delete a conversation
@@ -946,6 +949,7 @@ export function StandaloneChat() {
       }
     });
     return () => { unlisten.then((fn) => fn()); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [settings.chatHistory?.conversations]);
 
   const appMentionSuggestions = React.useMemo(
@@ -1184,6 +1188,7 @@ export function StandaloneChat() {
       model: activePreset.model || "",
       apiKey: ("apiKey" in activePreset ? (activePreset.apiKey as string) : null) || null,
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activePreset?.provider, activePreset?.url, activePreset?.model, activePreset?.apiKey]);
 
   // Check Pi status on mount — Pi is auto-started at app boot by Rust
@@ -1270,6 +1275,7 @@ export function StandaloneChat() {
       }
     };
     restartPi();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activePreset?.provider, activePreset?.model, settings.user?.token]);
 
   // Listen for Pi events (all providers route through Pi)
@@ -1714,6 +1720,7 @@ export function StandaloneChat() {
       unlistenTerminated?.();
       unlistenLog?.();
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Generate follow-up suggestions using Apple Intelligence
@@ -2061,7 +2068,7 @@ export function StandaloneChat() {
   };
 
   return (
-    <div className="flex flex-col h-screen bg-background">
+    <div className={cn("flex flex-col h-screen bg-background", className)}>
       {/* Header - draggable */}
       {/* Add left padding on macOS to avoid traffic light overlap */}
       <div
@@ -2431,6 +2438,7 @@ export function StandaloneChat() {
               {prefillFrameId && (
                 <div className="flex-shrink-0">
                   <div className="relative group">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img
                       src={`http://localhost:3030/frames/${prefillFrameId}`}
                       alt="Attached frame"
@@ -2636,6 +2644,7 @@ export function StandaloneChat() {
               {pastedImage && (
                 <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
                   <div className="relative group">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img
                       src={pastedImage}
                       alt="Pasted"
