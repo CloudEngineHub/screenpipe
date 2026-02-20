@@ -76,7 +76,7 @@ const easeOutCubic = (x: number): number => {
 
 
 
-export default function Timeline() {
+export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 	const { isMac } = usePlatform();
 	const [currentIndex, setCurrentIndex] = useState(0);
 	const [showAudioTranscript, setShowAudioTranscript] = useState(true);
@@ -220,8 +220,9 @@ export default function Timeline() {
 		};
 	}, [onWindowFocus, frames, setCurrentFrame]);
 
-	// Hide timeline when mouse moves to a different screen
+	// Hide timeline when mouse moves to a different screen (skip in embedded mode)
 	useEffect(() => {
+		if (embedded) return;
 		let initialScreenBounds: { x: number; y: number; width: number; height: number } | null = null;
 		let checkInterval: ReturnType<typeof setInterval> | null = null;
 
@@ -703,7 +704,9 @@ export default function Timeline() {
 	}, [currentFrame, isMac, showSearchModal]);
 
 	// Handle Escape: close search modal if open, otherwise close the window
+	// In embedded mode, only handle closing the search modal (don't close the window)
 	useEffect(() => {
+		if (embedded) return;
 		const unlisten = listen("escape-pressed", () => {
 			if (showSearchModal) {
 				setShowSearchModal(false);
@@ -712,7 +715,7 @@ export default function Timeline() {
 			commands.closeWindow("Main");
 		});
 		return () => { unlisten.then((fn) => fn()); };
-	}, [showSearchModal]);
+	}, [showSearchModal, embedded]);
 
 	// Handle arrow key navigation via JS keydown (no global hotkey stealing)
 	useEffect(() => {
@@ -942,37 +945,44 @@ export default function Timeline() {
 	[frames, zoomLevel], // Re-create when zoom changes
 	);
 
-	// Attach scroll/zoom handler at document level so pinch-to-zoom works
-	// without clicking the timeline first (wheel events go to window under cursor)
+	// Attach scroll/zoom handler so pinch-to-zoom and scroll-to-navigate work.
+	// Overlay mode: attach to document (wheel events go to window under cursor).
+	// Embedded mode: attach to the container element only, so the settings
+	// sidebar and other page areas still scroll normally.
 	useEffect(() => {
 		const onWheel = (e: WheelEvent) => {
-			const isWithinAiPanel = document
-				.querySelector(".ai-panel")
-				?.contains(e.target as Node);
-			const isWithinAudioPanel = document
-				.querySelector(".audio-transcript-panel")
-				?.contains(e.target as Node);
-			const isWithinTimelineDialog = document
-				.querySelector('[role="dialog"]')
-				?.contains(e.target as Node);
-			const isWithinSettingsDialog = document
-				.querySelector('[data-settings-dialog]')
-				?.contains(e.target as Node);
+			if (!embedded) {
+				const isWithinAiPanel = document
+					.querySelector(".ai-panel")
+					?.contains(e.target as Node);
+				const isWithinAudioPanel = document
+					.querySelector(".audio-transcript-panel")
+					?.contains(e.target as Node);
+				const isWithinTimelineDialog = document
+					.querySelector('[role="dialog"]')
+					?.contains(e.target as Node);
+				const isWithinSettingsDialog = document
+					.querySelector('[data-settings-dialog]')
+					?.contains(e.target as Node);
 
-			if (isWithinAiPanel || isWithinAudioPanel || isWithinTimelineDialog || isWithinSettingsDialog) {
-				return;
+				if (isWithinAiPanel || isWithinAudioPanel || isWithinTimelineDialog || isWithinSettingsDialog) {
+					return;
+				}
 			}
 
-			// Always preventDefault to block native browser zoom
+			// preventDefault to block native browser zoom
 			e.preventDefault();
 
 			// Delegate to the throttled handler for zoom + scroll logic
 			handleScroll(e);
 		};
 
-		document.addEventListener("wheel", onWheel, { passive: false });
-		return () => document.removeEventListener("wheel", onWheel);
-	}, [handleScroll]);
+		const target = embedded ? containerRef.current : document;
+		if (!target) return;
+		const handler = onWheel as EventListener;
+		target.addEventListener("wheel", handler, { passive: false });
+		return () => target.removeEventListener("wheel", handler);
+	}, [handleScroll, embedded]);
 
 	// Ensure WKWebView is first responder so pinch-to-zoom works.
 	// On macOS, magnifyWithEvent: only reaches the WKWebView if it's first responder.
@@ -1237,7 +1247,7 @@ export default function Timeline() {
 				ref={containerRef}
 				className="inset-0 flex flex-col text-foreground relative"
 				style={{
-					height: "100vh",
+					height: embedded ? "100%" : "100vh",
 					overscrollBehavior: "none",
 					WebkitUserSelect: "none",
 					userSelect: "none",
@@ -1368,7 +1378,7 @@ export default function Timeline() {
 						onDateChange={handleDateChange}
 						onJumpToday={handleJumpToday}
 						onSearchClick={() => setShowSearchModal(true)}
-						onChatClick={() => commands.showWindow("Chat")}
+						onChatClick={embedded ? undefined : () => commands.showWindow("Chat")}
 					/>
 					{/* Top right buttons */}
 					<div className="absolute top-[calc(env(safe-area-inset-top)+16px)] right-4 flex items-center gap-2">
@@ -1391,14 +1401,16 @@ export default function Timeline() {
 				{/* Loading/Error States - Progressive loading: only block when no frames yet */}
 				{showBlockingLoader && (
 					<div className="absolute inset-0 z-50 flex items-center justify-center bg-background/90">
-						{/* Close button - always visible to prevent being stuck */}
-						<button
-							onClick={() => commands.closeWindow("Main")}
-							className="absolute top-4 right-4 p-2 bg-card hover:bg-muted border border-border rounded-md transition-colors z-50"
-							title="Close (Esc)"
-						>
-							<X className="w-4 h-4 text-muted-foreground" />
-						</button>
+						{/* Close button - always visible to prevent being stuck (hidden in embedded mode) */}
+						{!embedded && (
+							<button
+								onClick={() => commands.closeWindow("Main")}
+								className="absolute top-4 right-4 p-2 bg-card hover:bg-muted border border-border rounded-md transition-colors z-50"
+								title="Close (Esc)"
+							>
+								<X className="w-4 h-4 text-muted-foreground" />
+							</button>
+						)}
 						<div className="bg-card text-foreground p-6 rounded-2xl text-center space-y-3 max-w-md mx-4">
 							<h3 className="font-medium">Loading Timeline</h3>
 							<p className="text-sm text-foreground">
@@ -1432,14 +1444,16 @@ export default function Timeline() {
 
 				{error && (
 					<div className="absolute inset-0 z-50 flex items-center justify-center bg-background/90">
-						{/* Close button - always visible to prevent being stuck */}
-						<button
-							onClick={() => commands.closeWindow("Main")}
-							className="absolute top-4 right-4 p-2 bg-card hover:bg-muted border border-border rounded-md transition-colors z-50"
-							title="Close (Esc)"
-						>
-							<X className="w-4 h-4 text-muted-foreground" />
-						</button>
+						{/* Close button - always visible to prevent being stuck (hidden in embedded mode) */}
+						{!embedded && (
+							<button
+								onClick={() => commands.closeWindow("Main")}
+								className="absolute top-4 right-4 p-2 bg-card hover:bg-muted border border-border rounded-md transition-colors z-50"
+								title="Close (Esc)"
+							>
+								<X className="w-4 h-4 text-muted-foreground" />
+							</button>
+						)}
 						<div className="bg-destructive/20 border border-destructive/30 text-foreground p-6 rounded-2xl text-center space-y-4 max-w-md mx-4">
 							<div className="flex flex-col items-center gap-2">
 								<AlertCircle className="h-6 w-6 text-destructive" />
@@ -1558,26 +1572,52 @@ export default function Timeline() {
 				</div>
 
 	
-				{/* Search Modal */}
-				<SearchModal
-					isOpen={showSearchModal}
-					onClose={() => setShowSearchModal(false)}
-					onNavigateToTimestamp={(timestamp) => {
-						const targetDate = new Date(timestamp);
-						setSeekingTimestamp(timestamp);
-
-						if (!isSameDay(targetDate, currentDate)) {
-							// Different day: use direct navigation (skip hasFramesForDate —
-							// search results prove this date has data)
-							navigateDirectToDate(targetDate);
-						} else {
-							// Same day: jump directly, no pending navigation needed
-							pendingNavigationRef.current = null;
-							jumpToTime(targetDate);
-							setSeekingTimestamp(null);
-						}
-					}}
-				/>
+				{/* Search — inline overlay in embedded mode, standard modal otherwise */}
+				{embedded && showSearchModal ? (
+					<div className="absolute inset-0 z-50 flex flex-col">
+						{/* Backdrop */}
+						<div
+							className="absolute inset-0 bg-black/40 backdrop-blur-[2px]"
+							onClick={() => setShowSearchModal(false)}
+						/>
+						{/* Panel — drops down from top */}
+						<div className="relative z-10 m-3 mt-14 flex flex-col max-h-[calc(100%-7rem)] rounded-lg border border-border shadow-2xl overflow-hidden">
+							<SearchModal
+								isOpen={true}
+								embedded
+								onClose={() => setShowSearchModal(false)}
+								onNavigateToTimestamp={(timestamp) => {
+									setShowSearchModal(false);
+									const targetDate = new Date(timestamp);
+									setSeekingTimestamp(timestamp);
+									if (!isSameDay(targetDate, currentDate)) {
+										navigateDirectToDate(targetDate);
+									} else {
+										pendingNavigationRef.current = null;
+										jumpToTime(targetDate);
+										setSeekingTimestamp(null);
+									}
+								}}
+							/>
+						</div>
+					</div>
+				) : (
+					<SearchModal
+						isOpen={showSearchModal}
+						onClose={() => setShowSearchModal(false)}
+						onNavigateToTimestamp={(timestamp) => {
+							const targetDate = new Date(timestamp);
+							setSeekingTimestamp(timestamp);
+							if (!isSameDay(targetDate, currentDate)) {
+								navigateDirectToDate(targetDate);
+							} else {
+								pendingNavigationRef.current = null;
+								jumpToTime(targetDate);
+								setSeekingTimestamp(null);
+							}
+						}}
+					/>
+				)}
 			</div>
 		</TimelineProvider>
 	);
