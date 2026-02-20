@@ -119,20 +119,21 @@ const createWindowOptions = (
       value: item.name,
       label: item.name,
       icon: AppWindowMac,
-      iconUrl: item.app_name ? getAppIconUrl(item.app_name) : undefined,
+      iconUrl: getAppIconUrl(item.app_name || item.name),
       description: [
         item.app_name && item.app_name !== item.name ? item.app_name : null,
         `${formatCount(item.count)} captures`,
       ].filter(Boolean).join(" · "),
     }));
 
-  // Custom patterns don't have real app names — skip iconUrl so the Lucide fallback shows
+  // Custom patterns try the app-icon endpoint; OptionIcon falls back to Lucide if it returns a placeholder
   const customOptions = existingPatterns
     .filter((pattern) => !windowItems.some((item) => item.name === pattern))
     .map((pattern) => ({
       value: pattern,
       label: pattern,
       icon: AppWindowMac,
+      iconUrl: getAppIconUrl(pattern),
     }));
 
   return [...windowOptions, ...customOptions];
@@ -1540,30 +1541,39 @@ Your screen is a pipe. Everything you see, hear, and type flows through it. Scre
         <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-1">Filtering</h2>
 
         {/* All | Personal | Shared with team tabs */}
-        {team.team && (
-          <div className="flex items-center gap-4 border-b border-border">
-            {(["all", "personal", "team"] as const).map((tab) => {
-              const personalCount = settings.ignoredWindows.length + settings.includedWindows.length + (settings.ignoredUrls || []).length;
-              const teamCount = (settings.teamFilters?.ignoredWindows?.length ?? 0) + (settings.teamFilters?.includedWindows?.length ?? 0) + (settings.teamFilters?.ignoredUrls?.length ?? 0);
-              const count = tab === "all" ? personalCount + teamCount : tab === "personal" ? personalCount : teamCount;
-              const label = tab === "all" ? "All" : tab === "personal" ? "Personal" : "Shared with team";
-              return (
-                <button
-                  key={tab}
-                  onClick={() => setFilterView(tab)}
-                  className={cn(
-                    "pb-2 text-sm transition-colors duration-150 border-b-2 -mb-px",
-                    filterView === tab
-                      ? "border-foreground text-foreground font-medium"
-                      : "border-transparent text-muted-foreground hover:text-foreground"
-                  )}
-                >
-                  {label} ({count})
-                </button>
-              );
-            })}
-          </div>
-        )}
+        {team.team && (() => {
+          const teamIgnored = new Set(settings.teamFilters?.ignoredWindows ?? []);
+          const teamIncluded = new Set(settings.teamFilters?.includedWindows ?? []);
+          const teamUrls = new Set(settings.teamFilters?.ignoredUrls ?? []);
+          const personalOnlyCount =
+            settings.ignoredWindows.filter((w) => !teamIgnored.has(w)).length +
+            settings.includedWindows.filter((w) => !teamIncluded.has(w)).length +
+            (settings.ignoredUrls || []).filter((u) => !teamUrls.has(u)).length;
+          const teamOnlyCount = teamIgnored.size + teamIncluded.size + teamUrls.size;
+          const allCount = personalOnlyCount + teamOnlyCount;
+          return (
+            <div className="flex items-center gap-4 border-b border-border">
+              {(["all", "personal", "team"] as const).map((tab) => {
+                const count = tab === "all" ? allCount : tab === "personal" ? personalOnlyCount : teamOnlyCount;
+                const label = tab === "all" ? "All" : tab === "personal" ? "Personal" : "Shared with team";
+                return (
+                  <button
+                    key={tab}
+                    onClick={() => setFilterView(tab)}
+                    className={cn(
+                      "pb-2 text-sm transition-colors duration-150 border-b-2 -mb-px",
+                      filterView === tab
+                        ? "border-foreground text-foreground font-medium"
+                        : "border-transparent text-muted-foreground hover:text-foreground"
+                    )}
+                  >
+                    {label} ({count})
+                  </button>
+                );
+              })}
+            </div>
+          );
+        })()}
 
         {/* Personal filters (shown in "all" and "personal" views) */}
         {filterView !== "team" && (

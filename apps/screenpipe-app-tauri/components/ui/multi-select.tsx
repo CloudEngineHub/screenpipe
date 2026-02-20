@@ -31,6 +31,37 @@ import {
   CommandSeparator,
 } from "@/components/ui/command";
 
+function OptionIcon({
+  iconUrl,
+  icon: Icon,
+  className,
+}: {
+  iconUrl?: string;
+  icon?: React.ComponentType<{ className?: string }>;
+  className?: string;
+}) {
+  const [imgFailed, setImgFailed] = React.useState(false);
+
+  if (iconUrl && !imgFailed) {
+    return (
+      <img
+        src={iconUrl}
+        alt=""
+        className={cn("rounded-sm object-contain", className)}
+        onLoad={(e) => {
+          const img = e.target as HTMLImageElement;
+          if (img.naturalWidth <= 2) setImgFailed(true);
+        }}
+        onError={() => setImgFailed(true)}
+      />
+    );
+  }
+  if (Icon) {
+    return <Icon className={cn("text-muted-foreground", className)} />;
+  }
+  return null;
+}
+
 /**
  * Variants for the multi-select component to handle different styles.
  * Uses class-variance-authority (cva) to define different styles based on "variant" prop.
@@ -288,17 +319,11 @@ export const MultiSelect = React.forwardRef<
                         )}
                         style={{ animationDuration: `${animation}s` }}
                       >
-                        {option?.iconUrl ? (
-                          <img
-                            src={option.iconUrl}
-                            alt=""
-                            className="h-3.5 w-3.5 mr-1.5 rounded-sm"
-                            onLoad={(e) => { const img = e.target as HTMLImageElement; if (img.naturalWidth <= 2) img.style.display = 'none'; }}
-                            onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
-                          />
-                        ) : IconComponent ? (
-                          <IconComponent className="h-4 w-4 mr-2" />
-                        ) : null}
+                        <OptionIcon
+                          iconUrl={option?.iconUrl}
+                          icon={IconComponent}
+                          className="h-3.5 w-3.5 mr-1.5 shrink-0"
+                        />
                         {option?.label || value}
                         <XCircle
                           className="ml-2 h-4 w-4 cursor-pointer"
@@ -424,17 +449,11 @@ export const MultiSelect = React.forwardRef<
                       >
                         <CheckIcon className="h-4 w-4" />
                       </div>
-                      {option.iconUrl ? (
-                        <img
-                          src={option.iconUrl}
-                          alt=""
-                          className="mr-2 h-4 w-4 shrink-0 rounded-sm"
-                          onLoad={(e) => { const img = e.target as HTMLImageElement; if (img.naturalWidth <= 2) img.style.display = 'none'; }}
-                            onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
-                        />
-                      ) : option.icon ? (
-                        <option.icon className="mr-2 h-4 w-4 text-muted-foreground shrink-0" />
-                      ) : null}
+                      <OptionIcon
+                        iconUrl={option.iconUrl}
+                        icon={option.icon}
+                        className="mr-2 h-4 w-4 shrink-0"
+                      />
                       <div className="flex flex-col min-w-0 flex-1">
                         <span className="truncate">{option.label}</span>
                         {option.description && (
