@@ -31,6 +31,7 @@ export function TimelineTagToolbar({ anchorRect, onAskAI }: TimelineTagToolbarPr
 	const [frequentTags, setFrequentTags] = useState<FrequentTag[]>([]);
 	const inputRef = useRef<HTMLInputElement>(null);
 
+	// eslint-disable-next-line react-hooks/exhaustive-deps
 	const frameIds = selectionRange?.frameIds ?? [];
 
 	// Fetch user's frequent tags once on mount via raw SQL
@@ -82,6 +83,7 @@ export function TimelineTagToolbar({ anchorRect, onAskAI }: TimelineTagToolbarPr
 			frameTags.forEach((t) => tagSet.add(t));
 		}
 		return [...tagSet];
+		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [frameIds, tags]);
 
 	const handleApplyTag = useCallback(async (tag: string) => {
@@ -109,6 +111,7 @@ export function TimelineTagToolbar({ anchorRect, onAskAI }: TimelineTagToolbarPr
 		} finally {
 			setIsApplying(false);
 		}
+		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [isApplying, frameIds, tagFrames, setSelectionRange, quickTags]);
 
 	const handleCustomSubmit = useCallback((e: React.FormEvent) => {

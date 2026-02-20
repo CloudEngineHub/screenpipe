@@ -240,6 +240,7 @@ const FrameThumbnail = ({ frameId, alt }: { frameId: number; alt: string }) => {
           <span className="text-xs text-muted-foreground">unavailable</span>
         </div>
       ) : (
+        // eslint-disable-next-line @next/next/no-img-element
         <img
           src={`http://localhost:3030/frames/${frameId}`}
           alt={alt}

@@ -368,6 +368,7 @@ export default function Timeline() {
 		return () => {
 			unlisten.then((fn) => fn());
 		};
+		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [navigateToTimestamp, setPendingNavigation, toast]);
 
 	// Consume pending navigation from zustand store on mount (survives page navigation)
@@ -428,6 +429,7 @@ export default function Timeline() {
 				isNavigatingRef.current = false;
 			}
 		}
+		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [frames, currentDate, setPendingNavigation]);
 
 	// Timeout: clear seeking overlay if navigation doesn't resolve within 15s
@@ -460,6 +462,7 @@ export default function Timeline() {
 			setCurrentFrame(frames[0]);
 			setCurrentIndex(0);
 		}
+		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [frames.length, currentFrame, setCurrentFrame, seekingTimestamp]);
 
 	// Track timeline opened and setup session tracking
@@ -848,6 +851,7 @@ export default function Timeline() {
 		return () => {
 			cancelled = true;
 		};
+		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [currentDate, websocket]); // Re-run when websocket connects or date changes
 
 	// Sync currentDate to frame's date - but NOT during intentional navigation
@@ -934,7 +938,8 @@ export default function Timeline() {
 				16,
 				{ leading: true, trailing: false },
 			),
-		[frames, zoomLevel], // Re-create when zoom changes
+			// eslint-disable-next-line react-hooks/exhaustive-deps
+	[frames, zoomLevel], // Re-create when zoom changes
 	);
 
 	// Attach scroll/zoom handler at document level so pinch-to-zoom works

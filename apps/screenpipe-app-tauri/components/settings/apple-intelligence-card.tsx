@@ -250,6 +250,7 @@ export function AppleIntelligenceCard() {
       <CardContent className="p-0">
         <div className="flex items-start p-4 gap-4">
           <div className="flex-shrink-0">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
               src="/apple-intelligence-logo.svg"
               alt="Apple Intelligence"

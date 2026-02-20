@@ -482,6 +482,7 @@ export const TimelineSlider = ({
 			block: "nearest",
 			inline: "center",
 		});
+		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [currentIndex, frames.length]);
 
 	useEffect(() => {
@@ -745,6 +746,7 @@ export const TimelineSlider = ({
 												}}
 												transition={{ type: "spring", stiffness: 400, damping: 25 }}
 											>
+												{/* eslint-disable-next-line @next/next/no-img-element */}
 												<img
 													src={`http://localhost:11435/app-icon?name=${encodeURIComponent(appName)}`}
 													className="w-full h-full rounded-sm object-contain scale-110"
@@ -893,6 +895,7 @@ export const TimelineSlider = ({
 													}}
 												>
 													<div className="flex items-center gap-2 mb-1">
+														{/* eslint-disable-next-line @next/next/no-img-element */}
 														<img
 															src={`http://localhost:11435/app-icon?name=${encodeURIComponent(group.appName)}`}
 															className="w-4 h-4 rounded"

@@ -77,6 +77,7 @@ export function TeamSection() {
     let unsub: (() => void) | undefined;
     setup().then((u) => (unsub = u));
     return () => unsub?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [team.joinTeam]);
 
   const handleCreate = async () => {

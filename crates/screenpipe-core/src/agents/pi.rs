@@ -231,6 +231,7 @@ impl PiExecutor {
     }
 
     /// Spawn the pi subprocess and wait for its output.
+    #[allow(clippy::too_many_arguments)]
     async fn spawn_pi(
         &self,
         pi_path: &str,

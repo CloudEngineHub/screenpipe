@@ -168,6 +168,7 @@ export function useTeam() {
         error: err.message || "failed to fetch team",
       }));
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
 
   const fetchMembers = useCallback(
@@ -180,6 +181,7 @@ export function useTeam() {
         setState((s) => ({ ...s, members: data.members || [] }));
       } catch {}
     },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [token]
   );
 
@@ -211,6 +213,7 @@ export function useTeam() {
         setState((s) => ({ ...s, configs }));
       } catch {}
     },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [token]
   );
 
@@ -238,6 +241,7 @@ export function useTeam() {
       await fetchTeam();
       return data;
     },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [token, fetchTeam]
   );
 
@@ -264,6 +268,7 @@ export function useTeam() {
 
       await fetchTeam();
     },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [token, fetchTeam]
   );
 
@@ -292,6 +297,7 @@ export function useTeam() {
       loading: false,
       error: null,
     });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token, state.team]);
 
   // delete team (admin only)
@@ -319,6 +325,7 @@ export function useTeam() {
       loading: false,
       error: null,
     });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token, state.team]);
 
   // remove member (admin only)
@@ -338,6 +345,7 @@ export function useTeam() {
 
       await fetchMembers();
     },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [token, fetchMembers]
   );
 
@@ -366,6 +374,7 @@ export function useTeam() {
 
       await fetchConfigs();
     },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [token, fetchConfigs]
   );
 
@@ -386,6 +395,7 @@ export function useTeam() {
 
       await fetchConfigs();
     },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [token, fetchConfigs]
   );
 

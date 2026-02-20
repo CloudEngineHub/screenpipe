@@ -186,6 +186,7 @@ async fn update_last_indexed(
 /// Pre-reads source data outside the write tx, then inserts into FTS
 /// in micro-batches of FTS_MICRO_BATCH_SIZE rows. Each micro-batch
 /// acquires and releases the write lock so frame inserts can interleave.
+#[allow(clippy::explicit_auto_deref)]
 async fn index_frames_fts(db: &DatabaseManager) -> Result<i64, sqlx::Error> {
     let last = get_last_indexed(db, "frames").await?;
 
@@ -245,6 +246,7 @@ async fn index_frames_fts(db: &DatabaseManager) -> Result<i64, sqlx::Error> {
 }
 
 /// Index new rows from `ocr_text` into `ocr_text_fts`.
+#[allow(clippy::explicit_auto_deref)]
 async fn index_ocr_text_fts(db: &DatabaseManager) -> Result<i64, sqlx::Error> {
     let last = get_last_indexed(db, "ocr_text").await?;
 
@@ -302,6 +304,7 @@ async fn index_ocr_text_fts(db: &DatabaseManager) -> Result<i64, sqlx::Error> {
 }
 
 /// Index new rows from `audio_transcriptions` into `audio_transcriptions_fts`.
+#[allow(clippy::explicit_auto_deref)]
 async fn index_audio_transcriptions_fts(db: &DatabaseManager) -> Result<i64, sqlx::Error> {
     let last = get_last_indexed(db, "audio_transcriptions").await?;
 
@@ -360,6 +363,7 @@ async fn index_audio_transcriptions_fts(db: &DatabaseManager) -> Result<i64, sql
 }
 
 /// Index new rows from `accessibility` into `accessibility_fts`.
+#[allow(clippy::explicit_auto_deref)]
 async fn index_accessibility_fts(db: &DatabaseManager) -> Result<i64, sqlx::Error> {
     let last = get_last_indexed(db, "accessibility").await?;
 

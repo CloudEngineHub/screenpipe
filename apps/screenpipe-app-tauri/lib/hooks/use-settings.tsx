@@ -483,6 +483,7 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 					});
 				});
 		}
+		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [settings.analyticsId, settings.user?.id]);
 
 	// When user becomes a Pro subscriber, default to cloud transcription (one-time)
@@ -503,6 +504,7 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 			// Mark as done even if we didn't change anything
 			settingsStore.set({ _proCloudMigrationDone: true } as any);
 		}
+		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [settings.user?.cloud_subscribed, isSettingsLoaded]);
 
 	const updateSettings = async (updates: Partial<Settings>) => {

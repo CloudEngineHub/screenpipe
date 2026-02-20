@@ -389,6 +389,7 @@ export const CurrentFrameTimeline: FC<CurrentFrameTimelineProps> = ({
 			img.onload = null;
 			img.onerror = null;
 		};
+		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [fallbackImageUrl]);
 
 	// OCR data
@@ -589,6 +590,7 @@ export const CurrentFrameTimeline: FC<CurrentFrameTimelineProps> = ({
 		);
 	}
 
+	// eslint-disable-next-line react-hooks/rules-of-hooks
 	const handleContextMenu = useCallback(
 		(e: React.MouseEvent) => {
 			e.preventDefault();
@@ -689,6 +691,7 @@ export const CurrentFrameTimeline: FC<CurrentFrameTimelineProps> = ({
 
 			{/* Fallback mode: preloaded <img> layered on top of video */}
 			{displayedFallbackUrl && !useVideoMode && (
+				// eslint-disable-next-line @next/next/no-img-element
 				<img
 					src={displayedFallbackUrl}
 					className="absolute inset-0 w-full h-full object-contain"

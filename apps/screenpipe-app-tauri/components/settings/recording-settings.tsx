@@ -358,6 +358,7 @@ export function RecordingSettings() {
     };
 
     loadDevices();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Enhanced validation for specific fields

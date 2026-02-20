@@ -61,19 +61,19 @@ impl TreeSnapshot {
             }
             let hash = hasher.finish();
 
-            for i in 0..64 {
+            for (i, bit) in bits.iter_mut().enumerate() {
                 if (hash >> i) & 1 == 1 {
-                    bits[i] += 1;
+                    *bit += 1;
                 } else {
-                    bits[i] -= 1;
+                    *bit -= 1;
                 }
             }
         }
 
         // Convert accumulator to hash: bit is 1 if sum > 0
         let mut result: u64 = 0;
-        for i in 0..64 {
-            if bits[i] > 0 {
+        for (i, &bit) in bits.iter().enumerate() {
+            if bit > 0 {
                 result |= 1 << i;
             }
         }

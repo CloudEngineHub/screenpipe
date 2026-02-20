@@ -111,6 +111,7 @@ export function AIPanel({
 		setActivePreset(activePreset || undefined);
 
 		setOsType(detectOS());
+		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, []);
 
 	const handlePanelMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
