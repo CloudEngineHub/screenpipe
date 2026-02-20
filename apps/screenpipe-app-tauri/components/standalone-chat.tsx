@@ -2089,7 +2089,7 @@ export function StandaloneChat({ className }: { className?: string } = {}) {
   };
 
   return (
-    <div className={cn("flex flex-col h-screen bg-background", className)}>
+    <div className={cn("flex flex-col bg-background", className ?? "h-screen")}>
       {/* Header - draggable */}
       {/* Add left padding on macOS to avoid traffic light overlap */}
       <div

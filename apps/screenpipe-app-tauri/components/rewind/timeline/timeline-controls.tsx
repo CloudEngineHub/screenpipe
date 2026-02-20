@@ -5,7 +5,7 @@
 "use client";
 
 import { Button } from "@/components/ui/button";
-import { ChevronLeft, ChevronRight, RefreshCw, CalendarIcon } from "lucide-react";
+import { ChevronLeft, ChevronRight, RefreshCw, CalendarIcon, Search } from "lucide-react";
 import {
 	endOfDay,
 	format,
@@ -98,6 +98,7 @@ interface TimelineControlsProps {
 	onJumpToday: () => void;
 	onSearchClick?: () => void;
 	onChatClick?: () => void;
+	embedded?: boolean;
 	className?: string;
 }
 
@@ -108,6 +109,7 @@ export function TimelineControls({
 	onJumpToday,
 	onSearchClick,
 	onChatClick,
+	embedded,
 	className,
 }: TimelineControlsProps) {
 	const { isMac } = usePlatform();
@@ -234,23 +236,27 @@ export function TimelineControls({
 					</Button>
 				</div>
 
-				<button
-					type="button"
-					onClick={onSearchClick}
-					className="flex items-center h-10 gap-1.5 bg-background border border-border px-4 font-mono hover:bg-foreground hover:text-background transition-colors duration-150 cursor-pointer group"
-				>
-					<span className="text-xs text-muted-foreground group-hover:text-background">{searchShortcutDisplay}</span>
-					<span className="text-xs text-foreground group-hover:text-background">search</span>
-				</button>
+				{onSearchClick && (
+					<button
+						type="button"
+						onClick={onSearchClick}
+						className="flex items-center h-10 gap-1.5 bg-background border border-border px-4 font-mono hover:bg-foreground hover:text-background transition-colors duration-150 cursor-pointer group"
+					>
+						<span className="text-xs text-muted-foreground group-hover:text-background">{searchShortcutDisplay}</span>
+						<span className="text-xs text-foreground group-hover:text-background">search</span>
+					</button>
+				)}
 
-				<button
-					type="button"
-					onClick={onChatClick}
-					className="flex items-center h-10 gap-1.5 bg-background border border-border px-4 font-mono hover:bg-foreground hover:text-background transition-colors duration-150 cursor-pointer group"
-				>
-					<span className="text-xs text-muted-foreground group-hover:text-background">{chatShortcutDisplay}</span>
-					<span className="text-xs text-foreground group-hover:text-background">chat</span>
-				</button>
+				{onChatClick && (
+					<button
+						type="button"
+						onClick={onChatClick}
+						className="flex items-center h-10 gap-1.5 bg-background border border-border px-4 font-mono hover:bg-foreground hover:text-background transition-colors duration-150 cursor-pointer group"
+					>
+						<span className="text-xs text-muted-foreground group-hover:text-background">{chatShortcutDisplay}</span>
+						<span className="text-xs text-foreground group-hover:text-background">chat</span>
+					</button>
+				)}
 			</div>
 
 			

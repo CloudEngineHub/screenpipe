@@ -40,6 +40,7 @@ import {
   Film,
   Zap,
   User,
+  Users,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
@@ -57,6 +58,7 @@ import {
   VadSensitivity,
   Settings,
 } from "@/lib/hooks/use-settings";
+import { useTeam } from "@/lib/hooks/use-team";
 import { useToast } from "@/components/ui/use-toast";
 import { useHealthCheck } from "@/lib/hooks/use-health-check";
 import { Badge } from "@/components/ui/badge";
@@ -97,16 +99,26 @@ type PermissionsStatus = {
 
 // AudioDeviceInfo and MonitorDevice are imported from @/lib/utils/tauri
 
+const formatCount = (count: number): string => {
+  if (count >= 1000) return `${(count / 1000).toFixed(1)}k`;
+  return `${count}`;
+};
+
 const createWindowOptions = (
-  windowItems: { name: string }[],
+  windowItems: { name: string; count: number; app_name?: string }[],
   existingPatterns: string[]
 ) => {
-  const windowOptions = windowItems
-    .sort((a, b) => a.name.localeCompare(b.name))
+  // Sort by usage frequency (most used first)
+  const windowOptions = [...windowItems]
+    .sort((a, b) => b.count - a.count)
     .map((item) => ({
       value: item.name,
       label: item.name,
       icon: AppWindowMac,
+      description: [
+        item.app_name && item.app_name !== item.name ? item.app_name : null,
+        `${formatCount(item.count)} captures`,
+      ].filter(Boolean).join(" · "),
     }));
 
   // Only add custom patterns that aren't already in windowItems
@@ -121,16 +133,23 @@ const createWindowOptions = (
   return [...windowOptions, ...customOptions];
 };
 
+const getFaviconUrl = (domain: string): string => {
+  return `https://www.google.com/s2/favicons?domain=${encodeURIComponent(domain)}&sz=32`;
+};
+
 const createUrlOptions = (
-  urlItems: { name: string }[],
+  urlItems: { name: string; count: number }[],
   existingUrls: string[]
 ) => {
-  const urlOptions = urlItems
-    .sort((a, b) => a.name.localeCompare(b.name))
+  // Sort by usage frequency (most used first)
+  const urlOptions = [...urlItems]
+    .sort((a, b) => b.count - a.count)
     .map((item) => ({
       value: item.name,
       label: item.name,
+      iconUrl: getFaviconUrl(item.name),
       icon: Globe,
+      description: `${formatCount(item.count)} visits this week`,
     }));
 
   // Add existing custom URLs that aren't in the suggestions
@@ -139,7 +158,8 @@ const createUrlOptions = (
     .map((url) => ({
       value: url,
       label: url,
-      icon: Asterisk,
+      iconUrl: getFaviconUrl(url),
+      icon: Globe,
     }));
 
   return [...urlOptions, ...customOptions];
@@ -178,6 +198,21 @@ export function RecordingSettings() {
   const [showApiKey, setShowApiKey] = useState(false);
   const [isRefreshingSubscription, setIsRefreshingSubscription] = useState(false);
   const { checkLogin } = useLoginDialog();
+  const team = useTeam();
+  const isTeamAdmin = !!team.team && team.role === "admin";
+  const [pushingFilter, setPushingFilter] = useState<string | null>(null);
+
+  const handlePushFilterToTeam = async (configType: string, key: string, filters: string[]) => {
+    setPushingFilter(key);
+    try {
+      await team.pushConfig(configType, key, { filters });
+      toast({ title: "pushed to team" });
+    } catch (err: any) {
+      toast({ title: "failed to push to team", description: err.message, variant: "destructive" });
+    } finally {
+      setPushingFilter(null);
+    }
+  };
 
   // Add new state to track if settings have changed
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
@@ -1506,6 +1541,22 @@ Your screen is a pipe. Everything you see, hear, and type flows through it. Scre
                 Ignored windows
                 <HelpTooltip text="Windows matching these patterns will not be captured by OCR or element capture. Use for privacy — e.g. add 'Password Manager' to skip sensitive apps." />
               </h3>
+              {isTeamAdmin && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-6 text-[10px] ml-auto cursor-pointer"
+                  disabled={pushingFilter === "ignored_windows"}
+                  onClick={() => handlePushFilterToTeam("window_filter", "ignored_windows", settings.ignoredWindows)}
+                >
+                  {pushingFilter === "ignored_windows" ? (
+                    <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                  ) : (
+                    <Users className="h-3 w-3 mr-1" />
+                  )}
+                  push to team
+                </Button>
+              )}
             </div>
             <div className="ml-[26px]">
               <MultiSelect
@@ -1515,6 +1566,15 @@ Your screen is a pipe. Everything you see, hear, and type flows through it. Scre
                 onValueChange={handleIgnoredWindowsChange}
                 placeholder="Select windows to ignore..."
               />
+              {(settings.teamFilters?.ignoredWindows?.length ?? 0) > 0 && (
+                <div className="flex flex-wrap gap-1 mt-1">
+                  {settings.teamFilters!.ignoredWindows.map((w) => (
+                    <Badge key={w} variant="outline" className="text-[10px] h-5">
+                      <Users className="h-2.5 w-2.5 mr-0.5" />{w}
+                    </Badge>
+                  ))}
+                </div>
+              )}
             </div>
           </CardContent>
         </Card>
@@ -1527,6 +1587,22 @@ Your screen is a pipe. Everything you see, hear, and type flows through it. Scre
                 Included windows
                 <HelpTooltip text="When set, ONLY windows matching these patterns will be captured by OCR and element capture. Everything else is ignored. Leave empty to capture all windows (except ignored ones)." />
               </h3>
+              {isTeamAdmin && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-6 text-[10px] ml-auto cursor-pointer"
+                  disabled={pushingFilter === "included_windows"}
+                  onClick={() => handlePushFilterToTeam("window_filter", "included_windows", settings.includedWindows)}
+                >
+                  {pushingFilter === "included_windows" ? (
+                    <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                  ) : (
+                    <Users className="h-3 w-3 mr-1" />
+                  )}
+                  push to team
+                </Button>
+              )}
             </div>
             <div className="ml-[26px]">
               <MultiSelect
@@ -1536,6 +1612,15 @@ Your screen is a pipe. Everything you see, hear, and type flows through it. Scre
                 onValueChange={handleIncludedWindowsChange}
                 placeholder="Whitelist (optional)..."
               />
+              {(settings.teamFilters?.includedWindows?.length ?? 0) > 0 && (
+                <div className="flex flex-wrap gap-1 mt-1">
+                  {settings.teamFilters!.includedWindows.map((w) => (
+                    <Badge key={w} variant="outline" className="text-[10px] h-5">
+                      <Users className="h-2.5 w-2.5 mr-0.5" />{w}
+                    </Badge>
+                  ))}
+                </div>
+              )}
             </div>
           </CardContent>
         </Card>
@@ -1548,6 +1633,22 @@ Your screen is a pipe. Everything you see, hear, and type flows through it. Scre
                 Ignored URLs
                 <HelpTooltip text="Browser URLs matching these patterns will not be captured. Use for privacy — e.g. add 'bank.com' to skip banking sites." />
               </h3>
+              {isTeamAdmin && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-6 text-[10px] ml-auto cursor-pointer"
+                  disabled={pushingFilter === "ignored_urls"}
+                  onClick={() => handlePushFilterToTeam("url_filter", "ignored_urls", settings.ignoredUrls || [])}
+                >
+                  {pushingFilter === "ignored_urls" ? (
+                    <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                  ) : (
+                    <Users className="h-3 w-3 mr-1" />
+                  )}
+                  push to team
+                </Button>
+              )}
             </div>
             <div className="ml-[26px]">
               <MultiSelect
@@ -1565,6 +1666,15 @@ Your screen is a pipe. Everything you see, hear, and type flows through it. Scre
                   <AlertCircle className="h-3 w-3" />
                   Short patterns may over-match. Use specific domains.
                 </p>
+              )}
+              {(settings.teamFilters?.ignoredUrls?.length ?? 0) > 0 && (
+                <div className="flex flex-wrap gap-1 mt-1">
+                  {settings.teamFilters!.ignoredUrls.map((u) => (
+                    <Badge key={u} variant="outline" className="text-[10px] h-5">
+                      <Users className="h-2.5 w-2.5 mr-0.5" />{u}
+                    </Badge>
+                  ))}
+                </div>
               )}
             </div>
           </CardContent>

@@ -1446,7 +1446,7 @@ impl DatabaseManager {
         speaker_name: Option<&str>,
     ) -> Result<Vec<AudioResult>, sqlx::Error> {
         // base query for audio search
-        let mut base_sql = String::from(
+        let base_sql = String::from(
             "SELECT
                 audio_transcriptions.audio_chunk_id,
                 audio_transcriptions.transcription,
@@ -1466,15 +1466,10 @@ impl DatabaseManager {
              LEFT JOIN audio_tags ON audio_chunks.id = audio_tags.audio_chunk_id
              LEFT JOIN tags ON audio_tags.tag_id = tags.id",
         );
-        // if query is provided, join the corresponding fts table
-        if !query.is_empty() {
-            base_sql.push_str(" JOIN audio_transcriptions_fts ON audio_transcriptions_fts.audio_chunk_id = audio_transcriptions.audio_chunk_id");
-        }
-
         // build where clause conditions in order
         let mut conditions = Vec::new();
         if !query.is_empty() {
-            conditions.push("audio_transcriptions_fts MATCH ?");
+            conditions.push("audio_transcriptions.audio_chunk_id IN (SELECT audio_chunk_id FROM audio_transcriptions_fts WHERE audio_transcriptions_fts MATCH ? ORDER BY rank LIMIT 5000)");
         }
         if start_time.is_some() {
             conditions.push("audio_transcriptions.timestamp >= ?");
@@ -3206,7 +3201,7 @@ impl DatabaseManager {
                 query.to_string()
             };
             conditions.push(
-                "f.id IN (SELECT frame_id FROM ocr_text_fts WHERE text MATCH ? ORDER BY rank)",
+                "f.id IN (SELECT frame_id FROM ocr_text_fts WHERE text MATCH ? ORDER BY rank LIMIT 5000)",
             );
             fts_match
         } else {

@@ -23,16 +23,25 @@ import {
   Loader2,
   Plus,
   ExternalLink,
+  Workflow,
+  AppWindowMac,
+  Globe,
 } from "lucide-react";
 import { toast } from "@/components/ui/use-toast";
 import { useSettings } from "@/lib/hooks/use-settings";
-import { useTeam } from "@/lib/hooks/use-team";
+import { useTeam, TeamConfig } from "@/lib/hooks/use-team";
+import { useTeamSync } from "@/lib/hooks/use-team-sync";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { onOpenUrl } from "@tauri-apps/plugin-deep-link";
 import { open as openUrl } from "@tauri-apps/plugin-shell";
 
 export function TeamSection() {
   const { settings } = useSettings();
   const team = useTeam();
+
+  // Must be called before any early returns (Rules of Hooks)
+  useTeamSync(team.configs, !!team.team);
+
   const [teamName, setTeamName] = useState("");
   const [inviteInput, setInviteInput] = useState("");
   const [copied, setCopied] = useState(false);
@@ -178,7 +187,7 @@ export function TeamSection() {
             Team
           </h1>
           <p className="text-sm text-muted-foreground mt-0.5">
-            manage your team and share pipe configurations
+            manage your team and share pipe configurations and content filters
           </p>
         </div>
 
@@ -226,7 +235,7 @@ export function TeamSection() {
             Team
           </h1>
           <p className="text-sm text-muted-foreground mt-0.5">
-            share pipe configurations with your team using end-to-end encryption
+            share pipe configurations and content filters with your team using end-to-end encryption
           </p>
         </div>
 
@@ -236,7 +245,7 @@ export function TeamSection() {
             <div>
               <h3 className="text-lg font-semibold">bring your team to screenpipe</h3>
               <p className="text-sm text-muted-foreground mt-1">
-                add your team and push pipe configurations to all members.
+                add your team and push pipe configurations and content filters to all members.
                 everything is end-to-end encrypted — the server never sees your configs.
               </p>
             </div>
@@ -313,6 +322,9 @@ export function TeamSection() {
   // team exists — admin or member view
   const isAdmin = team.role === "admin";
   const pipeConfigs = team.configs.filter((c) => c.config_type === "pipe" && c.scope === "team");
+  const windowFilterConfigs = team.configs.filter((c) => c.config_type === "window_filter" && c.scope === "team");
+  const urlFilterConfigs = team.configs.filter((c) => c.config_type === "url_filter" && c.scope === "team");
+  const totalSharedConfigs = pipeConfigs.length + windowFilterConfigs.length + urlFilterConfigs.length;
 
   return (
     <div className="space-y-6">
@@ -403,50 +415,76 @@ export function TeamSection() {
         </div>
       </Card>
 
-      {/* Shared pipes */}
+      {/* Shared configs — tabbed view */}
       <Card className="p-4">
         <h3 className="text-sm font-medium mb-3 flex items-center gap-1.5">
           <Lock className="h-4 w-4" />
-          shared pipes ({pipeConfigs.length})
+          shared configs ({totalSharedConfigs})
         </h3>
-        {pipeConfigs.length === 0 ? (
-          <p className="text-sm text-muted-foreground">
-            {isAdmin
-              ? "no pipes shared yet — push a pipe config from the pipes section"
-              : "no shared pipes from your admin yet"}
-          </p>
-        ) : (
-          <div className="space-y-2">
-            {pipeConfigs.map((c) => (
-              <div
-                key={c.id}
-                className="flex items-center justify-between py-2 px-3 rounded-md border"
-              >
-                <div>
-                  <div className="flex items-center gap-2">
-                    <Lock className="h-3 w-3 text-muted-foreground" />
-                    <span className="text-sm font-medium">{c.key}</span>
-                  </div>
-                  <p className="text-xs text-muted-foreground mt-0.5">
-                    {c.updated_at
-                      ? `last updated ${new Date(c.updated_at).toLocaleString()}`
-                      : ""}
-                  </p>
-                </div>
-                {isAdmin && (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="h-7 text-xs text-muted-foreground hover:text-destructive"
-                    onClick={() => team.deleteConfig(c.id)}
-                  >
-                    <Trash2 className="h-3 w-3" />
-                  </Button>
-                )}
+        <Tabs defaultValue="pipes">
+          <TabsList className="h-8">
+            <TabsTrigger value="pipes" className="text-xs h-6 px-2.5">
+              <Workflow className="h-3 w-3 mr-1" />
+              pipes ({pipeConfigs.length})
+            </TabsTrigger>
+            <TabsTrigger value="windows" className="text-xs h-6 px-2.5">
+              <AppWindowMac className="h-3 w-3 mr-1" />
+              windows ({windowFilterConfigs.length})
+            </TabsTrigger>
+            <TabsTrigger value="urls" className="text-xs h-6 px-2.5">
+              <Globe className="h-3 w-3 mr-1" />
+              urls ({urlFilterConfigs.length})
+            </TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="pipes">
+            {pipeConfigs.length === 0 ? (
+              <p className="text-sm text-muted-foreground py-3">
+                {isAdmin
+                  ? "no pipes shared yet — share a pipe from the pipes section"
+                  : "no shared pipes from your admin yet"}
+              </p>
+            ) : (
+              <div className="space-y-2 mt-2">
+                {pipeConfigs.map((c) => (
+                  <SharedConfigRow key={c.id} config={c} isAdmin={isAdmin} onDelete={() => team.deleteConfig(c.id)} />
+                ))}
               </div>
-            ))}
-          </div>
-        )}
+            )}
+          </TabsContent>
+
+          <TabsContent value="windows">
+            {windowFilterConfigs.length === 0 ? (
+              <p className="text-sm text-muted-foreground py-3">
+                {isAdmin
+                  ? "no window filters shared yet — push filters from recording settings"
+                  : "no shared window filters from your admin yet"}
+              </p>
+            ) : (
+              <div className="space-y-2 mt-2">
+                {windowFilterConfigs.map((c) => (
+                  <SharedFilterRow key={c.id} config={c} isAdmin={isAdmin} onDelete={() => team.deleteConfig(c.id)} />
+                ))}
+              </div>
+            )}
+          </TabsContent>
+
+          <TabsContent value="urls">
+            {urlFilterConfigs.length === 0 ? (
+              <p className="text-sm text-muted-foreground py-3">
+                {isAdmin
+                  ? "no url filters shared yet — push filters from recording settings"
+                  : "no shared url filters from your admin yet"}
+              </p>
+            ) : (
+              <div className="space-y-2 mt-2">
+                {urlFilterConfigs.map((c) => (
+                  <SharedFilterRow key={c.id} config={c} isAdmin={isAdmin} onDelete={() => team.deleteConfig(c.id)} />
+                ))}
+              </div>
+            )}
+          </TabsContent>
+        </Tabs>
       </Card>
 
       {/* Danger zone */}
@@ -503,6 +541,72 @@ export function TeamSection() {
 
       {team.error && (
         <p className="text-sm text-destructive">{team.error}</p>
+      )}
+    </div>
+  );
+}
+
+function SharedConfigRow({ config, isAdmin, onDelete }: { config: TeamConfig; isAdmin: boolean; onDelete: () => void }) {
+  return (
+    <div className="flex items-center justify-between py-2 px-3 rounded-md border">
+      <div>
+        <div className="flex items-center gap-2">
+          <Lock className="h-3 w-3 text-muted-foreground" />
+          <span className="text-sm font-medium">{config.key}</span>
+        </div>
+        <p className="text-xs text-muted-foreground mt-0.5">
+          {config.updated_at
+            ? `last updated ${new Date(config.updated_at).toLocaleString()}`
+            : ""}
+        </p>
+      </div>
+      {isAdmin && (
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-7 text-xs text-muted-foreground hover:text-destructive"
+          onClick={onDelete}
+        >
+          <Trash2 className="h-3 w-3" />
+        </Button>
+      )}
+    </div>
+  );
+}
+
+function SharedFilterRow({ config, isAdmin, onDelete }: { config: TeamConfig; isAdmin: boolean; onDelete: () => void }) {
+  const filters = (config.value as { filters?: string[] })?.filters || [];
+  return (
+    <div className="flex items-center justify-between py-2 px-3 rounded-md border">
+      <div>
+        <div className="flex items-center gap-2">
+          <Lock className="h-3 w-3 text-muted-foreground" />
+          <span className="text-sm font-medium">{config.key.replace(/_/g, " ")}</span>
+        </div>
+        {filters.length > 0 && (
+          <div className="flex flex-wrap gap-1 mt-1">
+            {filters.map((f) => (
+              <Badge key={f} variant="secondary" className="text-[10px] h-5">
+                {f}
+              </Badge>
+            ))}
+          </div>
+        )}
+        <p className="text-xs text-muted-foreground mt-0.5">
+          {config.updated_at
+            ? `last updated ${new Date(config.updated_at).toLocaleString()}`
+            : ""}
+        </p>
+      </div>
+      {isAdmin && (
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-7 text-xs text-muted-foreground hover:text-destructive"
+          onClick={onDelete}
+        >
+          <Trash2 className="h-3 w-3" />
+        </Button>
       )}
     </div>
   );
