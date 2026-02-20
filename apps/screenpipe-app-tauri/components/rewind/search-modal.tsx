@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useRef, useCallback, useMemo } from "react";
-import { Search, X, Loader2, Clock, MessageSquare, User, ArrowLeft, Mic, Volume2 } from "lucide-react";
+import { Search, X, Loader2, Clock, MessageSquare, User, ArrowLeft, Mic, Volume2, Hash, Tag } from "lucide-react";
 import { useKeywordSearchStore, SearchMatch } from "@/lib/hooks/use-keyword-search-store";
 import { useDebounce } from "@/lib/hooks/use-debounce";
 import { format, isToday, isYesterday } from "date-fns";
@@ -24,6 +24,13 @@ interface AudioTranscription {
   duration_secs: number;
 }
 
+
+interface TaggedFrame {
+  frame_id: number;
+  timestamp: string;
+  tag_names: string[];
+  app_name: string;
+}
 
 interface SearchModalProps {
   isOpen: boolean;
@@ -277,6 +284,12 @@ export function SearchModal({ isOpen, onClose, onNavigateToTimestamp }: SearchMo
   const [isLoadingTranscriptions, setIsLoadingTranscriptions] = useState(false);
   const [selectedTranscriptionIndex, setSelectedTranscriptionIndex] = useState(0);
 
+  // Tag search state
+  const [tagResults, setTagResults] = useState<TaggedFrame[]>([]);
+  const [allTags, setAllTags] = useState<string[]>([]); // distinct tags for autocomplete
+  const [isSearchingTags, setIsSearchingTags] = useState(false);
+  const isTagSearch = query.startsWith("#");
+
   // App filter
   const [appFilter, setAppFilter] = useState<string | null>(null);
 
@@ -330,6 +343,8 @@ export function SearchModal({ isOpen, onClose, onNavigateToTimestamp }: SearchMo
       resetSearch();
       setAppFilter(null);
       setSpeakerResults([]);
+      setTagResults([]);
+      setAllTags([]);
       setSelectedSpeaker(null);
       setSpeakerTranscriptions([]);
       setSelectedTranscriptionIndex(0);
@@ -361,11 +376,20 @@ export function SearchModal({ isOpen, onClose, onNavigateToTimestamp }: SearchMo
     if (!debouncedQuery.trim()) {
       resetSearch();
       setSpeakerResults([]);
+      setTagResults([]);
       setAppFilter(null);
       return;
     }
 
+    // Skip keyword search for #tag queries (handled by tag search effect)
+    if (debouncedQuery.startsWith("#")) {
+      resetSearch();
+      setSpeakerResults([]);
+      return;
+    }
+
     setAppFilter(null);
+    setTagResults([]);
     setOcrOffset(0);
     setHasMoreOcr(true);
     searchKeywords(debouncedQuery, {
@@ -373,6 +397,83 @@ export function SearchModal({ isOpen, onClose, onNavigateToTimestamp }: SearchMo
       offset: 0,
     });
   }, [debouncedQuery, searchKeywords, resetSearch]);
+
+  // Search tags when query starts with #
+  useEffect(() => {
+    if (!debouncedQuery.startsWith("#")) {
+      setTagResults([]);
+      setAllTags([]);
+      return;
+    }
+
+    const tagQuery = debouncedQuery.slice(1).trim().toLowerCase(); // strip #
+    let cancelled = false;
+
+    (async () => {
+      setIsSearchingTags(true);
+      try {
+        // Fetch all distinct tags with counts from the tags + vision_tags tables
+        const tagsResp = await fetch("http://localhost:3030/raw_sql", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            query: "SELECT t.name, COUNT(vt.vision_id) as count FROM tags t JOIN vision_tags vt ON t.id = vt.tag_id GROUP BY t.id, t.name ORDER BY count DESC",
+          }),
+          signal: AbortSignal.timeout(5000),
+        });
+
+        if (cancelled) return;
+        const allDbTags: { name: string; count: number }[] = tagsResp.ok
+          ? await tagsResp.json()
+          : [];
+
+        // Set autocomplete pills (filtered if user typed something after #)
+        const tagNames = allDbTags.map(t => t.name);
+        setAllTags(
+          tagQuery.length > 0
+            ? tagNames.filter(t => t.toLowerCase().includes(tagQuery))
+            : tagNames
+        );
+
+        // Find tags that match the query
+        const matched = tagQuery.length > 0
+          ? allDbTags.filter(t => t.name.toLowerCase().includes(tagQuery))
+          : allDbTags;
+
+        if (matched.length > 0 && !cancelled) {
+          // Fetch frames tagged with matching tags
+          const inList = matched.map(t => `'${t.name.replace(/'/g, "''")}'`).join(",");
+          const framesResp = await fetch("http://localhost:3030/raw_sql", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              query: `SELECT f.id as frame_id, f.timestamp, f.app_name, GROUP_CONCAT(DISTINCT t.name) as tag_names FROM vision_tags vt JOIN frames f ON vt.vision_id = f.id JOIN tags t ON vt.tag_id = t.id WHERE t.name IN (${inList}) GROUP BY f.id ORDER BY f.timestamp DESC LIMIT 50`,
+            }),
+            signal: AbortSignal.timeout(5000),
+          });
+
+          if (cancelled) return;
+          if (framesResp.ok) {
+            const rows: { frame_id: number; timestamp: string; tag_names: string; app_name: string }[] = await framesResp.json();
+            setTagResults(rows.map(r => ({
+              frame_id: r.frame_id,
+              timestamp: r.timestamp,
+              tag_names: r.tag_names.split(","),
+              app_name: r.app_name || "",
+            })));
+          }
+        } else {
+          setTagResults([]);
+        }
+      } catch {
+        // ignore
+      } finally {
+        if (!cancelled) setIsSearchingTags(false);
+      }
+    })();
+
+    return () => { cancelled = true; };
+  }, [debouncedQuery]);
 
   // Search speakers in parallel
   useEffect(() => {
@@ -649,8 +750,8 @@ export function SearchModal({ isOpen, onClose, onNavigateToTimestamp }: SearchMo
 
   if (!isOpen) return null;
 
-  const hasResults = searchResults.length > 0 || speakerResults.length > 0;
-  const showEmpty = !isSearching && !isSearchingSpeakers && debouncedQuery && !hasResults && !selectedSpeaker;
+  const hasResults = searchResults.length > 0 || speakerResults.length > 0 || tagResults.length > 0;
+  const showEmpty = !isSearching && !isSearchingSpeakers && !isSearchingTags && debouncedQuery && !hasResults && !selectedSpeaker && !isTagSearch;
   const activeIndex = hoveredIndex ?? selectedIndex;
 
   return (
@@ -695,7 +796,7 @@ export function SearchModal({ isOpen, onClose, onNavigateToTimestamp }: SearchMo
                 setHasMoreTranscriptions(true);
               }
             }}
-            placeholder="Search your memory..."
+            placeholder="Search your memory... (# for tags)"
             className="flex-1 bg-transparent text-foreground placeholder:text-muted-foreground text-sm outline-none"
             autoComplete="off"
             autoCorrect="off"
@@ -703,7 +804,7 @@ export function SearchModal({ isOpen, onClose, onNavigateToTimestamp }: SearchMo
             spellCheck={false}
             autoFocus
           />
-          {isSearching && <Loader2 className="w-4 h-4 text-muted-foreground animate-spin" />}
+          {(isSearching || isSearchingTags) && <Loader2 className="w-4 h-4 text-muted-foreground animate-spin" />}
           {query && (
             <button
               onClick={() => setQuery("")}
@@ -815,8 +916,99 @@ export function SearchModal({ isOpen, onClose, onNavigateToTimestamp }: SearchMo
                 </div>
               )}
 
+              {/* Tag autocomplete pills */}
+              {isTagSearch && allTags.length > 0 && (
+                <div className="mb-4">
+                  <p className="text-xs text-muted-foreground mb-2 flex items-center gap-1.5">
+                    <Tag className="w-3 h-3" />
+                    tags
+                  </p>
+                  <div className="flex flex-wrap gap-1.5 mb-3">
+                    {allTags.map((t) => {
+                      const tagQuery = query.slice(1).trim().toLowerCase();
+                      const isActive = tagQuery === t;
+                      return (
+                        <button
+                          key={t}
+                          onClick={() => setQuery(`#${t}`)}
+                          className={cn(
+                            "inline-flex items-center gap-1 px-2.5 py-1 text-xs rounded-full border transition-colors cursor-pointer",
+                            isActive
+                              ? "bg-foreground text-background border-foreground"
+                              : "border-border text-foreground/70 hover:bg-muted hover:border-foreground/30"
+                          )}
+                        >
+                          <Hash className="w-2.5 h-2.5" />
+                          {t}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* Tag timeline entries — thumbnail grid */}
+              {isTagSearch && tagResults.length > 0 && (
+                <div className="grid grid-cols-4 gap-3">
+                  {tagResults.map((frame) => (
+                    <div
+                      key={frame.frame_id}
+                      onClick={() => {
+                        onNavigateToTimestamp(frame.timestamp);
+                        onClose();
+                      }}
+                      className="cursor-pointer rounded overflow-hidden border border-border hover:border-foreground/50 transition-all duration-150"
+                    >
+                      <FrameThumbnail
+                        frameId={frame.frame_id}
+                        alt={frame.tag_names.join(", ")}
+                      />
+                      <div className="p-2 bg-card">
+                        <div className="flex items-center gap-1.5 text-xs text-muted-foreground mb-1">
+                          <Clock className="w-3 h-3" />
+                          <span className="font-mono">
+                            {formatRelativeTime(frame.timestamp)}
+                          </span>
+                        </div>
+                        <p className="text-xs font-medium text-foreground truncate">
+                          {frame.app_name || frame.tag_names[0]}
+                        </p>
+                        <div className="flex flex-wrap gap-1 mt-1">
+                          {frame.tag_names.map((t) => (
+                            <span
+                              key={t}
+                              className="px-1.5 py-0.5 text-[10px] rounded-full bg-foreground/8 text-foreground/60"
+                            >
+                              {t}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Tag search loading */}
+              {isTagSearch && isSearchingTags && tagResults.length === 0 && allTags.length === 0 && (
+                <div className="space-y-3">
+                  {Array.from({ length: 4 }).map((_, i) => (
+                    <div key={i} className="bg-muted animate-pulse rounded p-3 h-12" />
+                  ))}
+                </div>
+              )}
+
+              {/* Tag search empty */}
+              {isTagSearch && !isSearchingTags && tagResults.length === 0 && allTags.length === 0 && (
+                <div className="py-12 text-center text-sm text-muted-foreground">
+                  {query.slice(1).trim()
+                    ? <>no tags matching &quot;{query.slice(1).trim()}&quot;</>
+                    : "no tags found"}
+                </div>
+              )}
+
               {/* Loading skeleton */}
-              {isSearching && searchResults.length === 0 && speakerResults.length === 0 && (
+              {!isTagSearch && isSearching && searchResults.length === 0 && speakerResults.length === 0 && (
                 <div className="grid grid-cols-4 gap-3">
                   {Array.from({ length: 8 }).map((_, i) => (
                     <div key={i} className="bg-muted animate-pulse rounded overflow-hidden">
