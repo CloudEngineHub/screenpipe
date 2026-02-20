@@ -1644,6 +1644,13 @@ export function StandaloneChat({ className }: { className?: string } = {}) {
         const terminatedPid = event.payload;
         console.log("[Pi] Process terminated, pid:", terminatedPid, "restart count:", piRestartCountRef.current);
 
+        // pid=0 means the idle watchdog stopped Pi to save resources — don't auto-restart
+        if (terminatedPid === 0) {
+          console.log("[Pi] Idle watchdog stopped Pi, skipping auto-restart");
+          setPiInfo(null);
+          return;
+        }
+
         // If a message was in flight, mark it as errored so the UI doesn't stay stuck
         if (piMessageIdRef.current) {
           const msgId = piMessageIdRef.current;
