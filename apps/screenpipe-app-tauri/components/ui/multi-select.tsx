@@ -293,6 +293,7 @@ export const MultiSelect = React.forwardRef<
                             src={option.iconUrl}
                             alt=""
                             className="h-3.5 w-3.5 mr-1.5 rounded-sm"
+                            onLoad={(e) => { const img = e.target as HTMLImageElement; if (img.naturalWidth <= 2) img.style.display = 'none'; }}
                             onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
                           />
                         ) : IconComponent ? (
@@ -428,7 +429,8 @@ export const MultiSelect = React.forwardRef<
                           src={option.iconUrl}
                           alt=""
                           className="mr-2 h-4 w-4 shrink-0 rounded-sm"
-                          onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                          onLoad={(e) => { const img = e.target as HTMLImageElement; if (img.naturalWidth <= 2) img.style.display = 'none'; }}
+                            onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
                         />
                       ) : option.icon ? (
                         <option.icon className="mr-2 h-4 w-4 text-muted-foreground shrink-0" />
