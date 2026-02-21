@@ -487,9 +487,11 @@ export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 		return () => clearTimeout(timer);
 	}, [seekingTimestamp, setPendingNavigation]);
 
-	// Progressive loading: show UI immediately once we have any frames
+	// Progressive loading: show UI immediately once we have any frames.
+	// During navigation, frames are cleared but we DON'T show the full-screen
+	// blocker — the inline spinner on the date control is enough feedback.
 	const hasInitialFrames = frames.length > 0;
-	const showBlockingLoader = isLoading && !hasInitialFrames;
+	const showBlockingLoader = isLoading && !hasInitialFrames && !isNavigating;
 
 
 	// Auto-select first frame when frames arrive and no frame is selected
@@ -1118,6 +1120,9 @@ export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 	};
 
 	const handleDateChange = async (newDate: Date) => {
+		// Guard against double-click / re-entry while navigation is in progress
+		if (isNavigatingRef.current) return;
+
 		// Pause playback on date change
 		pausePlayback();
 

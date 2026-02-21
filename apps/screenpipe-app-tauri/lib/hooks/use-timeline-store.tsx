@@ -148,16 +148,18 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
 			requestTimeoutTimer = null;
 		}
 		requestRetryCount = 0;
-		// Keep existing frames visible to avoid the full-screen "Loading Timeline"
-		// blocker. The pendingNavigation effect in timeline.tsx filters by target
-		// date to find the right frame once new data arrives.
-		// Clear frameTimestamps so incoming frames from the new date aren't
-		// rejected as duplicates if they somehow share timestamps with old frames.
-		set((state) => ({
+		// Clear frames + timestamps so:
+		// 1) request timeout logic correctly sees "no frames" and retries
+		// 2) pendingNavigation effect triggers on first batch from new date
+		// 3) no stale old-date frames confuse the frame selection
+		// The full-screen "Loading Timeline" blocker is suppressed during
+		// navigation by the isNavigating flag in timeline.tsx.
+		set(() => ({
+			frames: [],
 			frameTimestamps: new Set<string>(),
 			sentRequests: new Set<string>(),
 			isLoading: true,
-			loadingProgress: { loaded: state.frames.length, isStreaming: false },
+			loadingProgress: { loaded: 0, isStreaming: false },
 			error: null,
 			message: "loading...",
 		}));
