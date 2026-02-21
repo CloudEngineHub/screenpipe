@@ -162,6 +162,10 @@ export const CurrentFrameTimeline: FC<CurrentFrameTimelineProps> = ({
 		lastFrameIdRef.current = frameId;
 	}, [frameId]);
 
+	// Snapshot frame direct-load state (bypasses HTTP server entirely)
+	const [snapshotAssetUrl, setSnapshotAssetUrl] = useState<string | null>(null);
+	const [snapshotFailed, setSnapshotFailed] = useState(false);
+
 	// Debounce frame changes
 	useEffect(() => {
 		if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
@@ -177,6 +181,19 @@ export const CurrentFrameTimeline: FC<CurrentFrameTimelineProps> = ({
 			if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
 		};
 	}, [frameId, filePath, offsetIndex, fpsFromServer]);
+
+	// Detect snapshot frames (event-driven JPEGs) vs video chunks
+	const isSnapshotFrame = useMemo(() => {
+		if (!debouncedFrame?.filePath) return false;
+		const lower = debouncedFrame.filePath.toLowerCase();
+		return lower.endsWith('.jpg') || lower.endsWith('.jpeg') || lower.endsWith('.png');
+	}, [debouncedFrame?.filePath]);
+
+	// Reset snapshot state when frame changes
+	useEffect(() => {
+		setSnapshotFailed(false);
+		setSnapshotAssetUrl(null);
+	}, [debouncedFrame?.filePath]);
 
 	// Convert file path to asset URL
 	const getVideoUrl = useCallback(async (path: string): Promise<string | null> => {
@@ -235,7 +252,7 @@ export const CurrentFrameTimeline: FC<CurrentFrameTimelineProps> = ({
 
 	// Main video seeking effect
 	useEffect(() => {
-		if (!debouncedFrame || !useVideoMode) return;
+		if (!debouncedFrame || !useVideoMode || isSnapshotFrame) return;
 		const { filePath: path, offsetIndex: idx, fps: serverFps, frameId: fid } = debouncedFrame;
 
 		// If this chunk previously failed, go straight to fallback
@@ -348,13 +365,54 @@ export const CurrentFrameTimeline: FC<CurrentFrameTimelineProps> = ({
 			loadedChunkRef.current = null;
 			setUseVideoMode(false);
 		});
-	}, [debouncedFrame, useVideoMode, getVideoUrl, resolveEffectiveFps]);
+	}, [debouncedFrame, useVideoMode, getVideoUrl, resolveEffectiveFps, isSnapshotFrame]);
+
+	// Snapshot frames: load directly via Tauri asset protocol (no HTTP/DB needed)
+	useEffect(() => {
+		if (!isSnapshotFrame || snapshotFailed || !debouncedFrame?.filePath) return;
+		let cancelled = false;
+		frameLoadStartTimeRef.current = performance.now();
+
+		getVideoUrl(debouncedFrame.filePath).then((url) => {
+			if (cancelled || !url) return;
+			// Preload before displaying to avoid flicker
+			const img = new Image();
+			img.onload = () => {
+				if (cancelled) return;
+				setSnapshotAssetUrl(url);
+				setIsLoading(false);
+				setHasError(false);
+				setNaturalDimensions({ width: img.naturalWidth, height: img.naturalHeight });
+				if (frameLoadStartTimeRef.current !== null) {
+					const loadTime = performance.now() - frameLoadStartTimeRef.current;
+					posthog.capture("timeline_frame_load_time", {
+						duration_ms: Math.round(loadTime),
+						frame_id: debouncedFrame.frameId,
+						success: true,
+						mode: "snapshot_direct",
+						frames_skipped: framesSkippedRef.current,
+					});
+					frameLoadStartTimeRef.current = null;
+					framesSkippedRef.current = 0;
+				}
+			};
+			img.onerror = () => {
+				if (cancelled) return;
+				setSnapshotFailed(true); // fall through to HTTP fallback
+			};
+			img.src = url;
+		});
+
+		return () => { cancelled = true; };
+	}, [isSnapshotFrame, snapshotFailed, debouncedFrame?.filePath, debouncedFrame?.frameId, getVideoUrl]);
 
 	// Fallback: ffmpeg <img> mode (same as old behavior)
+	// Skipped for snapshot frames that loaded successfully via asset protocol
 	const fallbackImageUrl = useMemo(() => {
 		if (useVideoMode || !debouncedFrame) return null;
+		if (isSnapshotFrame && !snapshotFailed) return null;
 		return `http://localhost:3030/frames/${debouncedFrame.frameId}`;
-	}, [useVideoMode, debouncedFrame]);
+	}, [useVideoMode, debouncedFrame, isSnapshotFrame, snapshotFailed]);
 
 	// Preload fallback image — only swap displayed URL when the new image loads successfully
 	useEffect(() => {
@@ -551,12 +609,12 @@ export const CurrentFrameTimeline: FC<CurrentFrameTimelineProps> = ({
 		return () => observer.disconnect();
 	}, [naturalDimensions]);
 
-	// Re-enable video mode when navigating to a non-failed chunk
+	// Re-enable video mode when navigating to a non-failed video chunk
 	useEffect(() => {
-		if (debouncedFrame?.filePath && !isChunkFailed(debouncedFrame.filePath)) {
+		if (debouncedFrame?.filePath && !isChunkFailed(debouncedFrame.filePath) && !isSnapshotFrame) {
 			setUseVideoMode(true);
 		}
-	}, [debouncedFrame?.filePath]);
+	}, [debouncedFrame?.filePath, isSnapshotFrame]);
 
 	if (!frameId) {
 		return (
@@ -695,8 +753,20 @@ export const CurrentFrameTimeline: FC<CurrentFrameTimelineProps> = ({
 				}}
 			/>
 
-			{/* Fallback mode: preloaded <img> layered on top of video */}
-			{displayedFallbackUrl && !useVideoMode && (
+			{/* Snapshot frame: direct local file via asset protocol — no HTTP/DB needed */}
+			{snapshotAssetUrl && isSnapshotFrame && !snapshotFailed && (
+				// eslint-disable-next-line @next/next/no-img-element
+				<img
+					src={snapshotAssetUrl}
+					className="absolute inset-0 w-full h-full object-contain"
+					style={{ zIndex: 2 }}
+					alt="Current frame"
+					draggable={false}
+				/>
+			)}
+
+			{/* Fallback mode: preloaded <img> via HTTP server */}
+			{displayedFallbackUrl && !useVideoMode && !(snapshotAssetUrl && isSnapshotFrame && !snapshotFailed) && (
 				// eslint-disable-next-line @next/next/no-img-element
 				<img
 					src={displayedFallbackUrl}
