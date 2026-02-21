@@ -322,18 +322,24 @@ pub async fn event_driven_capture_loop(
 
         if let Some(trigger) = trigger {
             if state.can_capture() {
-                match do_capture(
-                    &db,
-                    &monitor,
-                    monitor_id,
-                    &device_name,
-                    &snapshot_writer,
-                    &tree_walker_config,
-                    &trigger,
+                // Timeout prevents the capture loop from blocking indefinitely
+                // when the DB pool is saturated (e.g., FTS backfill + streaming).
+                let capture_result = tokio::time::timeout(
+                    Duration::from_secs(5),
+                    do_capture(
+                        &db,
+                        &monitor,
+                        monitor_id,
+                        &device_name,
+                        &snapshot_writer,
+                        &tree_walker_config,
+                        &trigger,
+                    ),
                 )
-                .await
-                {
-                    Ok(result) => {
+                .await;
+
+                match capture_result {
+                    Ok(Ok(result)) => {
                         state.mark_captured();
 
                         // Feed the captured frame to comparer so we don't
@@ -358,12 +364,19 @@ pub async fn event_driven_capture_loop(
                             result.duration_ms
                         );
                     }
-                    Err(e) => {
+                    Ok(Err(e)) => {
                         error!(
                             "event capture failed (trigger={}, monitor={}): {}",
                             trigger.as_str(),
                             monitor_id,
                             e
+                        );
+                    }
+                    Err(_timeout) => {
+                        warn!(
+                            "event capture timed out (trigger={}, monitor={}) — DB pool may be saturated",
+                            trigger.as_str(),
+                            monitor_id
                         );
                     }
                 }

@@ -386,18 +386,39 @@ impl DatabaseManager {
     /// if not committed (preventing dirty connections from poisoning the pool).
     pub async fn begin_immediate_with_retry(&self) -> Result<ImmediateTx, sqlx::Error> {
         // Acquire the write semaphore first — this is where serialization happens.
-        // Only one task can pass this point at a time.
-        let permit = Arc::clone(&self.write_semaphore)
-            .acquire_owned()
-            .await
-            .map_err(|_| sqlx::Error::PoolClosed)?;
+        // Only one task can pass this point at a time. Use a timeout so captures
+        // don't block indefinitely when FTS holds the semaphore waiting for a pool
+        // connection (which itself may be blocked by streaming queries).
+        let permit = match tokio::time::timeout(
+            Duration::from_secs(5),
+            Arc::clone(&self.write_semaphore).acquire_owned(),
+        )
+        .await
+        {
+            Ok(Ok(permit)) => permit,
+            Ok(Err(_)) => return Err(sqlx::Error::PoolClosed),
+            Err(_) => {
+                return Err(sqlx::Error::PoolTimedOut);
+            }
+        };
 
         // With the semaphore held, BEGIN IMMEDIATE should succeed immediately
         // since no other writer can be active. Retry only for edge cases
         // (e.g., checkpoint in progress).
         let max_retries = 3;
         for attempt in 1..=max_retries {
-            let mut conn = self.pool.acquire().await?;
+            // Short timeout on pool.acquire — with semaphore held, we don't want
+            // to block for 30s waiting for a pool connection.
+            let mut conn = match tokio::time::timeout(
+                Duration::from_secs(3),
+                self.pool.acquire(),
+            )
+            .await
+            {
+                Ok(Ok(conn)) => conn,
+                Ok(Err(e)) => return Err(e),
+                Err(_) => return Err(sqlx::Error::PoolTimedOut),
+            };
             match sqlx::query("BEGIN IMMEDIATE").execute(&mut *conn).await {
                 Ok(_) => {
                     return Ok(ImmediateTx {
@@ -423,13 +444,35 @@ impl DatabaseManager {
     /// Low-priority version of `begin_immediate_with_retry` for background tasks
     /// like the FTS indexer. Returns `None` if the write semaphore is already held,
     /// so the caller can skip and retry later instead of blocking real-time captures.
+    ///
+    /// IMPORTANT: pool.acquire has a short timeout to prevent holding the write
+    /// semaphore while waiting for a pool connection. Without this, FTS can hold
+    /// the semaphore for up to 30s (pool acquire_timeout), starving captures.
     pub async fn try_begin_immediate(&self) -> Result<Option<ImmediateTx>, sqlx::Error> {
         let permit = match Arc::clone(&self.write_semaphore).try_acquire_owned() {
             Ok(permit) => permit,
             Err(_) => return Ok(None), // Someone else is writing — yield
         };
 
-        let mut conn = self.pool.acquire().await?;
+        // Short timeout on pool.acquire — don't hold the write semaphore while
+        // waiting for a pool connection. If the pool is saturated (streaming queries),
+        // release the semaphore immediately so captures aren't blocked.
+        let conn = match tokio::time::timeout(
+            Duration::from_millis(500),
+            self.pool.acquire(),
+        )
+        .await
+        {
+            Ok(Ok(conn)) => conn,
+            Ok(Err(e)) => return Err(e),
+            Err(_) => {
+                // Pool busy — drop semaphore permit so captures can proceed
+                drop(permit);
+                return Ok(None);
+            }
+        };
+
+        let mut conn = conn;
         match sqlx::query("BEGIN IMMEDIATE").execute(&mut *conn).await {
             Ok(_) => Ok(Some(ImmediateTx {
                 conn: Some(conn),
