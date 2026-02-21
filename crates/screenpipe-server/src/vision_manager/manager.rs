@@ -2,37 +2,23 @@
 
 use anyhow::Result;
 use dashmap::DashMap;
-use screenpipe_core::Language;
 use screenpipe_db::DatabaseManager;
 use screenpipe_vision::monitor::{get_monitor_by_id, list_monitors};
-use screenpipe_vision::{OcrEngine, PipelineMetrics};
+use screenpipe_vision::PipelineMetrics;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
-use std::time::Duration;
 use tokio::runtime::Handle;
 use tokio::sync::RwLock;
 use tokio::task::JoinHandle;
 use tracing::{debug, error, info, warn};
 
-use crate::core::record_video;
-
 /// Configuration for VisionManager
 #[derive(Clone)]
 pub struct VisionManagerConfig {
     pub output_path: String,
-    pub fps: f64,
-    pub video_chunk_duration: Duration,
-    pub ocr_engine: Arc<OcrEngine>,
-    pub use_pii_removal: bool,
     pub ignored_windows: Vec<String>,
     pub included_windows: Vec<String>,
-    pub ignored_urls: Vec<String>,
-    pub languages: Vec<Language>,
-    pub activity_feed: screenpipe_vision::ActivityFeedOption,
-    pub video_quality: String,
     pub vision_metrics: Arc<PipelineMetrics>,
-    pub disable_ocr: bool,
-    pub event_driven: bool,
 }
 
 /// Status of the VisionManager
@@ -135,7 +121,6 @@ impl VisionManager {
     }
 
     /// Start recording on a specific monitor
-    #[allow(clippy::clone_on_copy)] // ActivityFeedOption is not Copy when adaptive-fps feature is enabled
     pub async fn start_monitor(&self, monitor_id: u32) -> Result<()> {
         // Check if already recording
         if self.recording_tasks.contains_key(&monitor_id) {
@@ -155,82 +140,7 @@ impl VisionManager {
             monitor.height()
         );
 
-        // Clone config values for the spawned task
-        let db = self.db.clone();
-        let output_path = Arc::new(self.config.output_path.clone());
-        let fps = self.config.fps;
-        let video_chunk_duration = self.config.video_chunk_duration;
-        let ocr_engine = self.config.ocr_engine.clone();
-        let use_pii_removal = self.config.use_pii_removal;
-        let ignored_windows = self.config.ignored_windows.clone();
-        let included_windows = self.config.included_windows.clone();
-        let ignored_urls = self.config.ignored_urls.clone();
-        let languages = self.config.languages.clone();
-        let activity_feed = self.config.activity_feed.clone();
-        let video_quality = self.config.video_quality.clone();
-        let vision_metrics = self.config.vision_metrics.clone();
-        let disable_ocr = self.config.disable_ocr;
-        let event_driven = self.config.event_driven;
-
-        let handle = if event_driven {
-            // Event-driven capture mode
-            self.start_event_driven_monitor(monitor_id, monitor).await?
-        } else {
-            // Legacy continuous capture mode
-            self.vision_handle.spawn(async move {
-                let mut consecutive_restarts: u32 = 0;
-                loop {
-                    match record_video(
-                        db.clone(),
-                        output_path.clone(),
-                        fps,
-                        ocr_engine.clone(),
-                        monitor_id,
-                        use_pii_removal,
-                        &ignored_windows,
-                        &included_windows,
-                        &ignored_urls,
-                        video_chunk_duration,
-                        languages.clone(),
-                        activity_feed.clone(),
-                        video_quality.clone(),
-                        vision_metrics.clone(),
-                        disable_ocr,
-                    )
-                    .await
-                    {
-                        Ok(_) => {
-                            info!("Monitor {} recording completed normally", monitor_id);
-                            break;
-                        }
-                        Err(e) => {
-                            consecutive_restarts += 1;
-
-                            // Before restarting, verify the monitor still exists
-                            let monitor_exists = get_monitor_by_id(monitor_id).await.is_some();
-
-                            if !monitor_exists {
-                                warn!(
-                                    "Monitor {} no longer exists after error: {:?}. \
-                                     Stopping task — MonitorWatcher will restart if it reappears.",
-                                    monitor_id, e
-                                );
-                                break;
-                            }
-
-                            // Exponential backoff: 1s, 2s, 4s, 8s, 16s, capped at 30s
-                            let backoff =
-                                Duration::from_secs((1u64 << consecutive_restarts.min(4)).min(30));
-                            error!(
-                                "Monitor {} recording error (restart #{}): {:?}, retrying in {:?}",
-                                monitor_id, consecutive_restarts, e, backoff
-                            );
-                            tokio::time::sleep(backoff).await;
-                        }
-                    }
-                }
-            })
-        };
+        let handle = self.start_event_driven_monitor(monitor_id, monitor).await?;
 
         self.recording_tasks.insert(monitor_id, handle);
 

@@ -7,7 +7,7 @@ use screenpipe_audio::audio_manager::AudioManagerBuilder;
 use screenpipe_audio::core::engine::AudioTranscriptionEngine;
 use screenpipe_audio::vad::{VadEngineEnum, VadSensitivity};
 use screenpipe_core::Language;
-use screenpipe_vision::{OcrEngine, PipelineMetrics};
+use screenpipe_vision::PipelineMetrics;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
@@ -19,8 +19,6 @@ use crate::vision_manager::VisionManagerConfig;
 #[derive(Clone, Debug)]
 pub struct RecordingConfig {
     // Core recording
-    pub fps: f64,
-    pub adaptive_fps: bool,
     pub audio_chunk_duration: u64, // seconds
     pub port: u16,
     pub data_dir: PathBuf,
@@ -28,15 +26,12 @@ pub struct RecordingConfig {
     // Feature toggles
     pub disable_audio: bool,
     pub disable_vision: bool,
-    pub disable_ocr: bool,
     pub use_pii_removal: bool,
     pub enable_input_capture: bool,
     pub enable_accessibility: bool,
-    pub event_driven: bool,
 
     // Engines (typed, not strings)
     pub audio_transcription_engine: AudioTranscriptionEngine,
-    pub ocr_engine: OcrEngine,
     pub vad_sensitivity: VadSensitivity,
     pub transcription_mode: TranscriptionMode,
 
@@ -56,8 +51,17 @@ pub struct RecordingConfig {
     pub deepgram_api_key: Option<String>,
     pub user_id: Option<String>,
 
-    // Misc
+    // Speaker identification
+    /// User's display name for calendar-assisted speaker ID.
+    /// Fallback chain: settings userName → cloud auth name → cloud auth email.
+    pub user_name: Option<String>,
+
+    // Video
+    /// Video quality preset controlling JPEG quality during frame extraction.
+    /// Values: "low", "balanced", "high", "max". Default: "balanced".
     pub video_quality: String,
+
+    // Misc
     pub use_chinese_mirror: bool,
     pub analytics_enabled: bool,
     pub analytics_id: String,
@@ -106,28 +110,16 @@ impl RecordingConfig {
     }
 
     /// Build a `VisionManagerConfig` from this config.
-    /// Requires externally-created `activity_feed` and `vision_metrics`.
     pub fn to_vision_manager_config(
         &self,
         output_path: String,
-        activity_feed: screenpipe_vision::ActivityFeedOption,
         vision_metrics: Arc<PipelineMetrics>,
     ) -> VisionManagerConfig {
         VisionManagerConfig {
             output_path,
-            fps: self.fps,
-            video_chunk_duration: Duration::from_secs(60),
-            ocr_engine: Arc::new(self.ocr_engine.clone()),
-            use_pii_removal: self.use_pii_removal,
             ignored_windows: self.ignored_windows.clone(),
             included_windows: self.included_windows.clone(),
-            ignored_urls: self.ignored_urls.clone(),
-            languages: self.languages.clone(),
-            activity_feed,
-            video_quality: self.video_quality.clone(),
             vision_metrics,
-            disable_ocr: self.disable_ocr,
-            event_driven: self.event_driven,
         }
     }
 }

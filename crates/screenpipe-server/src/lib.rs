@@ -34,7 +34,6 @@ pub mod vision_manager;
 pub use auto_destruct::watch_pid;
 pub use axum::Json as JsonResponse;
 pub use cli::Cli;
-pub use core::{record_video, start_continuous_recording};
 pub use recording_config::RecordingConfig;
 
 pub use cloud_search::{CloudSearchClient, CloudSearchMetadata, CloudStatus};
@@ -51,7 +50,4 @@ pub use server::{api_list_monitors_handler as api_list_monitors, MonitorInfo};
 pub use calendar_speaker_id::start_speaker_identification;
 pub use sleep_monitor::start_sleep_monitor;
 pub use ui_recorder::{start_ui_recording, UiRecorderConfig, UiRecorderHandle};
-pub use video::{
-    video_quality_to_crf, video_quality_to_jpeg_q, video_quality_to_preset, FrameWriteInfo,
-    FrameWriteTracker, VideoCapture,
-};
+pub use video::{video_quality_to_crf, video_quality_to_jpeg_q, video_quality_to_preset};

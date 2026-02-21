@@ -16,7 +16,7 @@ use screenpipe_audio::meeting_detector::MeetingDetector;
 use screenpipe_db::DatabaseManager;
 use screenpipe_server::{
     analytics, RecordingConfig,
-    ResourceMonitor, SCServer, start_continuous_recording, start_meeting_watcher,
+    ResourceMonitor, SCServer, start_meeting_watcher,
     start_sleep_monitor, start_ui_recording,
     vision_manager::{VisionManager, start_monitor_watcher, stop_monitor_watcher},
 };
@@ -144,195 +144,54 @@ pub async fn start_embedded_server(
     // Create shared pipeline metrics (used by recording + health endpoint + PostHog)
     let vision_metrics = Arc::new(screenpipe_vision::PipelineMetrics::new());
 
-    // Start vision recording
+    // Start vision recording (event-driven capture via VisionManager)
     if !config.disable_vision {
         let db_clone = db.clone();
         let output_path = data_path.to_string_lossy().into_owned();
 
-        info!(
-            "Monitor config: use_all_monitors={}, monitor_ids={:?}",
-            config.use_all_monitors, config.monitor_ids
+        let vision_config = config.to_vision_manager_config(
+            output_path,
+            vision_metrics.clone(),
         );
 
-        // Check if user has specific monitor IDs set (not empty, not "default")
-        // This handles upgrades where old configs have monitor_ids but use_all_monitors defaults to true
-        // Supports both legacy numeric IDs and new stable IDs (e.g. "Display 4_5120x1440_0,0")
-        let has_specific_monitors = !config.monitor_ids.is_empty()
-            && !config.monitor_ids.contains(&"default".to_string());
+        let vision_manager = Arc::new(VisionManager::new(
+            vision_config,
+            db_clone,
+            vision_handle.clone(),
+        ));
 
-        let use_dynamic_detection = config.use_all_monitors && !has_specific_monitors;
+        let vm_clone = vision_manager.clone();
+        let shutdown_rx = shutdown_tx_clone.subscribe();
 
-        info!(
-            "Monitor detection: has_specific_monitors={}, use_dynamic_detection={}",
-            has_specific_monitors, use_dynamic_detection
-        );
+        tokio::spawn(async move {
+            let mut shutdown_rx = shutdown_rx;
 
-        if use_dynamic_detection {
-            // Use VisionManager for dynamic monitor detection (handles connect/disconnect)
-            info!("Using dynamic monitor detection (use_all_monitors=true)");
+            // Start VisionManager
+            if let Err(e) = vm_clone.start().await {
+                error!("Failed to start VisionManager: {:?}", e);
+                return;
+            }
+            info!("VisionManager started successfully");
 
-            // Create activity feed for adaptive FPS if enabled
-            let activity_feed: screenpipe_vision::ActivityFeedOption = if config.adaptive_fps {
-                info!("Starting activity feed for adaptive FPS");
-                match screenpipe_accessibility::UiRecorder::with_defaults().start_activity_only() {
-                    Ok(feed) => {
-                        info!("Activity feed started successfully for adaptive FPS");
-                        Some(feed)
-                    }
-                    Err(e) => {
-                        warn!(
-                            "Failed to start activity feed: {:?}. Adaptive FPS will be disabled.",
-                            e
-                        );
-                        None
-                    }
-                }
-            } else {
-                info!("Adaptive FPS disabled");
-                None
-            };
+            // Start MonitorWatcher for dynamic detection
+            if let Err(e) = start_monitor_watcher(vm_clone.clone()).await {
+                error!("Failed to start monitor watcher: {:?}", e);
+            }
+            info!("Monitor watcher started - will detect connect/disconnect");
 
-            let vision_config = config.to_vision_manager_config(
-                output_path,
-                activity_feed,
-                vision_metrics.clone(),
-            );
+            // Wait for shutdown signal
+            let _ = shutdown_rx.recv().await;
+            info!("Received shutdown signal for VisionManager");
 
-            let vision_manager = Arc::new(VisionManager::new(
-                vision_config,
-                db_clone,
-                vision_handle.clone(),
-            ));
-
-            let vm_clone = vision_manager.clone();
-            let shutdown_rx = shutdown_tx_clone.subscribe();
-
-            tokio::spawn(async move {
-                let mut shutdown_rx = shutdown_rx;
-
-                // Start VisionManager
-                if let Err(e) = vm_clone.start().await {
-                    error!("Failed to start VisionManager: {:?}", e);
-                    return;
-                }
-                info!("VisionManager started successfully");
-
-                // Start MonitorWatcher for dynamic detection
-                if let Err(e) = start_monitor_watcher(vm_clone.clone()).await {
-                    error!("Failed to start monitor watcher: {:?}", e);
-                }
-                info!("Monitor watcher started - will detect connect/disconnect");
-
-                // Wait for shutdown signal
-                let _ = shutdown_rx.recv().await;
-                info!("Received shutdown signal for VisionManager");
-
-                // Stop monitor watcher and VisionManager
-                let _ = stop_monitor_watcher().await;
-                if let Err(e) = vm_clone.shutdown().await {
-                    error!("Error shutting down VisionManager: {:?}", e);
-                }
-            });
-        } else {
-            // Use static monitor list - either user disabled dynamic detection
-            // or has specific monitor IDs set from previous config
-            let monitor_ids: Vec<u32> = if has_specific_monitors {
-                // User has specific monitors selected - respect their choice
-                // Resolve stable IDs (e.g. "Display 4_5120x1440_0,0") or legacy numeric IDs to runtime u32
-                let all_monitors = screenpipe_vision::monitor::list_monitors().await;
-                let parsed: Vec<u32> = config
-                    .monitor_ids
-                    .iter()
-                    .filter_map(|stored_id| {
-                        // 1. Exact stable_id match
-                        if let Some(m) = all_monitors.iter().find(|m| m.stable_id() == *stored_id) {
-                            return Some(m.id());
-                        }
-                        // 2. Backward compat: try parsing as raw u32 ID
-                        if let Ok(id) = stored_id.parse::<u32>() {
-                            return Some(id);
-                        }
-                        // 3. Fuzzy: match by name+resolution (position may shift across reboot)
-                        //    stable_id format: "Name_WxH_X,Y" — strip the trailing "_X,Y"
-                        if let Some(last_underscore) = stored_id.rfind('_') {
-                            let prefix = &stored_id[..last_underscore];
-                            if let Some(m) = all_monitors.iter().find(|m| {
-                                let sid = m.stable_id();
-                                sid.rfind('_').map_or(false, |pos| &sid[..pos] == prefix)
-                            }) {
-                                info!("Fuzzy-matched monitor '{}' -> runtime id {} (position changed)", stored_id, m.id());
-                                return Some(m.id());
-                            }
-                        }
-                        warn!("Could not resolve stored monitor ID '{}' to any available monitor", stored_id);
-                        None
-                    })
-                    .collect();
-                info!(
-                    "Using user-selected monitors: {:?} (from settings: {:?})",
-                    parsed, config.monitor_ids
-                );
-                parsed
-            } else {
-                // No specific monitors - use all available
-                info!("No specific monitors configured, using all available");
-                let monitors = screenpipe_vision::monitor::list_monitors().await;
-                monitors.iter().map(|m| m.id()).collect()
-            };
-
-            info!("Using static monitor list: {:?}", monitor_ids);
-            let output_path = Arc::new(output_path);
-            let shutdown_rx = shutdown_tx_clone.subscribe();
-            let recording_metrics = vision_metrics.clone();
-            let config_clone = config.clone();
-
-            tokio::spawn(async move {
-                let mut shutdown_rx = shutdown_rx;
-                let mut restart_attempt: u32 = 0;
-                loop {
-                    let recording_future = start_continuous_recording(
-                        db_clone.clone(),
-                        output_path.clone(),
-                        &config_clone,
-                        monitor_ids.clone(),
-                        &vision_handle,
-                        None,
-                        recording_metrics.clone(),
-                    );
-
-                    tokio::select! {
-                        result = recording_future => {
-                            if let Err(e) = result {
-                                error!("Continuous recording error: {:?}", e);
-                                // Exponential backoff: 2s, 4s, 8s, ... capped at 30s
-                                let delay_secs = std::cmp::min(2u64.saturating_pow(restart_attempt + 1), 30);
-                                warn!(
-                                    "Vision recording failed, retrying in {}s (attempt {})",
-                                    delay_secs, restart_attempt + 1
-                                );
-                                tokio::time::sleep(tokio::time::Duration::from_secs(delay_secs)).await;
-                                restart_attempt += 1;
-                            } else {
-                                // Clean exit, reset counter
-                                restart_attempt = 0;
-                            }
-                        }
-                        _ = shutdown_rx.recv() => {
-                            info!("Received shutdown signal for vision recording");
-                            break;
-                        }
-                    }
-                }
-            });
-        }
+            // Stop monitor watcher and VisionManager
+            let _ = stop_monitor_watcher().await;
+            if let Err(e) = vm_clone.shutdown().await {
+                error!("Error shutting down VisionManager: {:?}", e);
+            }
+        });
     }
 
     // Start audio recording
-    // Delay reduced from 5s to 1s — the original 5s/10s delay was a cosmetic holdover
-    // from the CLI binary (to let terminal output finish printing). The embedded server
-    // has no terminal output, and the HTTP server is already bound and serving at this
-    // point. Vision capture is also already running. 1s gives a small buffer for the
-    // HTTP server to start accepting connections.
     if !config.disable_audio {
         let audio_manager_clone = audio_manager.clone();
         tokio::spawn(async move {
@@ -371,6 +230,12 @@ pub async fn start_embedded_server(
         // Handle kept alive by the spawned task — no need to store it
         info!("meeting watcher started for smart transcription mode");
     }
+
+    // Start calendar-assisted speaker identification
+    let _speaker_id_handle = screenpipe_server::start_speaker_identification(
+        db.clone(),
+        config.user_name.clone(),
+    );
 
     // Start background FTS indexer (replaces synchronous INSERT triggers)
     let _fts_handle = screenpipe_db::fts_indexer::start_fts_indexer(db.clone());

@@ -8,47 +8,34 @@ use tracing::{debug, info, warn};
 
 use crate::DatabaseManager;
 
-/// Total rows to index per table per cycle. Large batch since we run
-/// infrequently — process everything that accumulated since last run.
+/// Total rows to index per table per cycle.
 const FTS_BATCH_SIZE: i64 = 10_000;
 
-// --- Normal mode (steady-state): gentle on writes ---
-
-/// Rows per micro-batch in normal mode.
+/// Rows per micro-batch. Small enough to release the write lock quickly.
 const FTS_MICRO_BATCH_SIZE: usize = 25;
 
-/// Delay between micro-batches in normal mode.
+/// Delay between micro-batches — gives real-time captures time to interleave.
 const FTS_MICRO_BATCH_DELAY: Duration = Duration::from_millis(200);
 
-// --- Backfill mode (catching up after FTS rebuild): fast ---
-
-/// Rows per micro-batch during backfill. Larger batches = fewer lock
-/// acquisitions. 500 rows × ~2KB ≈ 1MB per tx, still very fast.
-const BACKFILL_MICRO_BATCH_SIZE: usize = 500;
-
-/// Delay between micro-batches during backfill. Just a yield to let
-/// other tasks run — no need for long delays during startup catchup.
-const BACKFILL_MICRO_BATCH_DELAY: Duration = Duration::from_millis(5);
-
-/// Delay between indexing each table to let frame inserts interleave.
+/// Delay between indexing each table.
 const FTS_INTER_TABLE_DELAY: Duration = Duration::from_secs(1);
 
-/// Interval between FTS indexing cycles. Search uses FTS5 MATCH so
-/// unindexed rows won't appear in results until the next cycle.
-/// 30 min is fine — onboarding triggers POST /fts/index explicitly,
-/// and users rarely search for content captured seconds ago.
-/// This eliminates the FTS indexer as a source of write contention
-/// (was 555 slow batches in 3 hours at the old 30s interval).
+/// Interval between FTS indexing cycles in steady state.
 const FTS_INDEX_INTERVAL: Duration = Duration::from_secs(30 * 60);
 
 /// If any table has more than this many unindexed rows, use backfill mode.
 const BACKFILL_THRESHOLD: i64 = 1_000;
 
-/// Start the background FTS indexer that periodically indexes new rows
-/// into FTS5 tables. This replaces the synchronous AFTER INSERT triggers
-/// that were adding ~0.5-1ms per row to write transactions.
-///
-/// Returns a JoinHandle that can be used to await/abort the indexer.
+/// Delay between micro-batches during backfill.
+const BACKFILL_MICRO_BATCH_DELAY: Duration = Duration::from_millis(500);
+
+/// How long to sleep when the DB write lock is busy (real-time capture
+/// is writing). This ensures FTS never blocks captures.
+const YIELD_ON_BUSY_DELAY: Duration = Duration::from_secs(2);
+
+/// Start the background FTS indexer. Uses `try_begin_immediate` so it
+/// NEVER blocks real-time captures — if the write lock is held, FTS
+/// skips and retries after a delay.
 pub fn start_fts_indexer(db: Arc<DatabaseManager>) -> tokio::task::JoinHandle<()> {
     info!(
         "Starting background FTS indexer (interval: {}s, batch: {}, micro-batch: {})",
@@ -58,22 +45,20 @@ pub fn start_fts_indexer(db: Arc<DatabaseManager>) -> tokio::task::JoinHandle<()
     );
 
     tokio::spawn(async move {
-        // Wait for the app to stabilize before first FTS run.
-        // At startup, frame/audio inserts are heaviest — give them 60s headroom.
+        // Wait for startup to stabilize.
         tokio::time::sleep(Duration::from_secs(60)).await;
 
-        // Phase 1: Check if we need backfill (e.g. after FTS table rebuild).
-        // Run continuously with fast settings until caught up.
+        // Phase 1: Backfill if needed (after FTS table rebuild).
         let backlog = estimate_backlog(&db).await;
         if backlog > BACKFILL_THRESHOLD {
             info!(
-                "FTS indexer: backfill needed (~{} rows behind), using fast mode",
+                "FTS indexer: backfill needed (~{} rows behind), using low-priority mode",
                 backlog
             );
             loop {
                 let total = index_all_tables_with_config(
                     &db,
-                    BACKFILL_MICRO_BATCH_SIZE,
+                    FTS_MICRO_BATCH_SIZE,
                     BACKFILL_MICRO_BATCH_DELAY,
                 )
                 .await;
@@ -82,12 +67,11 @@ pub fn start_fts_indexer(db: Arc<DatabaseManager>) -> tokio::task::JoinHandle<()
                     break;
                 }
                 info!("FTS indexer: backfill batch indexed {} rows", total);
-                // Brief pause between backfill cycles — 1s is enough
-                tokio::time::sleep(Duration::from_secs(1)).await;
+                tokio::time::sleep(Duration::from_secs(2)).await;
             }
         }
 
-        // Phase 2: Normal steady-state mode.
+        // Phase 2: Steady-state — run every 30 minutes.
         let mut interval = tokio::time::interval(FTS_INDEX_INTERVAL);
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
@@ -137,7 +121,6 @@ async fn estimate_backlog(db: &DatabaseManager) -> i64 {
 }
 
 /// Index all FTS tables, returning total rows indexed.
-/// Adds a small delay between tables so frame inserts can interleave.
 pub async fn index_all_tables(db: &DatabaseManager) -> i64 {
     index_all_tables_with_config(db, FTS_MICRO_BATCH_SIZE, FTS_MICRO_BATCH_DELAY).await
 }
@@ -167,7 +150,6 @@ async fn index_all_tables_with_config(
     }
     total += frames_count;
 
-    // Yield to let frame inserts through
     if total > 0 {
         tokio::time::sleep(FTS_INTER_TABLE_DELAY).await;
     }
@@ -189,7 +171,6 @@ async fn index_all_tables_with_config(
     }
     total += ocr_count;
 
-    // Yield again
     if ocr_count > 0 {
         tokio::time::sleep(FTS_INTER_TABLE_DELAY).await;
     }
@@ -211,7 +192,6 @@ async fn index_all_tables_with_config(
     }
     total += audio_count;
 
-    // Yield again
     if audio_count > 0 {
         tokio::time::sleep(FTS_INTER_TABLE_DELAY).await;
     }
@@ -232,9 +212,6 @@ async fn index_all_tables_with_config(
         );
     }
     total += accessibility_count;
-
-    // ui_events_fts is not indexed — input event search uses LIKE,
-    // so maintaining that FTS table is wasted work.
 
     total
 }
@@ -268,11 +245,20 @@ async fn update_last_indexed(
     Ok(())
 }
 
+/// Try to acquire a write lock, yielding to real-time captures if busy.
+/// Returns None if the lock couldn't be acquired after one retry.
+async fn try_acquire_write(db: &DatabaseManager) -> Result<Option<crate::ImmediateTx>, sqlx::Error> {
+    match db.try_begin_immediate().await? {
+        Some(tx) => Ok(Some(tx)),
+        None => {
+            // Write lock held by real-time capture — back off
+            tokio::time::sleep(YIELD_ON_BUSY_DELAY).await;
+            db.try_begin_immediate().await
+        }
+    }
+}
+
 /// Index new rows from `frames` into `frames_fts`.
-///
-/// Pre-reads source data outside the write tx, then inserts into FTS
-/// in micro-batches. Each micro-batch acquires and releases the write
-/// lock so frame inserts can interleave.
 #[allow(clippy::explicit_auto_deref)]
 async fn index_frames_fts(
     db: &DatabaseManager,
@@ -281,7 +267,6 @@ async fn index_frames_fts(
 ) -> Result<i64, sqlx::Error> {
     let last = get_last_indexed(db, "frames").await?;
 
-    // Cheap existence check — avoid slow full SELECT on 3GB+ DB when nothing to index
     let has_rows: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM frames WHERE rowid > ?1)")
         .bind(last)
         .fetch_one(&db.pool)
@@ -290,7 +275,6 @@ async fn index_frames_fts(
         return Ok(0);
     }
 
-    // Pre-read source data OUTSIDE the write transaction.
     let rows: Vec<(i64, String, String, String, String, String, String)> = sqlx::query_as(
         "SELECT id, COALESCE(name, ''), COALESCE(browser_url, ''), \
                 COALESCE(app_name, ''), COALESCE(window_name, ''), CAST(COALESCE(focused, 0) AS TEXT), \
@@ -311,7 +295,15 @@ async fn index_frames_fts(
     for chunk in rows.chunks(micro_batch_size) {
         let chunk_max_id = chunk.last().unwrap().0;
 
-        let mut tx = db.begin_immediate_with_retry().await?;
+        let mut tx = match try_acquire_write(db).await? {
+            Some(tx) => tx,
+            None => {
+                debug!("FTS indexer: frames yielding to real-time writes");
+                tokio::time::sleep(YIELD_ON_BUSY_DELAY).await;
+                continue;
+            }
+        };
+
         for (id, name, browser_url, app_name, window_name, focused, accessibility_text) in chunk {
             sqlx::query(
                 "INSERT OR IGNORE INTO frames_fts(id, name, browser_url, app_name, window_name, focused, accessibility_text) \
@@ -330,7 +322,6 @@ async fn index_frames_fts(
         update_last_indexed(&mut **tx.conn(), "frames", chunk_max_id).await?;
         tx.commit().await?;
 
-        // Brief delay to let real-time inserts through between micro-batches
         tokio::time::sleep(micro_batch_delay).await;
     }
 
@@ -346,7 +337,6 @@ async fn index_ocr_text_fts(
 ) -> Result<i64, sqlx::Error> {
     let last = get_last_indexed(db, "ocr_text").await?;
 
-    // Cheap existence check
     let has_rows: bool = sqlx::query_scalar(
         "SELECT EXISTS(SELECT 1 FROM ocr_text WHERE rowid > ?1 AND text IS NOT NULL AND text != '' AND frame_id IS NOT NULL)",
     )
@@ -377,7 +367,15 @@ async fn index_ocr_text_fts(
     for chunk in rows.chunks(micro_batch_size) {
         let chunk_max_rowid = chunk.last().unwrap().0;
 
-        let mut tx = db.begin_immediate_with_retry().await?;
+        let mut tx = match try_acquire_write(db).await? {
+            Some(tx) => tx,
+            None => {
+                debug!("FTS indexer: ocr_text yielding to real-time writes");
+                tokio::time::sleep(YIELD_ON_BUSY_DELAY).await;
+                continue;
+            }
+        };
+
         for (_, frame_id, text, app_name, window_name) in chunk {
             sqlx::query(
                 "INSERT OR IGNORE INTO ocr_text_fts(frame_id, text, app_name, window_name) \
@@ -408,7 +406,6 @@ async fn index_audio_transcriptions_fts(
 ) -> Result<i64, sqlx::Error> {
     let last = get_last_indexed(db, "audio_transcriptions").await?;
 
-    // Cheap existence check
     let has_rows: bool = sqlx::query_scalar(
         "SELECT EXISTS(SELECT 1 FROM audio_transcriptions WHERE rowid > ?1 AND transcription IS NOT NULL AND transcription != '' AND audio_chunk_id IS NOT NULL)",
     )
@@ -440,7 +437,15 @@ async fn index_audio_transcriptions_fts(
     for chunk in rows.chunks(micro_batch_size) {
         let chunk_max_rowid = chunk.last().unwrap().0;
 
-        let mut tx = db.begin_immediate_with_retry().await?;
+        let mut tx = match try_acquire_write(db).await? {
+            Some(tx) => tx,
+            None => {
+                debug!("FTS indexer: audio_transcriptions yielding to real-time writes");
+                tokio::time::sleep(YIELD_ON_BUSY_DELAY).await;
+                continue;
+            }
+        };
+
         for (_, audio_chunk_id, transcription, device, speaker_id) in chunk {
             sqlx::query(
                 "INSERT OR IGNORE INTO audio_transcriptions_fts(audio_chunk_id, transcription, device, speaker_id) \
@@ -471,7 +476,6 @@ async fn index_accessibility_fts(
 ) -> Result<i64, sqlx::Error> {
     let last = get_last_indexed(db, "accessibility").await?;
 
-    // Cheap existence check
     let has_rows: bool = sqlx::query_scalar(
         "SELECT EXISTS(SELECT 1 FROM accessibility WHERE id > ?1 AND text_content IS NOT NULL AND text_content != '')",
     )
@@ -502,7 +506,15 @@ async fn index_accessibility_fts(
     for chunk in rows.chunks(micro_batch_size) {
         let chunk_max_id = chunk.last().unwrap().0;
 
-        let mut tx = db.begin_immediate_with_retry().await?;
+        let mut tx = match try_acquire_write(db).await? {
+            Some(tx) => tx,
+            None => {
+                debug!("FTS indexer: accessibility yielding to real-time writes");
+                tokio::time::sleep(YIELD_ON_BUSY_DELAY).await;
+                continue;
+            }
+        };
+
         for (id, text_content, app_name, window_name) in chunk {
             sqlx::query(
                 "INSERT OR IGNORE INTO accessibility_fts(rowid, text_content, app_name, window_name) \

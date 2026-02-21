@@ -252,13 +252,6 @@ export function RecordingSettings() {
       const errors: Record<string, string> = {};
       
       // Validate numeric fields
-      if (newSettings.fps !== undefined) {
-        const fpsValidation = validateField("fps", newSettings.fps);
-        if (!fpsValidation.isValid && fpsValidation.error) {
-          errors.fps = fpsValidation.error;
-        }
-      }
-      
       if (newSettings.audioChunkDuration !== undefined) {
         const durationValidation = validateField("audioChunkDuration", newSettings.audioChunkDuration);
         if (!durationValidation.isValid && durationValidation.error) {
@@ -576,9 +569,6 @@ export function RecordingSettings() {
     handleSettingsChange(newSettings, true);
   };
 
-  const handleOcrModelChange = (value: string) => {
-    handleSettingsChange({ ocrEngine: value });
-  };
 
   const handleLanguageChange = (currentValue: Language) => {
     const updatedLanguages = settings.languages.includes(currentValue)
@@ -1443,42 +1433,6 @@ Your screen is a pipe. Everything you see, hear, and type flows through it. Scre
                 <Eye className="h-4 w-4 text-muted-foreground shrink-0" />
                 <h3 className="text-sm font-medium text-foreground">Text extraction</h3>
               </div>
-
-              {/* OCR */}
-              <div className="flex items-center justify-between ml-[26px] gap-3">
-                <div className="min-w-0">
-                  <h4 className="text-sm text-foreground flex items-center gap-1.5">
-                    OCR (optical character recognition)
-                    <HelpTooltip text="Takes screenshots of your screen and extracts text using optical character recognition. Captures everything visible including images with text, custom-rendered content, and terminal output. Uses more CPU (~15-30%) but provides the most complete text capture." />
-                  </h4>
-                  <p className="text-xs text-muted-foreground">Extracts text from screenshots — captures everything visible</p>
-                </div>
-                <Switch className="shrink-0" id="enableOcr" checked={!(settings.disableOcr ?? false)} onCheckedChange={(checked) => handleSettingsChange({ disableOcr: !checked }, true)} />
-              </div>
-
-              {/* OCR Engine - shown when OCR is enabled */}
-              {!(settings.disableOcr ?? false) && (
-                <>
-                  <div className="flex items-center justify-between ml-[26px] gap-3">
-                    <h4 className="text-sm text-foreground flex items-center gap-1.5">
-                      OCR engine
-                      <HelpTooltip text="Apple Native: fast, uses built-in macOS OCR. Tesseract: open-source, cross-platform. Windows Native: uses Windows OCR APIs." />
-                    </h4>
-                    <Select value={settings.ocrEngine} onValueChange={handleOcrModelChange}>
-                      <SelectTrigger className="w-[160px] h-7 text-xs">
-                        <SelectValue placeholder="Select" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {isMacOS && <SelectItem value="apple-native">Apple Native</SelectItem>}
-                        {!isMacOS && platform() === "windows" && <SelectItem value="windows-native">Windows Native</SelectItem>}
-                        {!isMacOS && platform() !== "windows" && <SelectItem value="tesseract">Tesseract</SelectItem>}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </>
-              )}
-
-              {(isMacOS || platform() === "windows") && <Separator />}
 
               {/* Accessibility text capture (AX tree walker) */}
               {(isMacOS || platform() === "windows") && (

@@ -6,11 +6,7 @@ use screenpipe_audio::{
     vad::{VadEngineEnum, VadSensitivity},
 };
 use screenpipe_core::Language;
-use screenpipe_db::CustomOcrConfig as DBCustomOcrConfig;
-use screenpipe_db::OcrEngine as DBOcrEngine;
-use screenpipe_vision::{custom_ocr::CustomOcrConfig, utils::OcrEngine as CoreOcrEngine};
 use std::path::PathBuf;
-use std::sync::Arc;
 
 #[derive(Clone, Debug, ValueEnum, PartialEq)]
 pub enum CliAudioTranscriptionEngine {
@@ -54,60 +50,6 @@ impl From<CliAudioTranscriptionEngine> for CoreAudioTranscriptionEngine {
                 CoreAudioTranscriptionEngine::WhisperLargeV3TurboQuantized
             }
             CliAudioTranscriptionEngine::Disabled => CoreAudioTranscriptionEngine::Disabled,
-        }
-    }
-}
-
-#[derive(Clone, Debug, ValueEnum, PartialEq)]
-pub enum CliOcrEngine {
-    Unstructured,
-    #[cfg(target_os = "linux")]
-    Tesseract,
-    #[cfg(target_os = "windows")]
-    WindowsNative,
-    #[cfg(target_os = "macos")]
-    AppleNative,
-    Custom,
-}
-
-impl From<CliOcrEngine> for Arc<DBOcrEngine> {
-    fn from(cli_engine: CliOcrEngine) -> Self {
-        match cli_engine {
-            CliOcrEngine::Unstructured => Arc::new(DBOcrEngine::Unstructured),
-            #[cfg(target_os = "macos")]
-            CliOcrEngine::AppleNative => Arc::new(DBOcrEngine::AppleNative),
-            #[cfg(target_os = "linux")]
-            CliOcrEngine::Tesseract => Arc::new(DBOcrEngine::Tesseract),
-            #[cfg(target_os = "windows")]
-            CliOcrEngine::WindowsNative => Arc::new(DBOcrEngine::WindowsNative),
-            CliOcrEngine::Custom => Arc::new(DBOcrEngine::Custom(DBCustomOcrConfig::default())),
-        }
-    }
-}
-
-impl From<CliOcrEngine> for CoreOcrEngine {
-    fn from(cli_engine: CliOcrEngine) -> Self {
-        match cli_engine {
-            CliOcrEngine::Unstructured => CoreOcrEngine::Unstructured,
-            #[cfg(target_os = "linux")]
-            CliOcrEngine::Tesseract => CoreOcrEngine::Tesseract,
-            #[cfg(target_os = "windows")]
-            CliOcrEngine::WindowsNative => CoreOcrEngine::WindowsNative,
-            #[cfg(target_os = "macos")]
-            CliOcrEngine::AppleNative => CoreOcrEngine::AppleNative,
-            CliOcrEngine::Custom => {
-                if let Ok(config_str) = std::env::var("SCREENPIPE_CUSTOM_OCR_CONFIG") {
-                    match serde_json::from_str(&config_str) {
-                        Ok(config) => CoreOcrEngine::Custom(config),
-                        Err(e) => {
-                            tracing::warn!("failed to parse custom ocr config from env: {}", e);
-                            CoreOcrEngine::Custom(CustomOcrConfig::default())
-                        }
-                    }
-                } else {
-                    CoreOcrEngine::Custom(CustomOcrConfig::default())
-                }
-            }
         }
     }
 }
@@ -191,14 +133,6 @@ pub struct Cli {
     // Legacy top-level flags (for backward compat with bare `screenpipe`)
     // These are duplicated on RecordArgs. When command is None, these are used.
     // =========================================================================
-    /// FPS for continuous recording
-    #[cfg_attr(not(target_os = "macos"), arg(short, long, default_value_t = 1.0))]
-    #[cfg_attr(target_os = "macos", arg(short, long, default_value_t = 0.5))]
-    pub fps: f64,
-
-    #[arg(long, default_value_t = false)]
-    pub adaptive_fps: bool,
-
     #[arg(short = 'd', long, default_value_t = 30)]
     pub audio_chunk_duration: u64,
 
@@ -225,20 +159,6 @@ pub struct Cli {
 
     #[arg(short = 'a', long, value_enum, default_value_t = CliAudioTranscriptionEngine::WhisperLargeV3TurboQuantized)]
     pub audio_transcription_engine: CliAudioTranscriptionEngine,
-
-    #[cfg_attr(
-        target_os = "macos",
-        arg(short = 'o', long, value_enum, default_value_t = CliOcrEngine::AppleNative)
-    )]
-    #[cfg_attr(
-        target_os = "windows",
-        arg(short = 'o', long, value_enum, default_value_t = CliOcrEngine::WindowsNative)
-    )]
-    #[cfg_attr(
-        not(any(target_os = "macos", target_os = "windows")),
-        arg(short = 'o', long, value_enum, default_value_t = CliOcrEngine::Tesseract)
-    )]
-    pub ocr_engine: CliOcrEngine,
 
     #[arg(short = 'm', long)]
     pub monitor_id: Vec<u32>,
@@ -293,11 +213,6 @@ pub struct Cli {
     /// Enable accessibility text capture (AX tree walker)
     #[arg(long, default_value_t = false)]
     pub enable_accessibility: bool,
-
-    /// Use event-driven capture instead of continuous polling. Enabled by default.
-    /// Pass --no-event-driven to fall back to legacy continuous capture.
-    #[arg(long, default_value_t = true)]
-    pub event_driven: bool,
 
     #[arg(long, default_value_t = false)]
     pub enable_sync: bool,
@@ -406,16 +321,6 @@ pub enum Command {
 
 #[derive(Parser, Clone)]
 pub struct RecordArgs {
-    /// FPS for continuous recording
-    /// 1 FPS = 30 GB / month, 5 FPS = 150 GB / month
-    #[cfg_attr(not(target_os = "macos"), arg(short, long, default_value_t = 1.0))]
-    #[cfg_attr(target_os = "macos", arg(short, long, default_value_t = 0.5))]
-    pub fps: f64,
-
-    /// Enable adaptive FPS based on input activity
-    #[arg(long, default_value_t = false)]
-    pub adaptive_fps: bool,
-
     /// Audio chunk duration in seconds
     #[arg(short = 'd', long, default_value_t = 30)]
     pub audio_chunk_duration: u64,
@@ -447,21 +352,6 @@ pub struct RecordArgs {
     /// Audio transcription engine to use
     #[arg(short = 'a', long, value_enum, default_value_t = CliAudioTranscriptionEngine::WhisperLargeV3TurboQuantized)]
     pub audio_transcription_engine: CliAudioTranscriptionEngine,
-
-    /// OCR engine to use
-    #[cfg_attr(
-        target_os = "macos",
-        arg(short = 'o', long, value_enum, default_value_t = CliOcrEngine::AppleNative)
-    )]
-    #[cfg_attr(
-        target_os = "windows",
-        arg(short = 'o', long, value_enum, default_value_t = CliOcrEngine::WindowsNative)
-    )]
-    #[cfg_attr(
-        not(any(target_os = "macos", target_os = "windows")),
-        arg(short = 'o', long, value_enum, default_value_t = CliOcrEngine::Tesseract)
-    )]
-    pub ocr_engine: CliOcrEngine,
 
     /// Monitor IDs to use
     #[arg(short = 'm', long)]
@@ -531,11 +421,6 @@ pub struct RecordArgs {
     #[arg(long, default_value_t = false)]
     pub enable_accessibility: bool,
 
-    /// Use event-driven capture instead of continuous polling. Enabled by default.
-    /// Pass --no-event-driven to fall back to legacy continuous capture.
-    #[arg(long, default_value_t = true)]
-    pub event_driven: bool,
-
     /// Enable cloud sync
     #[arg(long, default_value_t = false)]
     pub enable_sync: bool,
@@ -561,8 +446,6 @@ impl RecordArgs {
     /// Convert legacy top-level Cli flags into RecordArgs
     pub fn from_cli(cli: &Cli) -> Self {
         RecordArgs {
-            fps: cli.fps,
-            adaptive_fps: cli.adaptive_fps,
             audio_chunk_duration: cli.audio_chunk_duration,
             port: cli.port,
             disable_audio: cli.disable_audio,
@@ -571,7 +454,6 @@ impl RecordArgs {
             data_dir: cli.data_dir.clone(),
             debug: cli.debug,
             audio_transcription_engine: cli.audio_transcription_engine.clone(),
-            ocr_engine: cli.ocr_engine.clone(),
             monitor_id: cli.monitor_id.clone(),
             use_all_monitors: cli.use_all_monitors,
             language: cli.language.clone(),
@@ -589,7 +471,6 @@ impl RecordArgs {
             video_quality: cli.video_quality.clone(),
             enable_input_capture: cli.enable_input_capture,
             enable_accessibility: cli.enable_accessibility,
-            event_driven: cli.event_driven,
             enable_sync: cli.enable_sync,
             sync_token: cli.sync_token.clone(),
             sync_password: cli.sync_password.clone(),
@@ -634,20 +515,15 @@ impl RecordArgs {
     ) -> crate::recording_config::RecordingConfig {
         let languages = self.unique_languages().unwrap_or_default();
         crate::recording_config::RecordingConfig {
-            fps: self.fps,
-            adaptive_fps: self.adaptive_fps,
             audio_chunk_duration: self.audio_chunk_duration,
             port: self.port,
             data_dir,
             disable_audio: self.disable_audio,
             disable_vision: self.disable_vision,
-            disable_ocr: false,
             use_pii_removal: self.use_pii_removal,
             enable_input_capture: self.enable_input_capture,
             enable_accessibility: self.enable_accessibility,
-            event_driven: self.event_driven,
             audio_transcription_engine: self.audio_transcription_engine.into(),
-            ocr_engine: self.ocr_engine.into(),
             vad_sensitivity: self.vad_sensitivity.into(),
             transcription_mode: self.transcription_mode.into(),
             audio_devices: self.audio_device,
@@ -660,6 +536,7 @@ impl RecordArgs {
             languages,
             deepgram_api_key: self.deepgram_api_key,
             user_id: None,
+            user_name: None,
             video_quality: self.video_quality,
             use_chinese_mirror: false,
             analytics_enabled: !self.disable_telemetry,

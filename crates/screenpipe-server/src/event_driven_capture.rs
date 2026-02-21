@@ -12,6 +12,7 @@ use crate::paired_capture::{paired_capture, CaptureContext, PairedCaptureResult}
 use anyhow::Result;
 use chrono::Utc;
 use screenpipe_db::DatabaseManager;
+use screenpipe_vision::frame_comparison::{FrameComparer, FrameComparisonConfig};
 use screenpipe_vision::monitor::SafeMonitor;
 use screenpipe_vision::snapshot_writer::SnapshotWriter;
 use screenpipe_vision::utils::capture_monitor_image;
@@ -41,6 +42,8 @@ pub enum CaptureTrigger {
     ScrollStop,
     /// Clipboard content changed
     Clipboard,
+    /// Screen content changed without user input (video, animation, auto-scroll)
+    VisualChange,
     /// No activity for a while — periodic fallback capture
     Idle,
     /// Manual/forced capture request
@@ -57,6 +60,7 @@ impl CaptureTrigger {
             CaptureTrigger::TypingPause => "typing_pause",
             CaptureTrigger::ScrollStop => "scroll_stop",
             CaptureTrigger::Clipboard => "clipboard",
+            CaptureTrigger::VisualChange => "visual_change",
             CaptureTrigger::Idle => "idle",
             CaptureTrigger::Manual => "manual",
         }
@@ -80,6 +84,11 @@ pub struct EventDrivenCaptureConfig {
     pub capture_on_click: bool,
     /// Whether to capture on clipboard changes.
     pub capture_on_clipboard: bool,
+    /// Interval (ms) between visual-change checks (screenshot + frame diff).
+    /// Set to 0 to disable visual change detection.
+    pub visual_check_interval_ms: u64,
+    /// Frame difference threshold (0.0–1.0) above which a VisualChange trigger fires.
+    pub visual_change_threshold: f64,
 }
 
 impl Default for EventDrivenCaptureConfig {
@@ -92,6 +101,8 @@ impl Default for EventDrivenCaptureConfig {
             jpeg_quality: 80,
             capture_on_click: true,
             capture_on_clipboard: true,
+            visual_check_interval_ms: 3_000, // check every 3 seconds
+            visual_change_threshold: 0.02,   // ~2% difference triggers capture
         }
     }
 }
@@ -211,8 +222,20 @@ pub async fn event_driven_capture_loop(
         monitor_id, device_name
     );
 
+    let visual_check_enabled = config.visual_check_interval_ms > 0;
+    let visual_check_interval = Duration::from_millis(config.visual_check_interval_ms);
+    let visual_change_threshold = config.visual_change_threshold;
+
     let mut state = EventDrivenCapture::new(config);
     let poll_interval = Duration::from_millis(50);
+
+    // Frame comparer for visual change detection
+    let mut frame_comparer = if visual_check_enabled {
+        Some(FrameComparer::new(FrameComparisonConfig::max_performance()))
+    } else {
+        None
+    };
+    let mut last_visual_check = Instant::now();
 
     loop {
         if stop_signal.load(Ordering::Relaxed) {
@@ -221,7 +244,7 @@ pub async fn event_driven_capture_loop(
         }
 
         // Check for external triggers (non-blocking)
-        let trigger = match trigger_rx.try_recv() {
+        let mut trigger = match trigger_rx.try_recv() {
             Ok(trigger) => Some(trigger),
             Err(mpsc::error::TryRecvError::Empty) => {
                 // Poll activity feed for state transitions
@@ -232,6 +255,32 @@ pub async fn event_driven_capture_loop(
                 break;
             }
         };
+
+        // Visual change detection: periodically screenshot + frame diff
+        if trigger.is_none()
+            && visual_check_enabled
+            && state.can_capture()
+            && last_visual_check.elapsed() >= visual_check_interval
+        {
+            last_visual_check = Instant::now();
+            if let Some(ref mut comparer) = frame_comparer {
+                match capture_monitor_image(&monitor).await {
+                    Ok((image, _dur)) => {
+                        let diff = comparer.compare(&image);
+                        if diff > visual_change_threshold {
+                            debug!(
+                                "visual change detected on monitor {} (diff={:.4}, threshold={:.4})",
+                                monitor_id, diff, visual_change_threshold
+                            );
+                            trigger = Some(CaptureTrigger::VisualChange);
+                        }
+                    }
+                    Err(e) => {
+                        debug!("visual check screenshot failed for monitor {}: {}", monitor_id, e);
+                    }
+                }
+            }
+        }
 
         if let Some(trigger) = trigger {
             if state.can_capture() {
@@ -248,6 +297,14 @@ pub async fn event_driven_capture_loop(
                 {
                     Ok(result) => {
                         state.mark_captured();
+
+                        // Feed the captured frame to comparer so we don't
+                        // re-trigger on the same visual state
+                        if let Some(ref mut comparer) = frame_comparer {
+                            if let Ok((img, _)) = capture_monitor_image(&monitor).await {
+                                let _ = comparer.compare(&img);
+                            }
+                        }
 
                         // Update vision metrics so health check reports "ok"
                         vision_metrics.record_capture();
@@ -360,6 +417,7 @@ mod tests {
         );
         assert_eq!(CaptureTrigger::Click.as_str(), "click");
         assert_eq!(CaptureTrigger::TypingPause.as_str(), "typing_pause");
+        assert_eq!(CaptureTrigger::VisualChange.as_str(), "visual_change");
         assert_eq!(CaptureTrigger::Idle.as_str(), "idle");
         assert_eq!(CaptureTrigger::Manual.as_str(), "manual");
     }
@@ -435,5 +493,7 @@ mod tests {
         assert_eq!(config.jpeg_quality, 80);
         assert!(config.capture_on_click);
         assert!(config.capture_on_clipboard);
+        assert_eq!(config.visual_check_interval_ms, 3_000);
+        assert!((config.visual_change_threshold - 0.02).abs() < f64::EPSILON);
     }
 }

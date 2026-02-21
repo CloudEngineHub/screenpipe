@@ -231,16 +231,24 @@ mod query_plan_tests {
             &db,
             r#"SELECT
                 f.id, f.timestamp, f.offset_index,
-                SUBSTR(ot.text, 1, 200) as text,
-                COALESCE(f.app_name, ot.app_name) as app_name,
-                COALESCE(f.window_name, ot.window_name) as window_name,
-                vc.device_name as screen_device,
-                vc.file_path as video_path,
-                vc.fps as chunk_fps,
+                COALESCE(
+                    SUBSTR(f.accessibility_text, 1, 200),
+                    (SELECT SUBSTR(ot.text, 1, 200) FROM ocr_text ot WHERE ot.frame_id = f.id LIMIT 1)
+                ) as text,
+                COALESCE(
+                    f.app_name,
+                    (SELECT ot.app_name FROM ocr_text ot WHERE ot.frame_id = f.id LIMIT 1)
+                ) as app_name,
+                COALESCE(
+                    f.window_name,
+                    (SELECT ot.window_name FROM ocr_text ot WHERE ot.frame_id = f.id LIMIT 1)
+                ) as window_name,
+                COALESCE(vc.device_name, f.device_name) as screen_device,
+                COALESCE(vc.file_path, f.snapshot_path) as video_path,
+                COALESCE(vc.fps, 0.033) as chunk_fps,
                 f.browser_url
             FROM frames f
-            JOIN video_chunks vc ON f.video_chunk_id = vc.id
-            LEFT JOIN ocr_text ot ON f.id = ot.frame_id
+            LEFT JOIN video_chunks vc ON f.video_chunk_id = vc.id
             WHERE f.timestamp >= '2020-01-01' AND f.timestamp <= '2030-01-01'
             ORDER BY f.timestamp DESC, f.offset_index DESC
             LIMIT 10000"#,

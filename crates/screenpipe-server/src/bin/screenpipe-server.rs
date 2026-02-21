@@ -25,12 +25,12 @@ use screenpipe_db::DatabaseManager;
 use screenpipe_server::{
     analytics,
     cli::{
-        get_or_create_machine_id, AudioCommand, Cli, CliAudioTranscriptionEngine, CliOcrEngine,
+        get_or_create_machine_id, AudioCommand, Cli, CliAudioTranscriptionEngine,
         Command, McpCommand, OutputFormat, RecordArgs, SyncCommand, VisionCommand,
     },
     cli_pipe::handle_pipe_command,
     cli_status::handle_status_command,
-    start_continuous_recording, start_meeting_watcher, start_sleep_monitor,
+    start_meeting_watcher, start_sleep_monitor,
     start_speaker_identification, start_ui_recording,
     sync_provider::ScreenpipeSyncProvider,
     vision_manager::{start_monitor_watcher, stop_monitor_watcher, VisionManager},
@@ -298,8 +298,6 @@ async fn main() -> anyhow::Result<()> {
                 "cli_settings",
                 sentry::protocol::Context::Other({
                     let mut map = std::collections::BTreeMap::new();
-                    map.insert("fps".into(), json!(cli.fps));
-                    map.insert("adaptive_fps".into(), json!(cli.adaptive_fps));
                     map.insert(
                         "audio_chunk_duration".into(),
                         json!(cli.audio_chunk_duration),
@@ -310,7 +308,6 @@ async fn main() -> anyhow::Result<()> {
                         "audio_transcription_engine".into(),
                         json!(format!("{:?}", cli.audio_transcription_engine)),
                     );
-                    map.insert("ocr_engine".into(), json!(format!("{:?}", cli.ocr_engine)));
                     map.insert("monitor_ids".into(), json!(cli.monitor_id));
                     map.insert("use_all_monitors".into(), json!(cli.use_all_monitors));
                     map.insert(
@@ -472,10 +469,8 @@ async fn main() -> anyhow::Result<()> {
         _ => RecordArgs::from_cli(&cli),
     };
 
-    // Sync cli fields from record_args (needed when `screenpipe record --fps 2` is used,
+    // Sync cli fields from record_args (needed when `screenpipe record` is used,
     // because clap puts those flags on RecordArgs, not on Cli's top-level fields)
-    cli.fps = record_args.fps;
-    cli.adaptive_fps = record_args.adaptive_fps;
     cli.audio_chunk_duration = record_args.audio_chunk_duration;
     cli.port = record_args.port;
     cli.disable_audio = record_args.disable_audio;
@@ -484,7 +479,6 @@ async fn main() -> anyhow::Result<()> {
     cli.data_dir = record_args.data_dir.clone();
     cli.debug = record_args.debug;
     cli.audio_transcription_engine = record_args.audio_transcription_engine.clone();
-    cli.ocr_engine = record_args.ocr_engine.clone();
     cli.monitor_id = record_args.monitor_id.clone();
     cli.use_all_monitors = record_args.use_all_monitors;
     cli.language = record_args.language.clone();
@@ -608,7 +602,6 @@ async fn main() -> anyhow::Result<()> {
 
     let db_server = db.clone();
 
-    let warning_ocr_engine_clone = cli.ocr_engine.clone();
     let warning_audio_transcription_engine_clone = cli.audio_transcription_engine.clone();
     let monitor_ids: Vec<u32> = if config.monitor_ids.is_empty() {
         all_monitors.iter().map(|m| m.id()).collect::<Vec<_>>()
@@ -622,7 +615,6 @@ async fn main() -> anyhow::Result<()> {
 
     let languages = config.languages.clone();
 
-    let ocr_engine_clone = cli.ocr_engine.clone();
     let vad_engine = cli.vad_engine.clone();
     let vad_engine_clone = vad_engine.clone();
     let vad_sensitivity_clone = cli.vad_sensitivity.clone();
@@ -633,7 +625,6 @@ async fn main() -> anyhow::Result<()> {
     let db_clone = Arc::clone(&db);
     let output_path_clone = Arc::new(local_data_dir.join("data").to_string_lossy().into_owned());
     let shutdown_tx_clone = shutdown_tx.clone();
-    let monitor_ids_clone = monitor_ids.clone();
     let ignored_windows_clone = cli.ignored_windows.clone();
     let included_windows_clone = cli.included_windows.clone();
     // Create UI recorder config early before cli is moved
@@ -672,52 +663,19 @@ async fn main() -> anyhow::Result<()> {
     // Create shared pipeline metrics (used by recording + health endpoint + PostHog)
     let vision_metrics = Arc::new(screenpipe_vision::PipelineMetrics::new());
 
-    // Create VisionManager for dynamic monitor detection if enabled
-    let vision_manager: Option<Arc<VisionManager>> =
-        if config.use_all_monitors && !config.disable_vision {
-            info!("Using dynamic monitor detection (--use-all-monitors)");
+    // Create VisionManager for event-driven capture on all monitors
+    let handle = if !config.disable_vision {
+        let vision_config = config.to_vision_manager_config(
+            output_path_clone.to_string(),
+            vision_metrics.clone(),
+        );
+        let vision_manager = Arc::new(VisionManager::new(
+            vision_config,
+            db_clone.clone(),
+            vision_handle.clone(),
+        ));
 
-            // Create activity feed for adaptive FPS if enabled
-            #[cfg(feature = "adaptive-fps")]
-            let activity_feed: screenpipe_vision::ActivityFeedOption = if config.adaptive_fps {
-                info!("Starting activity feed for adaptive FPS");
-                match screenpipe_accessibility::UiRecorder::with_defaults().start_activity_only() {
-                    Ok(feed) => {
-                        info!("Activity feed started successfully");
-                        Some(feed)
-                    }
-                    Err(e) => {
-                        warn!(
-                            "Failed to start activity feed: {:?}. Adaptive FPS will be disabled.",
-                            e
-                        );
-                        None
-                    }
-                }
-            } else {
-                None
-            };
-
-            #[cfg(not(feature = "adaptive-fps"))]
-            let activity_feed: screenpipe_vision::ActivityFeedOption = None;
-
-            let vision_config = config.to_vision_manager_config(
-                output_path_clone.to_string(),
-                activity_feed,
-                vision_metrics.clone(),
-            );
-            Some(Arc::new(VisionManager::new(
-                vision_config,
-                db_clone.clone(),
-                vision_handle.clone(),
-            )))
-        } else {
-            None
-        };
-
-    let handle = if let Some(ref vm) = vision_manager {
-        // Use VisionManager for dynamic monitor detection
-        let vm_clone = vm.clone();
+        let vm_clone = vision_manager.clone();
         let shutdown_tx_clone2 = shutdown_tx_clone.clone();
         let runtime = &tokio::runtime::Handle::current();
         runtime.spawn(async move {
@@ -745,61 +703,8 @@ async fn main() -> anyhow::Result<()> {
             }
         })
     } else {
-        // Create activity feed for adaptive FPS if enabled (for non-VisionManager path)
-        #[cfg(feature = "adaptive-fps")]
-        let activity_feed_legacy: screenpipe_vision::ActivityFeedOption = if config.adaptive_fps {
-            info!("Starting activity feed for adaptive FPS (legacy path)");
-            match screenpipe_accessibility::UiRecorder::with_defaults().start_activity_only() {
-                Ok(feed) => {
-                    info!("Activity feed started successfully");
-                    Some(feed)
-                }
-                Err(e) => {
-                    warn!(
-                        "Failed to start activity feed: {:?}. Adaptive FPS will be disabled.",
-                        e
-                    );
-                    None
-                }
-            }
-        } else {
-            None
-        };
-
-        #[cfg(not(feature = "adaptive-fps"))]
-        let activity_feed_legacy: screenpipe_vision::ActivityFeedOption = None;
-
-        let vision_metrics_for_recording = vision_metrics.clone();
-        let config_clone = config.clone();
-
-        // Use traditional start_continuous_recording
-        let runtime = &tokio::runtime::Handle::current();
-        runtime.spawn(async move {
-            loop {
-                let mut shutdown_rx = shutdown_tx_clone.subscribe();
-                let recording_future = start_continuous_recording(
-                    db_clone.clone(),
-                    output_path_clone.clone(),
-                    &config_clone,
-                    monitor_ids_clone.clone(),
-                    &vision_handle,
-                    activity_feed_legacy,
-                    vision_metrics_for_recording.clone(),
-                );
-
-                let result = tokio::select! {
-                    result = recording_future => result,
-                    _ = shutdown_rx.recv() => {
-                        info!("received shutdown signal for recording");
-                        break;
-                    }
-                };
-
-                if let Err(e) = result {
-                    error!("continuous recording error: {:?}", e);
-                }
-            }
-        })
+        // Vision disabled — spawn a no-op task so `handle` always exists
+        tokio::spawn(async {})
     };
 
     let local_data_dir_clone_2 = local_data_dir_clone.clone();
@@ -894,7 +799,6 @@ async fn main() -> anyhow::Result<()> {
     println!("┌────────────────────────┬────────────────────────────────────┐");
     println!("│ setting                │ value                              │");
     println!("├────────────────────────┼────────────────────────────────────┤");
-    println!("│ fps                    │ {:<34} │", cli.fps);
     println!(
         "│ audio chunk duration   │ {:<34} │",
         format!("{} seconds", cli.audio_chunk_duration)
@@ -905,10 +809,6 @@ async fn main() -> anyhow::Result<()> {
     println!(
         "│ audio engine           │ {:<34} │",
         format!("{:?}", warning_audio_transcription_engine_clone)
-    );
-    println!(
-        "│ ocr engine             │ {:<34} │",
-        format!("{:?}", ocr_engine_clone)
     );
     println!(
         "│ vad engine             │ {:<34} │",
@@ -1062,9 +962,7 @@ async fn main() -> anyhow::Result<()> {
     println!("└────────────────────────┴────────────────────────────────────┘");
 
     // Add warning for cloud arguments and telemetry
-    if warning_audio_transcription_engine_clone == CliAudioTranscriptionEngine::Deepgram
-        || warning_ocr_engine_clone == CliOcrEngine::Unstructured
-    {
+    if warning_audio_transcription_engine_clone == CliAudioTranscriptionEngine::Deepgram {
         println!(
             "{}",
             "warning: you are using cloud now. make sure to understand the data privacy risks."
@@ -1134,7 +1032,7 @@ async fn main() -> anyhow::Result<()> {
         .map(|detector| start_meeting_watcher(detector.clone()));
 
     // Start calendar-assisted speaker identification
-    let _speaker_id_handle = start_speaker_identification(db.clone(), None);
+    let _speaker_id_handle = start_speaker_identification(db.clone(), config.user_name.clone());
 
     // Start background FTS indexer (replaces synchronous INSERT triggers)
     let _fts_handle = screenpipe_db::fts_indexer::start_fts_indexer(db.clone());

@@ -420,6 +420,30 @@ impl DatabaseManager {
         unreachable!()
     }
 
+    /// Low-priority version of `begin_immediate_with_retry` for background tasks
+    /// like the FTS indexer. Returns `None` if the write semaphore is already held,
+    /// so the caller can skip and retry later instead of blocking real-time captures.
+    pub async fn try_begin_immediate(&self) -> Result<Option<ImmediateTx>, sqlx::Error> {
+        let permit = match Arc::clone(&self.write_semaphore).try_acquire_owned() {
+            Ok(permit) => permit,
+            Err(_) => return Ok(None), // Someone else is writing — yield
+        };
+
+        let mut conn = self.pool.acquire().await?;
+        match sqlx::query("BEGIN IMMEDIATE").execute(&mut *conn).await {
+            Ok(_) => Ok(Some(ImmediateTx {
+                conn: Some(conn),
+                committed: false,
+                _write_permit: permit,
+            })),
+            Err(e) if Self::is_busy_error(&e) => {
+                drop(conn);
+                Ok(None) // DB busy (e.g. checkpoint) — yield
+            }
+            Err(e) => Err(e),
+        }
+    }
+
     /// Check if a sqlx error is a SQLite BUSY variant (code 5, 517, etc.)
     fn is_busy_error(e: &sqlx::Error) -> bool {
         match e {
@@ -2543,21 +2567,35 @@ impl DatabaseManager {
         // OCR text is truncated to 200 chars for the timeline stream — full text
         // is fetched on-demand via /frames/{id}/ocr when needed. This reduces
         // data transfer from ~5MB to ~500KB for a full-day query (~2500 frames).
+        // Avoid LEFT JOIN ocr_text — it forces a scan of the entire ocr_text
+        // table for every frame, taking 60+ seconds on large DBs. Instead, use
+        // COALESCE with correlated subqueries: for event-driven frames the frame
+        // columns (accessibility_text, app_name, window_name) are non-null so
+        // COALESCE short-circuits and the subquery never executes. For legacy
+        // frames the subquery does a fast indexed lookup by frame_id.
         let frames_query = r#"
          SELECT
             f.id,
             f.timestamp,
             f.offset_index,
-            COALESCE(SUBSTR(ot.text, 1, 200), SUBSTR(f.accessibility_text, 1, 200)) as text,
-            COALESCE(f.app_name, ot.app_name) as app_name,
-            COALESCE(f.window_name, ot.window_name) as window_name,
+            COALESCE(
+                SUBSTR(f.accessibility_text, 1, 200),
+                (SELECT SUBSTR(ot.text, 1, 200) FROM ocr_text ot WHERE ot.frame_id = f.id LIMIT 1)
+            ) as text,
+            COALESCE(
+                f.app_name,
+                (SELECT ot.app_name FROM ocr_text ot WHERE ot.frame_id = f.id LIMIT 1)
+            ) as app_name,
+            COALESCE(
+                f.window_name,
+                (SELECT ot.window_name FROM ocr_text ot WHERE ot.frame_id = f.id LIMIT 1)
+            ) as window_name,
             COALESCE(vc.device_name, f.device_name) as screen_device,
             COALESCE(vc.file_path, f.snapshot_path) as video_path,
             COALESCE(vc.fps, 0.033) as chunk_fps,
             f.browser_url
         FROM frames f
         LEFT JOIN video_chunks vc ON f.video_chunk_id = vc.id
-        LEFT JOIN ocr_text ot ON f.id = ot.frame_id
         WHERE f.timestamp >= ?1 AND f.timestamp <= ?2
         ORDER BY f.timestamp DESC, f.offset_index DESC
         LIMIT 10000

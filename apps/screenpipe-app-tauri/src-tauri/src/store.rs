@@ -568,26 +568,20 @@ impl SettingsStore {
         use screenpipe_audio::audio_manager::builder::TranscriptionMode;
         use screenpipe_audio::core::engine::AudioTranscriptionEngine;
         use screenpipe_audio::vad::VadSensitivity;
-        use screenpipe_vision::OcrEngine;
 
         let audio_engine_str = self.resolve_audio_engine();
 
         screenpipe_server::RecordingConfig {
-            fps: if self.fps > 0.0 { self.fps as f64 } else { 1.0 },
-            adaptive_fps: self.adaptive_fps,
             audio_chunk_duration: self.audio_chunk_duration as u64,
             port: self.port,
             data_dir,
             disable_audio: self.disable_audio,
             disable_vision: self.disable_vision,
-            disable_ocr: self.disable_ocr,
             use_pii_removal: self.use_pii_removal,
             enable_input_capture: self.enable_input_capture,
             enable_accessibility: self.enable_accessibility,
             audio_transcription_engine: audio_engine_str.parse()
                 .unwrap_or(AudioTranscriptionEngine::WhisperLargeV3Turbo),
-            ocr_engine: self.ocr_engine.parse()
-                .unwrap_or(OcrEngine::platform_default()),
             vad_sensitivity: self.vad_sensitivity.parse()
                 .unwrap_or(VadSensitivity::High),
             transcription_mode: match self.extra.get("transcriptionMode").and_then(|v| v.as_str()) {
@@ -613,11 +607,17 @@ impl SettingsStore {
                 Some(self.deepgram_api_key.clone())
             },
             user_id: self.user.id.as_ref().filter(|id| !id.is_empty()).cloned(),
+            // Fallback chain for speaker identification: userName setting → cloud name → cloud email
+            user_name: self.extra.get("userName")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string())
+                .filter(|s| !s.trim().is_empty())
+                .or_else(|| self.user.name.clone().filter(|s| !s.trim().is_empty()))
+                .or_else(|| self.user.email.clone().filter(|s| !s.trim().is_empty())),
             video_quality: self.video_quality.clone(),
             use_chinese_mirror: self.use_chinese_mirror,
             analytics_enabled: self.analytics_enabled,
             analytics_id: self.analytics_id.clone(),
-            event_driven: true,
         }
     }
 

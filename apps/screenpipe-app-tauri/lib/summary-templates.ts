@@ -19,14 +19,26 @@ export const SUMMARY_TEMPLATES: SummaryTemplate[] = [
     icon: "📋",
     featured: true,
     prompt: `Analyze my screen and audio recordings from today (last 16 hours only). Use limit=10 per search, max 5 searches total.
-Provide:
-1. A one-line summary of my day
-2. Top 3 accomplishments (with approximate timestamps)
-3. Key moments — important things I saw, said, or heard
-4. Unfinished work — anything I started but didn't complete
-5. Interesting patterns — apps I used most, topics that came up repeatedly
 
-Format each section with clear headings. Only report activities you can verify from the recordings. If uncertain, say so.`,
+Use this exact format:
+
+## Summary
+One sentence: what I mainly did today.
+
+## Accomplishments
+- Top 3 things I finished, with timestamps (e.g. "2:30 PM")
+- Name specific apps, files, or projects
+
+## Key Moments
+- Important things I saw, said, or heard — with timestamps
+
+## Unfinished Work
+- What I should continue tomorrow — name the app/file/task
+
+## Patterns
+- Apps I used most, topics that came up repeatedly
+
+Only report what you can verify from the data. End with: "**Next step:** [most important thing to continue]"`,
   },
   {
     id: "standup-update",
@@ -34,13 +46,21 @@ Format each section with clear headings. Only report activities you can verify f
     description: "What you did, what's next, and any blockers",
     icon: "🏢",
     featured: true,
-    prompt: `Based on my recordings from the last 24 hours, generate a concise standup update. Use limit=10 per search, max 3 searches total.
+    prompt: `Based on my recordings from the last 24 hours, generate a standup update. Use limit=10 per search, max 3 searches total.
 
-**Yesterday:** What I worked on (be specific — mention projects, files, tools)
-**Today:** What I'm likely working on next (based on recent activity and unfinished tasks)
-**Blockers:** Any issues I encountered — errors, long meetings, interruptions
+Use this exact format:
 
-Keep it short and copy-paste ready for a team standup. Use bullet points.`,
+## Yesterday
+- What I worked on (name specific projects, files, tools, PRs)
+
+## Today
+- What I will work on next (based on unfinished tasks and recent activity)
+
+## Blockers
+- Issues I hit — errors, slow builds, waiting on someone
+- If no blockers, write "None"
+
+Keep it under 150 words. Copy-paste ready for a team standup.`,
   },
   {
     id: "custom-summary",
@@ -58,13 +78,21 @@ Keep it short and copy-paste ready for a team standup. Use bullet points.`,
     featured: true,
     prompt: `Search my screen and audio recordings from the last 8 hours. Use limit=10 per search, max 4 searches total.
 
-Identify:
-1. **Recurring Topics** — subjects, projects, or people that keep coming up
-2. **Focus Areas** — what I spent the most time on
-3. **Unresolved Questions** — things I searched for or discussed without clear resolution
-4. **Emerging Patterns** — any new topics or tools appearing in my workflow
+Use this exact format:
 
-Rank topics by how frequently they appeared. Include context for each.`,
+## Recurring Topics
+- Subjects, projects, or people that appeared 3+ times. Rank by frequency.
+
+## Focus Areas
+- What I spent the most time on. Name the app and approximate duration.
+
+## Unresolved Questions
+- Things I searched for or discussed without finding an answer
+
+## Emerging Patterns
+- New topics, tools, or workflows appearing vs. my usual routine
+
+End with: "**Next step:** [most important thing to follow up on]"`,
   },
   {
     id: "ai-habits",
@@ -74,13 +102,21 @@ Rank topics by how frequently they appeared. Include context for each.`,
     featured: true,
     prompt: `Search my recordings from the last 24 hours for AI tool usage. Use app_name filter for each tool separately: ChatGPT, Claude, Copilot, Cursor, Gemini, Perplexity. Use limit=5 per search, max 6 searches total.
 
-Report:
-1. **Which AI tools** I used and approximate time per tool
-2. **What I used them for** — coding, writing, research, brainstorming
-3. **Usage patterns** — do I switch between tools? Use them in bursts or steadily?
-4. **Effectiveness** — which tool appeared alongside completed work vs. abandoned attempts
+Use this exact format:
 
-If no AI usage is found, say so. Don't make up data.`,
+## AI Tools Used
+- List each tool with approximate time spent (e.g. "Claude: ~45min")
+
+## What I Used Them For
+- For each tool: coding, writing, research, or brainstorming
+
+## Usage Patterns
+- Do I switch between tools? Use them in bursts or steadily?
+
+## Effectiveness
+- Which tool appeared alongside completed work vs. abandoned attempts
+
+If no AI usage is found, say so clearly. End with: "**Tip:** [one suggestion to use AI tools more effectively]"`,
   },
   {
     id: "morning-brief",
@@ -90,13 +126,21 @@ If no AI usage is found, say so. Don't make up data.`,
     featured: false,
     prompt: `Look at my recordings from yesterday evening (last 12-18 hours). Use limit=10 per search, max 3 searches total.
 
-Generate a morning brief:
-1. **Where I left off** — what was I working on when I stopped?
-2. **Unfinished tasks** — anything started but not completed
-3. **Important messages** — key conversations or notifications I should follow up on
-4. **Today's context** — meetings, deadlines, or events mentioned yesterday
+Use this exact format:
 
-Be specific with app names and window titles so I can jump right back in.`,
+## Where I Left Off
+- What was I working on when I stopped? Name the app, file, and task.
+
+## Unfinished Tasks
+- Anything started but not completed — list what to finish today
+
+## Important Messages
+- Key conversations or notifications I should follow up on
+
+## Today's Context
+- Meetings, deadlines, or events mentioned yesterday
+
+Be specific with app names and window titles. End with: "**Start with:** [first thing to do this morning]"`,
   },
   {
     id: "time-breakdown",
@@ -104,15 +148,25 @@ Be specific with app names and window titles so I can jump right back in.`,
     description: "Where your time went — by app, project, and category",
     icon: "⏱",
     featured: false,
-    prompt: `Analyze my app usage and screen recordings from today (last 12 hours). Use limit=10 per search, max 4 searches. Prefer using /raw_sql with COUNT/GROUP BY queries over fetching raw data.
+    prompt: `Analyze my app usage from today (last 12 hours). Use limit=10 per search, max 4 searches. Prefer /raw_sql with COUNT/GROUP BY queries.
 
-Break down my time by:
-1. **By Application** — which apps I used and approximate duration
-2. **By Category** — coding, meetings, browsing, writing, communication, other
-3. **By Project/Topic** — group related activities together
-4. **Productivity Score** — ratio of focused work vs. switching/browsing
+Use this exact format with durations and percentages:
 
-Show percentages and durations. Use a mermaid gantt chart to visualize the timeline.`,
+## By Application
+- List each app with duration and percentage, sorted by time (e.g. "VS Code: 2h 15min (28%)")
+
+## By Category
+- Group into: coding, meetings, browsing, writing, communication, other
+- Show hours and percentage per category
+
+## By Project
+- Group related activities by project/topic. Name specific repos or tasks.
+
+## Productivity Score
+- Calculate: focused_work_hours / total_hours as a percentage
+- Focused = coding + writing. Unfocused = browsing + switching.
+
+End with: "**Suggestion:** [one specific change to improve tomorrow's productivity]"`,
   },
   {
     id: "collaboration-patterns",
@@ -122,13 +176,21 @@ Show percentages and durations. Use a mermaid gantt chart to visualize the timel
     featured: false,
     prompt: `Analyze my communication patterns from the last 24 hours. Use limit=10 per search, max 4 searches. Filter by app_name for communication tools (Slack, Teams, Zoom, Discord, Mail).
 
-Report:
-1. **People I interacted with** — from meetings, messages, emails
-2. **Communication channels** — which apps/platforms for each person
-3. **Meeting time** — how much time in calls vs. async communication
-4. **Key discussions** — important topics per person/channel
+Use this exact format:
 
-Focus on professional interactions. Don't include personal messages unless clearly work-related.`,
+## People
+- Who I interacted with — from meetings, messages, emails
+
+## Channels
+- Which apps/platforms I used for each person
+
+## Meeting Time
+- How much time in calls vs. async communication
+
+## Key Discussions
+- Important topics per person/channel
+
+Focus on professional interactions. End with: "**Follow up with:** [person or thread to respond to first]"`,
   },
   {
     id: "week-recap",
@@ -136,19 +198,33 @@ Focus on professional interactions. Don't include personal messages unless clear
     description: "Weekly review without manual journaling",
     icon: "📅",
     featured: false,
-    prompt: `Generate a weekly recap. Search ONE DAY AT A TIME (7 separate searches, one per day this week). Use limit=5 per search, max 10 searches total. Use /raw_sql with COUNT/GROUP BY to get app usage stats instead of fetching raw content.
+    prompt: `Generate a weekly recap. Search ONE DAY AT A TIME (one search per day this week). Use limit=5 per search, max 10 searches total. Use /raw_sql with COUNT/GROUP BY for app usage stats.
 
-IMPORTANT: Do NOT fetch all data for the entire week in one query. Break it into daily slices.
+IMPORTANT: Search each day separately, not the full week at once.
 
-Provide:
-1. **Week Summary** — one paragraph overview
-2. **Daily Highlights** — one key accomplishment per day
-3. **Top Projects** — what I spent the most time on
-4. **Meetings & Collaborations** — key meetings and outcomes
-5. **Learnings** — new tools, techniques, or knowledge acquired
-6. **Next Week** — unfinished work carrying over
+Use this exact format:
 
-Make it suitable for a personal weekly review or sharing with a manager.`,
+## Week Summary
+One paragraph: main theme of the week and overall progress.
+
+## Daily Highlights
+- **Monday:** one key accomplishment (with timestamp)
+- **Tuesday:** ...
+- Continue for each day with data
+
+## Top Projects
+- Name specific projects/repos with approximate hours spent
+
+## Meetings & Collaborations
+- Key meetings, who attended, what was decided
+
+## Learnings
+- New tools, techniques, or insights gained
+
+## Next Week
+- Unfinished work to continue. List specific tasks.
+
+Keep it under 400 words. End with: "**Priority for next week:** [single most important task]"`,
   },
   {
     id: "professional-persona",
@@ -158,15 +234,27 @@ Make it suitable for a personal weekly review or sharing with a manager.`,
     featured: false,
     prompt: `Analyze my professional work style from the last 48 hours. Use limit=10 per search, max 5 searches. Prefer /raw_sql with COUNT/GROUP BY for app usage stats.
 
-Report:
-1. **Work Rhythm** — when am I most productive? Morning vs. afternoon patterns
-2. **Focus vs. Multitasking** — how often do I context-switch between apps?
-3. **Communication Style** — do I prefer meetings, chat, or async?
-4. **Tool Preferences** — which tools do I reach for most?
-5. **Strengths** — what patterns suggest effectiveness?
-6. **Areas to Improve** — what patterns suggest inefficiency?
+Use this exact format:
 
-Be honest but constructive. Base everything on observable data.`,
+## Work Rhythm
+- When am I most productive? Morning vs. afternoon vs. evening.
+
+## Focus vs. Multitasking
+- How often do I context-switch between apps? Average focus streak duration.
+
+## Communication Style
+- Do I prefer meetings, chat, or async?
+
+## Tool Preferences
+- Which tools do I reach for most? List with usage counts.
+
+## Strengths
+- What patterns suggest effectiveness?
+
+## Areas to Improve
+- What patterns suggest inefficiency?
+
+Be honest but constructive. End with: "**One change to try:** [specific actionable habit change]"`,
   },
 ];
 
