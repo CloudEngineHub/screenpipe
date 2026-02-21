@@ -14,14 +14,14 @@ import { SubtitleBar } from "@/components/rewind/timeline/subtitle-bar";
 import { TimelineProvider, useTimelineSelection } from "@/lib/hooks/use-timeline-selection";
 import { throttle } from "lodash";
 import { TimelineControls } from "@/components/rewind/timeline/timeline-controls";
-import { addDays, endOfDay, isAfter, isSameDay, startOfDay, subDays } from "date-fns";
+import { endOfDay, isAfter, isSameDay, startOfDay } from "date-fns";
 import { getStartDate } from "@/lib/actions/get-start-date";
 import { useTimelineData } from "@/lib/hooks/use-timeline-data";
 import { useCurrentFrame } from "@/lib/hooks/use-current-frame";
 import { TimelineSlider, getFrameAppName } from "@/components/rewind/timeline/timeline";
 import { useMeetings } from "@/lib/hooks/use-meetings";
 import { useTimelineStore } from "@/lib/hooks/use-timeline-store";
-import { hasFramesForDate } from "@/lib/actions/has-frames-date";
+import { findNearestDateWithFrames } from "@/lib/actions/has-frames-date";
 import { CurrentFrameTimeline } from "@/components/rewind/current-frame-timeline";
 import { usePlatform } from "@/lib/hooks/use-platform";
 import { useAudioPlayback } from "@/lib/hooks/use-audio-playback";
@@ -138,6 +138,9 @@ export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 	// Seeking state for UX feedback when navigating from search
 	const [seekingTimestamp, setSeekingTimestamp] = useState<string | null>(null);
 
+	// Navigation in progress — disables day arrows to prevent double-clicks
+	const [isNavigating, setIsNavigating] = useState(false);
+
 	// Get timeline selection for chat context
 	const { selectionRange, loadTagsForFrames } = useTimelineSelection();
 
@@ -226,6 +229,7 @@ export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 					setCurrentIndex(0);
 					setCurrentFrame(frames.length > 0 ? frames[0] : null);
 					isNavigatingRef.current = false;
+					setIsNavigating(false);
 					pendingNavigationRef.current = null;
 					setSeekingTimestamp(null);
 
@@ -462,13 +466,14 @@ export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 				pendingNavigationRef.current = null;
 				setSeekingTimestamp(null);
 				setPendingNavigation(null);
+				setIsNavigating(false);
 				isNavigatingRef.current = false;
 			}
 		}
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [frames, currentDate, setPendingNavigation]);
 
-	// Timeout: clear seeking overlay if navigation doesn't resolve within 15s
+	// Timeout: clear seeking overlay if navigation doesn't resolve within 10s
 	useEffect(() => {
 		if (!seekingTimestamp) return;
 		const timer = setTimeout(() => {
@@ -476,8 +481,9 @@ export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 			setSeekingTimestamp(null);
 			pendingNavigationRef.current = null;
 			setPendingNavigation(null);
+			setIsNavigating(false);
 			isNavigatingRef.current = false;
-		}, 15000);
+		}, 10000);
 		return () => clearTimeout(timer);
 	}, [seekingTimestamp, setPendingNavigation]);
 
@@ -852,30 +858,21 @@ export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 			const isToday = isSameDay(dateToCheck, new Date());
 
 			// For today, always fetch — live polling will push new frames.
-			// For other dates, walk back to find a date with frames.
+			// For other dates, find nearest date with frames in a single query.
+			// Skip when navigating — handleDateChange already resolved the date.
 			if (!isToday && !isNavigatingRef.current) {
-				let retries = 0;
-				while (retries < MAX_DATE_RETRIES) {
-					if (cancelled) return;
-					const checkFramesForDate = await hasFramesForDate(dateToCheck);
-					if (cancelled) return;
-					console.log("checkFramesForDate", dateToCheck, checkFramesForDate);
-					if (checkFramesForDate) break;
-					retries++;
-					dateToCheck = subDays(dateToCheck, 1);
-				}
-
+				if (cancelled) return;
+				const nearest = await findNearestDateWithFrames(dateToCheck, "backward", MAX_DATE_RETRIES);
 				if (cancelled) return;
 
-				if (retries > 0 && retries < MAX_DATE_RETRIES) {
-					// Found frames on a different date — update once
-					// The effect will re-run with the new date, find frames immediately,
-					// and proceed to fetchTimeRange below.
-					setCurrentDate(dateToCheck);
+				if (!nearest) {
+					console.warn("no frames found within", MAX_DATE_RETRIES, "days back, stopping");
 					return;
 				}
-				if (retries >= MAX_DATE_RETRIES) {
-					console.warn("no frames found after checking", MAX_DATE_RETRIES, "days back, stopping");
+
+				// If nearest date differs from current, update and let effect re-run
+				if (!isSameDay(nearest, dateToCheck)) {
+					setCurrentDate(nearest);
 					return;
 				}
 			}
@@ -1087,6 +1084,7 @@ export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 	// Skips the hasFramesForDate() HTTP round-trip and adjacent-date probing.
 	const navigateDirectToDate = (targetDate: Date) => {
 		isNavigatingRef.current = true;
+		setIsNavigating(true);
 
 		console.log("[navigateDirectToDate] called with:", targetDate.toISOString());
 
@@ -1113,9 +1111,10 @@ export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 				console.warn("[navigateDirectToDate] Timeout: frames didn't arrive, clearing navigation state");
 				pendingNavigationRef.current = null;
 				setSeekingTimestamp(null);
+				setIsNavigating(false);
 				isNavigatingRef.current = false;
 			}
-		}, 15000);
+		}, 10000);
 	};
 
 	const handleDateChange = async (newDate: Date) => {
@@ -1124,44 +1123,42 @@ export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 
 		// Set navigation flag to prevent frame-date sync from fighting
 		isNavigatingRef.current = true;
+		setIsNavigating(true);
+
+		// Show loading feedback IMMEDIATELY (before any HTTP calls)
+		setSeekingTimestamp(newDate.toISOString());
 
 		console.log("[handleDateChange] called with:", newDate.toISOString(), "currentDate:", currentDate.toISOString());
 
 		try {
-			// Check if target date has frames in the database
-			const checkFramesForDate = await hasFramesForDate(newDate);
-			console.log("[handleDateChange] hasFramesForDate result:", checkFramesForDate);
+			// For today, skip any HTTP checks — hot cache guarantees frames
+			const isToday = isSameDay(newDate, new Date());
 
-			if (!checkFramesForDate) {
-				// No frames for this date - try adjacent dates
-				let subDate;
-				if (isAfter(currentDate, newDate)) {
-					subDate = subDays(newDate, 1);
-				} else {
-					subDate = addDays(newDate, 1);
-				}
+			// Determine the actual target date (may differ if newDate has no frames)
+			let targetDate = newDate;
 
-				// Limit recursion - don't go past start date or future
-				if (isAfter(startAndEndDates.start, subDate)) {
-					console.log("[handleDateChange] Reached start date boundary, stopping navigation");
+			if (!isToday) {
+				// Single query to find nearest date with frames (replaces recursive loop)
+				const direction = isAfter(currentDate, newDate) ? "backward" : "forward";
+				const nearest = await findNearestDateWithFrames(newDate, direction, MAX_DATE_RETRIES);
+
+				if (!nearest) {
+					console.log("[handleDateChange] No frames found within", MAX_DATE_RETRIES, "days", direction);
 					isNavigatingRef.current = false;
-					return;
-				}
-				if (isAfter(startOfDay(subDate), startOfDay(new Date()))) {
-					console.log("[handleDateChange] Reached today boundary, stopping navigation");
-					isNavigatingRef.current = false;
+					setIsNavigating(false);
+					setSeekingTimestamp(null);
 					return;
 				}
 
-				console.log("[handleDateChange] No frames for date, trying:", subDate.toISOString());
-				return await handleDateChange(subDate);
+				targetDate = nearest;
+				console.log("[handleDateChange] Nearest date with frames:", targetDate.toISOString());
 			}
 
 			// Already on this day - jump to first frame of the day
-			if (isSameDay(newDate, currentDate)) {
+			if (isSameDay(targetDate, currentDate)) {
 				console.log("[handleDateChange] Same day, jumping to first frame of day");
-				const targetDayStart = startOfDay(newDate);
-				const targetDayEnd = endOfDay(newDate);
+				const targetDayStart = startOfDay(targetDate);
+				const targetDayEnd = endOfDay(targetDate);
 				const targetIndex = frames.findIndex((frame) => {
 					const frameDate = new Date(frame.timestamp);
 					return frameDate >= targetDayStart && frameDate <= targetDayEnd;
@@ -1171,13 +1168,17 @@ export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 					setCurrentFrame(frames[targetIndex]);
 				}
 				isNavigatingRef.current = false;
+				setIsNavigating(false);
+				setSeekingTimestamp(null);
 				return;
 			}
 
 			// Don't go before start date
-			if (isAfter(startAndEndDates.start, newDate)) {
+			if (isAfter(startAndEndDates.start, targetDate)) {
 				console.log("[handleDateChange] Before start date, stopping");
 				isNavigatingRef.current = false;
+				setIsNavigating(false);
+				setSeekingTimestamp(null);
 				return;
 			}
 
@@ -1185,7 +1186,7 @@ export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 			dateChangesRef.current += 1;
 			posthog.capture("timeline_date_changed", {
 				from_date: currentDate.toISOString(),
-				to_date: newDate.toISOString(),
+				to_date: targetDate.toISOString(),
 			});
 
 			// CRITICAL: Clear old frames before navigating to prevent confusion
@@ -1193,40 +1194,37 @@ export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 			clearFramesForNavigation();
 
 			// Clear the sent request cache for this date to force a fresh fetch
-			clearSentRequestForDate(newDate);
+			clearSentRequestForDate(targetDate);
 
 			// Store pending navigation - will be processed when frames arrive
-			pendingNavigationRef.current = newDate;
-
-			// Show seeking overlay while waiting for frames
-			setSeekingTimestamp(newDate.toISOString());
+			pendingNavigationRef.current = targetDate;
 
 			// Clear current frame and update date
 			// This triggers the effect that fetches frames for the new date
 			setCurrentFrame(null);
 			setCurrentIndex(0);
-			setCurrentDate(newDate);
+			setCurrentDate(targetDate);
 
 			// DON'T try to find frames here - they won't be loaded yet!
-			// The pending navigation effect (line ~224) handles jumping to the
+			// The pending navigation effect handles jumping to the
 			// correct frame once the new date's frames arrive via WebSocket.
 			console.log("[handleDateChange] Navigation initiated, waiting for frames to load...");
 
-			// Safety timeout: clear navigation state if frames don't arrive within 30s
-			// This prevents the app from getting stuck in a loading state.
-			// Using 30s because disk I/O can be slow (iCloud contention, large DB).
+			// Safety timeout: clear navigation state if frames don't arrive within 10s
 			setTimeout(() => {
-				if (pendingNavigationRef.current && isSameDay(pendingNavigationRef.current, newDate)) {
+				if (pendingNavigationRef.current && isSameDay(pendingNavigationRef.current, targetDate)) {
 					console.warn("[handleDateChange] Timeout: frames didn't arrive, clearing navigation state");
 					pendingNavigationRef.current = null;
 					setSeekingTimestamp(null);
+					setIsNavigating(false);
 					isNavigatingRef.current = false;
 				}
-			}, 30000);
+			}, 10000);
 
 		} catch (error) {
 			console.error("[handleDateChange] Error:", error);
 			isNavigatingRef.current = false;
+			setIsNavigating(false);
 			pendingNavigationRef.current = null;
 			setSeekingTimestamp(null);
 		}
@@ -1428,6 +1426,7 @@ export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 						hasAudioNearby={hasAudioNearby}
 						onTogglePlayPause={togglePlayPause}
 						onCycleSpeed={cycleSpeed}
+						isNavigating={isNavigating}
 					/>
 					{/* Top right buttons */}
 					<div className={`absolute ${embedded ? "top-2" : "top-[calc(env(safe-area-inset-top)+16px)]"} right-4 flex items-center gap-2`}>
@@ -1486,20 +1485,8 @@ export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 				{/* Non-blocking streaming indicator - removed for minimalistic UX
 			    The timeline works fine while loading, no need to show persistent indicator */}
 
-				{/* Seeking overlay - shows when navigating from search */}
-				{seekingTimestamp && (
-					<div className="absolute inset-0 z-40 flex items-center justify-center pointer-events-none">
-						<div className="bg-card/95 backdrop-blur-md text-foreground px-6 py-4 rounded-xl text-center space-y-2 border border-border shadow-2xl">
-							<div className="flex items-center justify-center gap-2">
-								<Loader2 className="h-4 w-4 animate-spin" />
-								<span className="font-medium">Finding frame...</span>
-							</div>
-							<p className="text-xs text-muted-foreground font-mono">
-								{new Date(seekingTimestamp).toLocaleString()}
-							</p>
-						</div>
-					</div>
-				)}
+				{/* Seeking state is now indicated inline by the spinner on the date
+				    in TimelineControls + disabled nav buttons — no overlay needed */}
 
 				{error && (
 					<div className="absolute inset-0 z-50 flex items-center justify-center bg-background/90">

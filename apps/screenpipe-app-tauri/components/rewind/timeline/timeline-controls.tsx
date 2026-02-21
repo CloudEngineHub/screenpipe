@@ -5,7 +5,7 @@
 "use client";
 
 import { Button } from "@/components/ui/button";
-import { ChevronLeft, ChevronRight, RefreshCw, CalendarIcon, Search, Play, Pause } from "lucide-react";
+import { ChevronLeft, ChevronRight, RefreshCw, CalendarIcon, Search, Play, Pause, Loader2 } from "lucide-react";
 import {
 	endOfDay,
 	format,
@@ -105,6 +105,7 @@ interface TimelineControlsProps {
 	hasAudioNearby?: boolean;
 	onTogglePlayPause?: () => void;
 	onCycleSpeed?: () => void;
+	isNavigating?: boolean;
 }
 
 export function TimelineControls({
@@ -121,6 +122,7 @@ export function TimelineControls({
 	hasAudioNearby,
 	onTogglePlayPause,
 	onCycleSpeed,
+	isNavigating,
 }: TimelineControlsProps) {
 	const { isMac } = usePlatform();
 	const { settings } = useSettings();
@@ -181,7 +183,7 @@ export function TimelineControls({
 						size="icon"
 						onClick={() => jumpDay(-1)}
 						className="h-8 w-8 text-foreground hover:bg-foreground hover:text-background transition-colors duration-150"
-						disabled={isAtEarliestDate}
+						disabled={isAtEarliestDate || isNavigating}
 					>
 						<ChevronLeft className="h-4 w-4" />
 					</Button>
@@ -192,7 +194,11 @@ export function TimelineControls({
 								type="button"
 								className="px-3 h-8 text-sm font-mono text-foreground min-w-[100px] text-center hover:bg-foreground hover:text-background transition-colors duration-150 flex items-center justify-center gap-2"
 							>
-								<CalendarIcon className="h-3 w-3" />
+								{isNavigating ? (
+									<Loader2 className="h-3 w-3 animate-spin" />
+								) : (
+									<CalendarIcon className="h-3 w-3" />
+								)}
 								<span>{format(currentDate, "d MMM yyyy")}</span>
 							</button>
 						</PopoverTrigger>
@@ -230,7 +236,7 @@ export function TimelineControls({
 						size="icon"
 						onClick={() => jumpDay(1)}
 						className="h-8 w-8 text-foreground hover:bg-foreground hover:text-background transition-colors duration-150"
-						disabled={isAtToday}
+						disabled={isAtToday || isNavigating}
 					>
 						<ChevronRight className="h-4 w-4" />
 					</Button>
