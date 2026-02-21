@@ -278,6 +278,7 @@ impl VisionManager {
         let stop_signal = Arc::new(AtomicBool::new(false));
 
         let monitor = Arc::new(monitor);
+        let vision_metrics = self.config.vision_metrics.clone();
 
         info!(
             "Starting event-driven capture for monitor {} (device: {})",
@@ -301,6 +302,7 @@ impl VisionManager {
                 capture_config,
                 trigger_rx,
                 stop_signal,
+                vision_metrics,
             )
             .await
             {

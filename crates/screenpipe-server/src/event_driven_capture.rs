@@ -204,6 +204,7 @@ pub async fn event_driven_capture_loop(
     config: EventDrivenCaptureConfig,
     mut trigger_rx: TriggerReceiver,
     stop_signal: Arc<AtomicBool>,
+    vision_metrics: Arc<screenpipe_vision::PipelineMetrics>,
 ) -> Result<()> {
     info!(
         "event-driven capture started for monitor {} (device: {})",
@@ -247,6 +248,12 @@ pub async fn event_driven_capture_loop(
                 {
                     Ok(result) => {
                         state.mark_captured();
+
+                        // Update vision metrics so health check reports "ok"
+                        vision_metrics.record_capture();
+                        vision_metrics.record_db_write(
+                            Duration::from_millis(result.duration_ms as u64),
+                        );
 
                         debug!(
                             "event capture: trigger={}, frame_id={}, text_source={:?}, dur={}ms",
