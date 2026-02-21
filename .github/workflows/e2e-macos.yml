@@ -421,6 +421,134 @@ jobs:
         run: |
           bun .github/scripts/e2e/run-all.ts --suite permissions 2>&1 | tee -a "${{ runner.temp }}/e2e-full.log"
 
+      - name: Sign CLI binary for screen recording
+        if: success()
+        continue-on-error: true
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+        run: |
+          if [ -z "$APPLE_CERTIFICATE" ]; then
+            echo "APPLE_CERTIFICATE not set, skipping signing"
+            echo "CLI_SIGNED=false" >> $GITHUB_ENV
+            exit 0
+          fi
+
+          # Import certificate into a temporary keychain
+          KEYCHAIN_PATH=$RUNNER_TEMP/e2e-signing.keychain-db
+          KEYCHAIN_PASSWORD=$(openssl rand -base64 32)
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
+          echo "$APPLE_CERTIFICATE" | base64 --decode > $RUNNER_TEMP/certificate.p12
+          security import $RUNNER_TEMP/certificate.p12 -P "$APPLE_CERTIFICATE_PASSWORD" \
+            -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+          security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security list-keychain -d user -s "$KEYCHAIN_PATH"
+
+          # Sign the CLI binary with hardened runtime
+          codesign --force --options runtime \
+            --sign "$APPLE_SIGNING_IDENTITY" \
+            --timestamp \
+            target/release/screenpipe
+
+          codesign --verify --verbose target/release/screenpipe
+          echo "CLI_SIGNED=true" >> $GITHUB_ENV
+          echo "KEYCHAIN_PATH=$KEYCHAIN_PATH" >> $GITHUB_ENV
+          echo "KEYCHAIN_PASSWORD=$KEYCHAIN_PASSWORD" >> $GITHUB_ENV
+          echo "CLI binary signed successfully"
+
+      - name: Grant CLI screen recording permission
+        if: success() && env.CLI_SIGNED == 'true'
+        continue-on-error: true
+        env:
+          RUNNER_PASSWORD: ${{ secrets.RUNNER_PASSWORD }}
+        run: |
+          CLI_BINARY="$(pwd)/target/release/screenpipe"
+          echo "Granting screen recording for: $CLI_BINARY"
+
+          # Open Screen Recording settings and add the CLI binary
+          open "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture"
+          sleep 3
+          osascript -e "
+            tell application \"System Events\"
+              tell process \"System Settings\"
+                set theGroup to group 1 of scroll area 1 of group 1 of group 2 of splitter group 1 of group 1 of window 1
+                click button 1 of theGroup
+                delay 2
+                try
+                  set theSheet to sheet 1 of window 1
+                  set value of text field \"Password\" of theSheet to \"$RUNNER_PASSWORD\"
+                  delay 0.3
+                  click button \"Modify Settings\" of theSheet
+                  delay 2
+                end try
+                key code 5 using {command down, shift down}
+                delay 2
+                keystroke \"$CLI_BINARY\"
+                delay 0.5
+                key code 36
+                delay 2
+                key code 36
+                delay 1
+              end tell
+            end tell
+          " 2>&1 || echo "Failed to grant screen recording"
+          killall "System Settings" 2>/dev/null || true
+
+      - name: Run capture fidelity tests
+        if: success()
+        continue-on-error: true
+        env:
+          ARTIFACTS_DIR: ${{ runner.temp }}/e2e-artifacts
+          SCREENPIPE_APP_NAME: ${{ env.SCREENPIPE_APP_NAME }}
+        run: |
+          # Kill the existing --disable-vision server
+          kill $SERVER_PID 2>/dev/null || true
+          sleep 3
+
+          # Start a new server with full capture
+          FIDELITY_FLAGS="--enable-input-capture --enable-accessibility --port 3030"
+          if [ "$CLI_SIGNED" = "true" ]; then
+            echo "Starting server with full capture (signed binary)"
+          else
+            echo "Starting server without vision (unsigned binary)"
+            FIDELITY_FLAGS="$FIDELITY_FLAGS --disable-vision --disable-audio"
+          fi
+
+          ./target/release/screenpipe $FIDELITY_FLAGS &
+          FIDELITY_PID=$!
+          echo "Started fidelity server (PID $FIDELITY_PID)"
+
+          # Wait for health API (up to 120s for vision warm-up)
+          for i in $(seq 1 60); do
+            if curl -sf http://localhost:3030/health > /dev/null 2>&1; then
+              FRAME_STATUS=$(curl -sf http://localhost:3030/health | python3 -c "import sys,json; print(json.load(sys.stdin).get('frame_status',''))" 2>/dev/null)
+              if [ "$FRAME_STATUS" = "ok" ] || [ "$CLI_SIGNED" != "true" ]; then
+                echo "Pipeline ready (attempt $i, frame_status=$FRAME_STATUS)"
+                break
+              fi
+            fi
+            echo "Waiting for pipeline... ($i/60)"
+            sleep 3
+          done
+
+          # Run the capture fidelity test suite
+          bun .github/scripts/e2e/run-all.ts --suite capture-fidelity 2>&1 | tee -a "${{ runner.temp }}/e2e-full.log"
+          FIDELITY_EXIT=$?
+
+          # Kill the fidelity server
+          kill $FIDELITY_PID 2>/dev/null || true
+          sleep 2
+
+          # Re-export SERVER_PID as 0 so cleanup doesn't try to kill stale PID
+          echo "SERVER_PID=0" >> $GITHUB_ENV
+
+          exit $FIDELITY_EXIT
+
       - name: Cleanup
         if: always()
         run: |
