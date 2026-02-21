@@ -142,14 +142,21 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
 			clearTimeout(flushTimer);
 			flushTimer = null;
 		}
-		// DON'T clear frames - keep showing current data while loading new date.
-		// Clearing causes visible "jumping" as frames stream in one-by-one.
-		// The pendingNavigation effect in timeline.tsx filters by target date
-		// when selecting the correct frame after navigation completes.
-		set((state) => ({
+		// Clear request timeout so stale retries don't interfere
+		if (requestTimeoutTimer) {
+			clearTimeout(requestTimeoutTimer);
+			requestTimeoutTimer = null;
+		}
+		requestRetryCount = 0;
+		// Clear frames + timestamps so:
+		// 1) request timeout logic correctly sees "no frames" and retries
+		// 2) pendingNavigation effect triggers on first batch from new date
+		set(() => ({
+			frames: [],
+			frameTimestamps: new Set<string>(),
 			sentRequests: new Set<string>(),
 			isLoading: true,
-			loadingProgress: { loaded: state.frames.length, isStreaming: false },
+			loadingProgress: { loaded: 0, isStreaming: false },
 			error: null,
 			message: "loading...",
 		}));
