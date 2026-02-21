@@ -82,7 +82,7 @@ pub async fn paired_capture(
         ctx.capture_trigger
     );
 
-    // Extract data from tree snapshot
+    // Extract data from tree snapshot, with OCR fallback when accessibility text is empty
     #[cfg(feature = "ui-events")]
     let (accessibility_text, tree_json, content_hash, simhash) = match tree_snapshot {
         Some(snap) if !snap.text_content.is_empty() => {
@@ -94,7 +94,32 @@ pub async fn paired_capture(
                 Some(snap.simhash as i64),
             )
         }
-        _ => (None, None, None, None),
+        _ => {
+            // OCR fallback: accessibility returned no text (games, terminals, bad a11y apps).
+            // Use platform-native OCR on the screenshot (fast: ~50-200ms on macOS).
+            let image = ctx.image.clone();
+            let ocr_text = tokio::task::spawn_blocking(move || {
+                #[cfg(target_os = "macos")]
+                {
+                    let (text, _json, _confidence) =
+                        screenpipe_vision::perform_ocr_apple(&image, &[]);
+                    text
+                }
+                #[cfg(not(target_os = "macos"))]
+                {
+                    let _ = image;
+                    String::new()
+                }
+            })
+            .await
+            .unwrap_or_default();
+
+            if ocr_text.is_empty() {
+                (None, None, None, None)
+            } else {
+                (Some(ocr_text), None, None, None)
+            }
+        }
     };
 
     #[cfg(not(feature = "ui-events"))]
@@ -105,12 +130,15 @@ pub async fn paired_capture(
         Option<i64>,
     ) = (None, None, None, None);
 
-    // Determine text source
+    // Determine text source: "accessibility" when tree nodes were available, "ocr" for fallback
     let (final_text, text_source) = if let Some(ref text) = accessibility_text {
         if text.is_empty() {
             (None, None)
-        } else {
+        } else if tree_json.is_some() {
             (Some(text.as_str()), Some("accessibility"))
+        } else {
+            // Text came from OCR fallback (no tree_json means no accessibility nodes)
+            (Some(text.as_str()), Some("ocr"))
         }
     } else {
         (None, None)
