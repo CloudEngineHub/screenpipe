@@ -1225,12 +1225,15 @@ Your screen is a pipe. Everything you see, hear, and type flows through it. Scre
             <div className="flex items-center justify-between">
               <div className="flex items-center space-x-2.5">
                 <Languages className="h-4 w-4 text-muted-foreground shrink-0" />
-                <h3 className="text-sm font-medium text-foreground">Languages</h3>
+                <div>
+                  <h3 className="text-sm font-medium text-foreground">Languages</h3>
+                  <p className="text-xs text-muted-foreground">{settings.languages.length === 0 ? "Automatically detects spoken language" : "Restricts transcription to selected"}</p>
+                </div>
               </div>
               <Popover open={openLanguages} onOpenChange={setOpenLanguages}>
                 <PopoverTrigger asChild>
                   <Button variant="outline" size="sm" className="h-7 text-xs">
-                    {settings.languages.length > 0 ? `${settings.languages.length} selected` : "Select..."}
+                    {settings.languages.length > 0 ? `${settings.languages.length} selected` : "Auto-detect"}
                     <ChevronsUpDown className="ml-1 h-3 w-3 opacity-50" />
                   </Button>
                 </PopoverTrigger>

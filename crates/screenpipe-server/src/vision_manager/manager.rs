@@ -17,6 +17,7 @@ use tokio::task::JoinHandle;
 use tracing::{debug, error, info, warn};
 
 use crate::event_driven_capture::{CaptureTrigger, TriggerSender};
+use crate::hot_frame_cache::HotFrameCache;
 
 /// Configuration for VisionManager
 #[derive(Clone)]
@@ -46,6 +47,8 @@ pub struct VisionManager {
     /// Broadcast sender for capture triggers — shared with UI recorder.
     /// Each monitor subscribes via `trigger_tx.subscribe()`.
     trigger_tx: TriggerSender,
+    /// Hot frame cache — capture pushes frames here for zero-DB timeline reads.
+    hot_frame_cache: Option<Arc<HotFrameCache>>,
 }
 
 impl VisionManager {
@@ -64,7 +67,14 @@ impl VisionManager {
             status: Arc::new(RwLock::new(VisionManagerStatus::Stopped)),
             recording_tasks: Arc::new(DashMap::new()),
             trigger_tx,
+            hot_frame_cache: None,
         }
+    }
+
+    /// Set the hot frame cache so captures push frames into it.
+    pub fn with_hot_frame_cache(mut self, cache: Arc<HotFrameCache>) -> Self {
+        self.hot_frame_cache = Some(cache);
+        self
     }
 
     /// Get a clone of the broadcast trigger sender.
@@ -206,6 +216,7 @@ impl VisionManager {
 
         let monitor = Arc::new(monitor);
         let vision_metrics = self.config.vision_metrics.clone();
+        let hot_frame_cache = self.hot_frame_cache.clone();
 
         info!(
             "Starting event-driven capture for monitor {} (device: {})",
@@ -227,6 +238,7 @@ impl VisionManager {
                 trigger_rx,
                 stop_signal,
                 vision_metrics,
+                hot_frame_cache,
             )
             .await
             {

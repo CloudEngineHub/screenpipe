@@ -18,6 +18,7 @@ use screenpipe_server::{
     analytics, RecordingConfig,
     ResourceMonitor, SCServer, start_meeting_watcher,
     start_sleep_monitor, start_ui_recording,
+    hot_frame_cache::HotFrameCache,
     vision_manager::{VisionManager, start_monitor_watcher, stop_monitor_watcher},
 };
 use tokio::sync::broadcast;
@@ -148,6 +149,10 @@ pub async fn start_embedded_server(
     // Passed to start_ui_recording so UI events (clicks, app switches) trigger captures.
     let mut capture_trigger_tx: Option<screenpipe_server::event_driven_capture::TriggerSender> = None;
 
+    // Create shared hot frame cache for zero-DB timeline reads.
+    // Shared between VisionManager (push) and HTTP server/AppState (read).
+    let hot_frame_cache = Arc::new(HotFrameCache::new());
+
     // Start vision recording (event-driven capture via VisionManager)
     if !config.disable_vision {
         let db_clone = db.clone();
@@ -162,7 +167,7 @@ pub async fn start_embedded_server(
             vision_config,
             db_clone,
             vision_handle.clone(),
-        ));
+        ).with_hot_frame_cache(hot_frame_cache.clone()));
 
         // Get the broadcast trigger sender BEFORE moving VisionManager into the
         // spawned task. Passed to start_ui_recording so UI events trigger captures.
@@ -269,6 +274,7 @@ pub async fn start_embedded_server(
     );
     server.vision_metrics = vision_metrics;
     server.audio_metrics = audio_manager.metrics.clone();
+    server.hot_frame_cache = Some(hot_frame_cache);
 
     // Initialize pipe manager
     let pipes_dir = config.data_dir.join("pipes");

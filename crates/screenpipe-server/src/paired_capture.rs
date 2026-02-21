@@ -57,6 +57,12 @@ pub struct PairedCaptureResult {
     pub captured_at: DateTime<Utc>,
     /// Total time for the paired capture
     pub duration_ms: u64,
+    /// App name from accessibility tree or OCR
+    pub app_name: Option<String>,
+    /// Window name from accessibility tree or OCR
+    pub window_name: Option<String>,
+    /// Browser URL (if detected)
+    pub browser_url: Option<String>,
 }
 
 /// Performs a paired capture: screenshot + accessibility tree data.
@@ -196,6 +202,9 @@ pub async fn paired_capture(
         capture_trigger: ctx.capture_trigger.to_string(),
         captured_at: ctx.captured_at,
         duration_ms,
+        app_name: ctx.app_name.map(String::from),
+        window_name: ctx.window_name.map(String::from),
+        browser_url: ctx.browser_url.map(String::from),
     })
 }
 

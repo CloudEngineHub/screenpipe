@@ -14,6 +14,7 @@ use tracing::{error, info};
 
 use crate::{
     analytics,
+    hot_frame_cache::HotFrameCache,
     routes::{
         audio::{
             api_list_audio_devices, start_audio, start_audio_device, stop_audio, stop_audio_device,
@@ -106,6 +107,9 @@ pub struct AppState {
     /// Limits concurrent ffmpeg frame extractions to prevent CPU thrashing
     /// when many thumbnails are requested in parallel (e.g., search results).
     pub frame_extraction_semaphore: Arc<tokio::sync::Semaphore>,
+    /// Hot frame cache — in-memory cache for today's frames.
+    /// Timeline WS reads from here instead of polling the DB.
+    pub hot_frame_cache: Arc<HotFrameCache>,
 }
 
 pub struct SCServer {
@@ -121,6 +125,8 @@ pub struct SCServer {
     pipe_manager: Option<crate::pipes_api::SharedPipeManager>,
     pub vision_metrics: Arc<screenpipe_vision::PipelineMetrics>,
     pub audio_metrics: Arc<screenpipe_audio::metrics::AudioPipelineMetrics>,
+    /// Shared hot frame cache — set this before starting the server so AppState uses it.
+    pub hot_frame_cache: Option<Arc<HotFrameCache>>,
 }
 
 impl SCServer {
@@ -149,6 +155,7 @@ impl SCServer {
             pipe_manager: None,
             vision_metrics: Arc::new(screenpipe_vision::PipelineMetrics::new()),
             audio_metrics,
+            hot_frame_cache: None,
         }
     }
 
@@ -292,6 +299,19 @@ impl SCServer {
             }
         });
 
+        // Use pre-set hot frame cache or create a new one, then warm from DB
+        let hot_frame_cache = self
+            .hot_frame_cache
+            .clone()
+            .unwrap_or_else(|| Arc::new(HotFrameCache::new()));
+        {
+            let cache = hot_frame_cache.clone();
+            let db = self.db.clone();
+            tokio::spawn(async move {
+                cache.warm_from_db(&db, 2).await;
+            });
+        }
+
         let app_state = Arc::new(AppState {
             db: self.db.clone(),
             audio_manager: self.audio_manager.clone(),
@@ -339,6 +359,7 @@ impl SCServer {
             // queue rather than thrashing CPU with 15+ parallel ffmpeg processes
             // (typical when search results load all thumbnails at once).
             frame_extraction_semaphore: Arc::new(tokio::sync::Semaphore::new(3)),
+            hot_frame_cache,
         });
 
         let cors = CorsLayer::new()

@@ -8,6 +8,7 @@
 //! Captures happen only on meaningful user events: app switch, window focus,
 //! click, typing pause, scroll stop, clipboard, and periodic idle fallback.
 
+use crate::hot_frame_cache::{HotFrame, HotFrameCache};
 use crate::paired_capture::{paired_capture, CaptureContext, PairedCaptureResult};
 use anyhow::Result;
 use chrono::Utc;
@@ -217,6 +218,7 @@ pub async fn event_driven_capture_loop(
     mut trigger_rx: TriggerReceiver,
     stop_signal: Arc<AtomicBool>,
     vision_metrics: Arc<screenpipe_vision::PipelineMetrics>,
+    hot_frame_cache: Option<Arc<HotFrameCache>>,
 ) -> Result<()> {
     info!(
         "event-driven capture started for monitor {} (device: {})",
@@ -265,6 +267,10 @@ pub async fn event_driven_capture_loop(
                 vision_metrics.record_capture();
                 vision_metrics
                     .record_db_write(Duration::from_millis(result.duration_ms as u64));
+                // Push to hot cache for zero-DB timeline reads
+                if let Some(ref cache) = hot_frame_cache {
+                    push_to_hot_cache(cache, &result, &device_name, &CaptureTrigger::Manual).await;
+                }
                 info!(
                     "startup capture for monitor {}: frame_id={}, dur={}ms",
                     monitor_id, result.frame_id, result.duration_ms
@@ -366,6 +372,11 @@ pub async fn event_driven_capture_loop(
                             Duration::from_millis(result.duration_ms as u64),
                         );
 
+                        // Push to hot cache for zero-DB timeline reads
+                        if let Some(ref cache) = hot_frame_cache {
+                            push_to_hot_cache(cache, &result, &device_name, &trigger).await;
+                        }
+
                         debug!(
                             "event capture: trigger={}, frame_id={}, text_source={:?}, dur={}ms",
                             trigger.as_str(),
@@ -407,6 +418,36 @@ pub async fn event_driven_capture_loop(
         monitor_id
     );
     Ok(())
+}
+
+/// Push a capture result into the hot frame cache.
+#[cfg(feature = "ui-events")]
+async fn push_to_hot_cache(
+    cache: &HotFrameCache,
+    result: &PairedCaptureResult,
+    device_name: &str,
+    trigger: &CaptureTrigger,
+) {
+    let hot = HotFrame {
+        frame_id: result.frame_id,
+        timestamp: result.captured_at,
+        device_name: device_name.to_string(),
+        app_name: result.app_name.clone().unwrap_or_default(),
+        window_name: result.window_name.clone().unwrap_or_default(),
+        ocr_text_preview: result
+            .accessibility_text
+            .as_deref()
+            .unwrap_or("")
+            .chars()
+            .take(200)
+            .collect(),
+        snapshot_path: result.snapshot_path.clone(),
+        browser_url: result.browser_url.clone(),
+        capture_trigger: trigger.as_str().to_string(),
+        offset_index: 0,
+        fps: 0.033,
+    };
+    cache.push_frame(hot).await;
 }
 
 /// Perform a single event-driven capture.

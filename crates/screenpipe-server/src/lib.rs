@@ -19,6 +19,7 @@ pub mod recording_config;
 pub mod routes;
 
 pub mod event_driven_capture;
+pub mod hot_frame_cache;
 pub mod meeting_watcher;
 pub mod paired_capture;
 mod resource_monitor;
