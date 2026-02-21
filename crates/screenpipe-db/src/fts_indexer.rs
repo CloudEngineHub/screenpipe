@@ -31,7 +31,7 @@ const BACKFILL_MICRO_BATCH_DELAY: Duration = Duration::from_millis(500);
 
 /// How long to sleep when the DB write lock is busy (real-time capture
 /// is writing). This ensures FTS never blocks captures.
-const YIELD_ON_BUSY_DELAY: Duration = Duration::from_secs(2);
+const YIELD_ON_BUSY_DELAY: Duration = Duration::from_millis(200);
 
 /// Start the background FTS indexer. Uses `try_begin_immediate` so it
 /// NEVER blocks real-time captures — if the write lock is held, FTS

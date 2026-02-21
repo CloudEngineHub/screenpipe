@@ -237,6 +237,44 @@ pub async fn event_driven_capture_loop(
     };
     let mut last_visual_check = Instant::now();
 
+    // Capture immediately on startup so the timeline has a frame right away.
+    // Also seeds the frame comparer so subsequent visual-change checks work.
+    {
+        // Small delay to let the monitor settle after startup
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        state.last_capture = Instant::now() - Duration::from_millis(500); // allow capture
+        match do_capture(
+            &db,
+            &monitor,
+            monitor_id,
+            &device_name,
+            &snapshot_writer,
+            &tree_walker_config,
+            &CaptureTrigger::Manual,
+        )
+        .await
+        {
+            Ok(result) => {
+                state.mark_captured();
+                if let Some(ref mut comparer) = frame_comparer {
+                    if let Ok((img, _)) = capture_monitor_image(&monitor).await {
+                        let _ = comparer.compare(&img);
+                    }
+                }
+                vision_metrics.record_capture();
+                vision_metrics
+                    .record_db_write(Duration::from_millis(result.duration_ms as u64));
+                info!(
+                    "startup capture for monitor {}: frame_id={}, dur={}ms",
+                    monitor_id, result.frame_id, result.duration_ms
+                );
+            }
+            Err(e) => {
+                warn!("startup capture failed for monitor {}: {}", monitor_id, e);
+            }
+        }
+    }
+
     loop {
         if stop_signal.load(Ordering::Relaxed) {
             info!("event-driven capture stopping for monitor {}", monitor_id);

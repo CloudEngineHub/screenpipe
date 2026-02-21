@@ -282,37 +282,56 @@ async fn handle_stream_frames_socket(
                             sent.clear();
                         }
 
-                        // DON'T set active_request yet - wait for initial fetch to complete
-                        // This prevents poll_timer from running with last_polled = start_time
-                        // which would cause ALL old frames to be re-sent
+                        // Enable live polling IMMEDIATELY from `now()` so new
+                        // frames stream to the client right away, even while the
+                        // historical fetch is still running. The initial fetch
+                        // handles backfill; live polling handles real-time.
+                        {
+                            let now = Utc::now();
+                            let mut req = active_request_clone.lock().await;
+                            *req = Some((start_time, end_time, is_descending, now));
+                            info!(
+                                "Live polling enabled immediately from {}",
+                                now
+                            );
+                        }
 
                         let sent_frame_ids_inner = sent_frame_ids_clone.clone();
                         let active_request_inner = active_request_clone.clone();
 
                         tokio::spawn(async move {
-                            match fetch_and_process_frames_with_tracking(
-                                db,
-                                start_time,
-                                end_time,
-                                frame_tx,
-                                is_descending,
-                                sent_frame_ids_inner,
+                            // Timeout the initial fetch — if DB is slow, don't
+                            // block forever. Live polling already covers new frames.
+                            let fetch_result = tokio::time::timeout(
+                                std::time::Duration::from_secs(10),
+                                fetch_and_process_frames_with_tracking(
+                                    db,
+                                    start_time,
+                                    end_time,
+                                    frame_tx,
+                                    is_descending,
+                                    sent_frame_ids_inner,
+                                ),
                             )
-                            .await
-                            {
-                                Ok(latest_timestamp) => {
-                                    // NOW set active_request - initial fetch is done
-                                    // Use latest_timestamp (or end_time) as last_polled to avoid re-fetching
-                                    let poll_start = latest_timestamp.unwrap_or(end_time);
-                                    let mut req = active_request_inner.lock().await;
-                                    *req = Some((start_time, end_time, is_descending, poll_start));
-                                    info!(
-                                        "Initial fetch complete, enabling live polling from {}",
-                                        poll_start
-                                    );
+                            .await;
+
+                            match fetch_result {
+                                Ok(Ok(latest_timestamp)) => {
+                                    // Update poll cursor to latest fetched timestamp
+                                    // so polling doesn't re-fetch historical frames.
+                                    if let Some(ts) = latest_timestamp {
+                                        let mut req = active_request_inner.lock().await;
+                                        if let Some((s, e, d, _)) = *req {
+                                            *req = Some((s, e, d, ts));
+                                        }
+                                    }
+                                    info!("Initial fetch complete");
                                 }
-                                Err(e) => {
+                                Ok(Err(e)) => {
                                     error!("frame fetching failed: {}", e);
+                                }
+                                Err(_) => {
+                                    warn!("Initial fetch timed out after 10s, live polling continues");
                                 }
                             }
                         });
