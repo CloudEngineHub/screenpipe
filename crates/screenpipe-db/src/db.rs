@@ -65,7 +65,7 @@ pub struct DeleteTimeRangeResult {
 pub struct ImmediateTx {
     conn: Option<PoolConnection<Sqlite>>,
     committed: bool,
-    _write_permit: OwnedSemaphorePermit,
+    _write_permit: Option<OwnedSemaphorePermit>,
 }
 
 impl ImmediateTx {
@@ -98,27 +98,23 @@ impl Drop for ImmediateTx {
     fn drop(&mut self) {
         if !self.committed {
             if let Some(mut conn) = self.conn.take() {
-                // Roll back the open transaction and return the connection to the pool.
-                //
-                // Previous approach detached (leaked) the connection to avoid async
-                // issues, but that slowly exhausted the pool over time.
-                //
-                // We spawn a task to rollback asynchronously. The connection is moved
-                // into the task, so if rollback succeeds, the clean connection is
-                // returned to the pool when dropped. If rollback fails, we detach.
+                // Move the write permit into the rollback task so the semaphore
+                // is NOT released until the ROLLBACK actually completes and frees
+                // the SQLite write lock. Without this, the next writer acquires
+                // the semaphore while the old connection still holds the SQLite
+                // write lock, causing BEGIN IMMEDIATE to block for 30-62s.
+                let permit = self._write_permit.take();
                 warn!("ImmediateTx dropped without commit — scheduling rollback");
-                // Rollback and return the connection to the pool. We spawn an async
-                // task because Drop is synchronous. The connection is moved into the
-                // task; if rollback succeeds, it returns to the pool when dropped.
                 tokio::spawn(async move {
                     if let Err(e) = sqlx::query("ROLLBACK").execute(&mut *conn).await {
                         error!("failed to rollback on drop: {}", e);
                         let _raw = conn.detach();
                     }
+                    // permit is dropped here AFTER rollback, releasing the semaphore
+                    drop(permit);
                 });
             }
         }
-        // _write_permit is dropped here, releasing the semaphore for the next writer
     }
 }
 
@@ -424,7 +420,7 @@ impl DatabaseManager {
                     return Ok(ImmediateTx {
                         conn: Some(conn),
                         committed: false,
-                        _write_permit: permit,
+                        _write_permit: Some(permit),
                     })
                 }
                 Err(e) if attempt < max_retries && Self::is_busy_error(&e) => {
@@ -477,7 +473,7 @@ impl DatabaseManager {
             Ok(_) => Ok(Some(ImmediateTx {
                 conn: Some(conn),
                 committed: false,
-                _write_permit: permit,
+                _write_permit: Some(permit),
             })),
             Err(e) if Self::is_busy_error(&e) => {
                 drop(conn);
@@ -1078,6 +1074,7 @@ impl DatabaseManager {
     /// The snapshot JPEG path is stored directly on the frame row.
     /// Returns the new frame id.
     #[allow(clippy::too_many_arguments)]
+    #[allow(clippy::too_many_arguments)]
     pub async fn insert_snapshot_frame(
         &self,
         device_name: &str,
@@ -1093,6 +1090,33 @@ impl DatabaseManager {
         accessibility_tree_json: Option<&str>,
         content_hash: Option<i64>,
         simhash: Option<i64>,
+    ) -> Result<i64, sqlx::Error> {
+        self.insert_snapshot_frame_with_ocr(
+            device_name, timestamp, snapshot_path, app_name, window_name,
+            browser_url, focused, capture_trigger, accessibility_text, text_source,
+            accessibility_tree_json, content_hash, simhash, None,
+        ).await
+    }
+
+    /// Insert a snapshot frame AND optional OCR text positions in a single transaction.
+    /// This avoids opening two separate transactions per capture which doubles pool pressure.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn insert_snapshot_frame_with_ocr(
+        &self,
+        device_name: &str,
+        timestamp: DateTime<Utc>,
+        snapshot_path: &str,
+        app_name: Option<&str>,
+        window_name: Option<&str>,
+        browser_url: Option<&str>,
+        focused: bool,
+        capture_trigger: Option<&str>,
+        accessibility_text: Option<&str>,
+        text_source: Option<&str>,
+        accessibility_tree_json: Option<&str>,
+        content_hash: Option<i64>,
+        simhash: Option<i64>,
+        ocr_data: Option<(&str, &str, &str)>, // (text, text_json, ocr_engine)
     ) -> Result<i64, sqlx::Error> {
         let mut tx = self.begin_immediate_with_retry().await?;
 
@@ -1127,8 +1151,23 @@ impl DatabaseManager {
         .await?
         .last_insert_rowid();
 
+        // Insert OCR text positions in the same transaction (no extra connection needed)
+        if let Some((text, text_json, ocr_engine)) = ocr_data {
+            let text_length = text.len() as i64;
+            sqlx::query(
+                "INSERT INTO ocr_text (frame_id, text, text_json, ocr_engine, text_length) VALUES (?1, ?2, ?3, ?4, ?5)",
+            )
+            .bind(id)
+            .bind(text)
+            .bind(text_json)
+            .bind(ocr_engine)
+            .bind(text_length)
+            .execute(&mut **tx.conn())
+            .await?;
+        }
+
         tx.commit().await?;
-        debug!("insert_snapshot_frame: id={}, trigger={:?}", id, capture_trigger);
+        debug!("insert_snapshot_frame: id={}, trigger={:?}, has_ocr={}", id, capture_trigger, ocr_data.is_some());
         Ok(id)
     }
 

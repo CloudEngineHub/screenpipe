@@ -82,7 +82,29 @@ pub async fn paired_capture(
         ctx.capture_trigger
     );
 
-    // Extract data from tree snapshot, with OCR fallback when accessibility text is empty
+    // --- Run OCR to get text positions with bounding boxes (for TextOverlay) ---
+    // Always run OCR regardless of accessibility data so the timeline has
+    // clickable text blocks that users can hover/click to copy.
+    let image_for_ocr = ctx.image.clone();
+    let ocr_result = tokio::task::spawn_blocking(move || {
+        #[cfg(target_os = "macos")]
+        {
+            let (text, json, confidence) =
+                screenpipe_vision::perform_ocr_apple(&image_for_ocr, &[]);
+            (text, json, confidence)
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            let _ = image_for_ocr;
+            (String::new(), "[]".to_string(), None::<f64>)
+        }
+    })
+    .await
+    .unwrap_or_else(|_| (String::new(), "[]".to_string(), None));
+
+    let (ocr_text, ocr_text_json, _ocr_confidence) = ocr_result;
+
+    // --- Extract data from tree snapshot, fall back to OCR text ---
     #[cfg(feature = "ui-events")]
     let (accessibility_text, tree_json, content_hash, simhash) = match tree_snapshot {
         Some(snap) if !snap.text_content.is_empty() => {
@@ -96,28 +118,10 @@ pub async fn paired_capture(
         }
         _ => {
             // OCR fallback: accessibility returned no text (games, terminals, bad a11y apps).
-            // Use platform-native OCR on the screenshot (fast: ~50-200ms on macOS).
-            let image = ctx.image.clone();
-            let ocr_text = tokio::task::spawn_blocking(move || {
-                #[cfg(target_os = "macos")]
-                {
-                    let (text, _json, _confidence) =
-                        screenpipe_vision::perform_ocr_apple(&image, &[]);
-                    text
-                }
-                #[cfg(not(target_os = "macos"))]
-                {
-                    let _ = image;
-                    String::new()
-                }
-            })
-            .await
-            .unwrap_or_default();
-
             if ocr_text.is_empty() {
                 (None, None, None, None)
             } else {
-                (Some(ocr_text), None, None, None)
+                (Some(ocr_text.clone()), None, None, None)
             }
         }
     };
@@ -128,7 +132,11 @@ pub async fn paired_capture(
         Option<String>,
         Option<i64>,
         Option<i64>,
-    ) = (None, None, None, None);
+    ) = if ocr_text.is_empty() {
+        (None, None, None, None)
+    } else {
+        (Some(ocr_text.clone()), None, None, None)
+    };
 
     // Determine text source: "accessibility" when tree nodes were available, "ocr" for fallback
     let (final_text, text_source) = if let Some(ref text) = accessibility_text {
@@ -144,10 +152,18 @@ pub async fn paired_capture(
         (None, None)
     };
 
-    // Insert snapshot frame into DB
+    // Insert snapshot frame + OCR text positions in a single transaction.
+    // Combining both writes avoids opening two separate transactions per capture,
+    // which halves pool pressure during high-frequency event-driven captures.
+    let ocr_data = if !ocr_text.is_empty() {
+        Some((ocr_text.as_str(), ocr_text_json.as_str(), "AppleNative"))
+    } else {
+        None
+    };
+
     let frame_id = ctx
         .db
-        .insert_snapshot_frame(
+        .insert_snapshot_frame_with_ocr(
             ctx.device_name,
             ctx.captured_at,
             &snapshot_path_str,
@@ -161,6 +177,7 @@ pub async fn paired_capture(
             tree_json.as_deref(),
             content_hash,
             simhash,
+            ocr_data,
         )
         .await?;
 
