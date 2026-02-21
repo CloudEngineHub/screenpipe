@@ -25,7 +25,6 @@ import {
   Monitor,
   Mic,
   Volume2,
-  Headphones,
 } from "lucide-react";
 import { useOverlayData } from "@/app/shortcut-reminder/use-overlay-data";
 import { cn } from "@/lib/utils";
@@ -89,40 +88,47 @@ function SettingsPageContent() {
   const showCloudSync = useMemo(() => posthog?.isFeatureEnabled("cloud-sync") ?? false, [posthog]);
   const overlayData = useOverlayData();
 
-  // Fetch actual recording devices (monitors + audio)
-  const [monitors, setMonitors] = useState<{ id: number; name: string }[]>([]);
-  const [audioDevices, setAudioDevices] = useState<{ name: string; displayName: string; isInput: boolean; isBluetooth: boolean }[]>([]);
+  // Fetch actual recording devices from health endpoint (same source as tray menu)
+  interface RecordingDevice { name: string; kind: "monitor" | "input" | "output"; active: boolean }
+  const [recordingDevices, setRecordingDevices] = useState<RecordingDevice[]>([]);
 
   useEffect(() => {
-    // Fetch monitors
-    fetch("http://localhost:3030/vision/list")
-      .then((r) => r.ok ? r.json() : [])
-      .then((data: { id: number; name: string }[]) => {
-        if (Array.isArray(data)) setMonitors(data);
-      })
-      .catch(() => {});
-    // Fetch audio devices — filter to only default/selected ones
-    fetch("http://localhost:3030/audio/list")
-      .then((r) => r.ok ? r.json() : [])
-      .then((data: { name: string; is_default: boolean }[]) => {
-        if (!Array.isArray(data)) return;
-        const selected = settings.audioDevices ?? ["default"];
-        const useDefault = selected.includes("default");
-        const active = data.filter((d) =>
-          useDefault ? d.is_default : selected.includes(d.name)
-        );
-        setAudioDevices(active.map((d) => {
-          const lower = d.name.toLowerCase();
-          return {
-            name: d.name,
-            displayName: d.name.replace(/\s*\((input|output)\)\s*$/i, ""),
-            isInput: lower.includes("(input)"),
-            isBluetooth: lower.includes("bluetooth") || lower.includes("airpods") || lower.includes("headphone"),
-          };
-        }));
-      })
-      .catch(() => {});
-  }, [settings.audioDevices]);
+    let cancelled = false;
+    const fetchDevices = () => {
+      fetch("http://localhost:3030/health")
+        .then((r) => r.ok ? r.json() : null)
+        .then((health: { monitors?: string[]; device_status_details?: string } | null) => {
+          if (cancelled || !health) return;
+          const devices: RecordingDevice[] = [];
+          // Parse monitors
+          if (health.monitors) {
+            for (const name of health.monitors) {
+              devices.push({ name, kind: "monitor", active: true });
+            }
+          }
+          // Parse audio devices from device_status_details
+          // Format: "DeviceName (input): active (last activity: 2s ago), DeviceName (output): inactive"
+          if (health.device_status_details) {
+            for (const part of health.device_status_details.split(", ")) {
+              const match = part.split(": ");
+              if (match.length < 2) continue;
+              const nameAndType = match[0];
+              const active = match[1].startsWith("active");
+              const kind = nameAndType.includes("(input)") ? "input" as const
+                : nameAndType.includes("(output)") ? "output" as const
+                : "input" as const;
+              const name = nameAndType.replace(/\s*\((input|output)\)\s*/gi, "").trim();
+              devices.push({ name, kind, active });
+            }
+          }
+          setRecordingDevices(devices);
+        })
+        .catch(() => {});
+    };
+    fetchDevices();
+    const interval = setInterval(fetchDevices, 10000);
+    return () => { cancelled = true; clearInterval(interval); };
+  }, []);
 
   // Settings modal state
   const [settingsModalOpen, setSettingsModalOpen] = useState(false);
@@ -247,23 +253,19 @@ function SettingsPageContent() {
               <h1 className="text-lg font-bold text-foreground">screenpipe</h1>
               <div className="flex items-center gap-2">
                 {(() => {
-                  const monitorCount = Math.max(monitors.length, 1);
-                  const monitorNames = monitors.length > 0 ? monitors.map((m) => m.name).join(", ") : "screen";
+                  const monitors = recordingDevices.filter((d) => d.kind === "monitor");
+                  const inputs = recordingDevices.filter((d) => d.kind === "input");
+                  const outputs = recordingDevices.filter((d) => d.kind === "output");
                   const screenOpacity = overlayData.screenActive ? 0.5 + Math.min(overlayData.captureFps / 2, 0.5) : 0.2;
-                  const inputs = audioDevices.filter((d) => d.isInput && !d.isBluetooth);
-                  const outputs = audioDevices.filter((d) => !d.isInput && !d.isBluetooth);
-                  const bt = audioDevices.filter((d) => d.isBluetooth);
                   const audioOpacity = overlayData.audioActive ? 0.5 + Math.min(overlayData.speechRatio, 0.5) : 0.2;
 
-                  const groups: { icon: typeof Monitor; count: number; title: string; opacity: number }[] = [
-                    { icon: Monitor, count: monitorCount, title: monitorNames, opacity: screenOpacity },
-                  ];
-                  if (inputs.length > 0) groups.push({ icon: Mic, count: inputs.length, title: inputs.map((d) => d.displayName).join(", "), opacity: audioOpacity });
-                  if (outputs.length > 0) groups.push({ icon: Volume2, count: outputs.length, title: outputs.map((d) => d.displayName).join(", "), opacity: audioOpacity });
-                  if (bt.length > 0) groups.push({ icon: Headphones, count: bt.length, title: bt.map((d) => d.displayName).join(", "), opacity: audioOpacity });
+                  const groups: { key: string; icon: typeof Monitor; count: number; title: string; opacity: number }[] = [];
+                  if (monitors.length > 0) groups.push({ key: "monitor", icon: Monitor, count: monitors.length, title: monitors.map((d) => d.name).join(", "), opacity: screenOpacity });
+                  if (inputs.length > 0) groups.push({ key: "mic", icon: Mic, count: inputs.length, title: inputs.map((d) => d.name).join(", "), opacity: audioOpacity });
+                  if (outputs.length > 0) groups.push({ key: "output", icon: Volume2, count: outputs.length, title: outputs.map((d) => d.name).join(", "), opacity: audioOpacity });
 
-                  return groups.map(({ icon: Icon, count, title, opacity }) => (
-                    <span key={title} className="flex items-center gap-0.5" title={title}>
+                  return groups.map(({ key, icon: Icon, count, title, opacity }) => (
+                    <span key={key} className="flex items-center gap-0.5" title={title}>
                       <Icon
                         className="h-3.5 w-3.5 text-foreground transition-opacity duration-500"
                         style={{ opacity }}
@@ -533,7 +535,7 @@ function ReferralSection() {
           refer and earn rewards
         </h2>
         <p className="text-sm text-muted-foreground mt-1">
-          give a month of screenpipe and get <span className="font-semibold text-foreground">1 free month</span> for each person you refer.
+          give <span className="font-semibold text-foreground">10% off</span> screenpipe and get <span className="font-semibold text-foreground">1 free month</span> for each person you refer.
         </p>
       </div>
 
@@ -542,7 +544,7 @@ function ReferralSection() {
           <h3 className="text-sm font-medium text-foreground mb-2">how it works</h3>
           <div className="space-y-1.5 text-sm text-muted-foreground">
             <p>1. share your invite link</p>
-            <p>2. they sign up and get a <span className="font-semibold text-foreground">free month</span> of screenpipe</p>
+            <p>2. they sign up and get <span className="font-semibold text-foreground">10% off</span> screenpipe</p>
             <p>3. you get a <span className="font-semibold text-foreground">free month</span> when they start using it</p>
           </div>
         </div>

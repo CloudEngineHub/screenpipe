@@ -8,6 +8,8 @@ import { Tag, Plus, MessageSquare, Trash2 } from "lucide-react";
 import { useState, useRef, useMemo, useCallback, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { toast } from "@/components/ui/use-toast";
+import { clearTimelineCache } from "@/lib/hooks/use-timeline-cache";
+import { clearOcrCache } from "@/lib/hooks/use-frame-ocr-data";
 import {
 	AlertDialog,
 	AlertDialogAction,
@@ -155,6 +157,8 @@ export function TimelineTagToolbar({ anchorRect, onAskAI }: TimelineTagToolbarPr
 			});
 			setSelectionRange(null);
 			setShowDeleteConfirm(false);
+			clearOcrCache();
+			await clearTimelineCache();
 			window.location.reload();
 		} catch (e) {
 			toast({ title: "deletion failed", description: String(e), variant: "destructive" });

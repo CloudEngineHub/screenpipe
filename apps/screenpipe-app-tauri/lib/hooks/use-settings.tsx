@@ -196,7 +196,7 @@ let DEFAULT_SETTINGS: Settings = {
 			teamFilters: { ignoredWindows: [], includedWindows: [], ignoredUrls: [] },
 
 			fps: 0.5,
-			vadSensitivity: "high",
+			vadSensitivity: "medium",
 			analyticsEnabled: true,
 			audioChunkDuration: 30,
 			useChineseMirror: false,

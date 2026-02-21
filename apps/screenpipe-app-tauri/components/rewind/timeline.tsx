@@ -10,6 +10,7 @@ import { commands } from "@/lib/utils/tauri";
 import { listen, emit } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { AudioTranscript } from "@/components/rewind/timeline/audio-transcript";
+import { SubtitleBar } from "@/components/rewind/timeline/subtitle-bar";
 import { TimelineProvider, useTimelineSelection } from "@/lib/hooks/use-timeline-selection";
 import { throttle } from "lodash";
 import { TimelineControls } from "@/components/rewind/timeline/timeline-controls";
@@ -80,16 +81,19 @@ const easeOutCubic = (x: number): number => {
 export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 	const { isMac } = usePlatform();
 	const [currentIndex, setCurrentIndex] = useState(0);
-	const [showAudioTranscript, setShowAudioTranscript] = useState(true);
+	const [showAudioTranscript, setShowAudioTranscript] = useState(false);
 	const [showSearchModal, setShowSearchModal] = useState(false);
 
 
 	const containerRef = useRef<HTMLDivElement | null>(null);
 	// const [searchResults, setSearchResults] = useState<number[]>([]);
-	const [startAndEndDates, setStartAndEndDates] = useState<TimeRange>({
-		// Default to 1 year ago so navigation works even if getStartDate fails
-		start: new Date(new Date().setFullYear(new Date().getFullYear() - 1)),
-		end: new Date(),
+	const [startAndEndDates, setStartAndEndDates] = useState<TimeRange>(() => {
+		// Lazy init to avoid SSR/client hydration mismatch from new Date()
+		const now = new Date();
+		return {
+			start: new Date(now.getFullYear() - 1, now.getMonth(), now.getDate()),
+			end: now,
+		};
 	});
 	
 	// Performance tracking refs
@@ -144,10 +148,7 @@ export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 		}
 	}, [selectionRange?.frameIds.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
-	// Re-show audio transcript when navigating timeline
-	useEffect(() => {
-		setShowAudioTranscript(true);
-	}, [currentIndex]);
+	// Note: audio transcript is now on-demand (opened via subtitle bar click)
 
 	const { currentDate, setCurrentDate, fetchTimeRange, hasDateBeenFetched, loadingProgress, onWindowFocus, newFramesCount, lastFlushTimestamp, clearNewFramesCount, clearSentRequestForDate, clearFramesForNavigation, pendingNavigation, setPendingNavigation } =
 		useTimelineStore();
@@ -1446,6 +1447,16 @@ export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 					<DailySummaryCard currentDate={currentDate} />
 				</div>
 
+				{/* Subtitle bar — below nav bar, always visible when audio exists nearby */}
+				<div className={`absolute ${embedded ? "top-16" : "top-[calc(env(safe-area-inset-top)+96px)]"} left-4 right-4 z-[35]`}>
+					<SubtitleBar
+						frames={frames}
+						currentIndex={currentIndex}
+						isPlaying={isPlaying}
+						onClick={() => setShowAudioTranscript(true)}
+					/>
+				</div>
+
 				{/* Loading/Error States - Progressive loading: only block when no frames yet */}
 				{showBlockingLoader && (
 					<div className="absolute inset-0 z-50 flex items-center justify-center bg-background/90">
@@ -1525,13 +1536,13 @@ export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 					</div>
 				)}
 
-				{/* Audio Transcript Panel - Re-enabled and properly positioned */}
-				{currentFrame && showAudioTranscript && (
+				{/* Full transcript panel — only shown on demand */}
+				{showAudioTranscript && currentFrame && (
 					<div className="absolute bottom-28 left-4 right-4 z-[35]">
 						<AudioTranscript
 							frames={frames}
 							currentIndex={currentIndex}
-							groupingWindowMs={30000} // 30 seconds window
+							groupingWindowMs={30000}
 							meetings={meetings}
 							onClose={() => setShowAudioTranscript(false)}
 							isPlaying={isPlaying}
@@ -1600,7 +1611,8 @@ export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 													key={i}
 													className="flex-1 bg-muted rounded-t"
 													style={{
-														height: `${Math.random() * 60 + 20}%`,
+														// Deterministic heights to avoid SSR/client hydration mismatch
+														height: `${((i * 37 + 13) % 60) + 20}%`,
 														animationDelay: `${i * 20}ms`
 													}}
 												/>

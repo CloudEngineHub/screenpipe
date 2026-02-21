@@ -39,7 +39,6 @@ import {
   Loader2,
   Globe,
   Shield,
-  Film,
   Zap,
   User,
   Users,
@@ -444,12 +443,6 @@ export function RecordingSettings() {
     // Add more validation as needed
     return { isValid: true };
   }, []);
-
-  // Enhanced FPS change handler with validation
-  const handleFpsChange = useCallback((value: number[]) => {
-    const fps = Math.max(0.1, Math.min(60, value[0]));
-    handleSettingsChange({ fps }, true);
-  }, [handleSettingsChange]);
 
   // Enhanced audio chunk duration handler
   const handleAudioChunkDurationChange = useCallback((value: number[]) => {
@@ -936,8 +929,8 @@ Your screen is a pipe. Everything you see, hear, and type flows through it. Scre
       </div>
 
 
-      <div className="space-y-2">
-      {/* Data Directory */}
+      {/* Data Directory - hidden for now (not fully working) */}
+      {/* <div className="space-y-2">
       <Card className="border-border bg-card">
         <CardContent className="px-3 py-2.5">
           <div className="flex items-center justify-between">
@@ -969,82 +962,7 @@ Your screen is a pipe. Everything you see, hear, and type flows through it. Scre
           </div>
         </CardContent>
       </Card>
-
-      {/* Adaptive FPS */}
-      <Card className="border-border bg-card">
-        <CardContent className="px-3 py-2.5">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-2.5">
-              <Eye className="h-4 w-4 text-muted-foreground shrink-0" />
-              <div>
-                <h3 className="text-sm font-medium text-foreground flex items-center gap-1.5">
-                  Adaptive FPS
-                  <HelpTooltip text="Automatically increases capture rate during mouse/keyboard activity (up to 5 FPS) and decreases during idle periods. Helps capture fast workflows without wasting resources." />
-                </h3>
-                <p className="text-xs text-muted-foreground">Boost during activity, reduce when idle</p>
-              </div>
-            </div>
-            <Switch
-              id="adaptiveFps"
-              checked={settings.adaptiveFps}
-              onCheckedChange={(checked) => handleSettingsChange({ adaptiveFps: checked }, true)}
-            />
-          </div>
-          {!settings.adaptiveFps && (
-            <div className="flex items-center space-x-3 mt-2 ml-[26px]">
-              <Slider id="fps" min={0.1} max={10} step={0.1} value={[settings.fps]} onValueChange={handleFpsChange} className="flex-grow" />
-              <span className="text-xs text-muted-foreground w-12 text-right">{settings.fps.toFixed(1)} fps</span>
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* Video Quality */}
-      <Card className="border-border bg-card">
-        <CardContent className="px-3 py-2.5">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-2.5">
-              <Film className="h-4 w-4 text-muted-foreground shrink-0" />
-              <div>
-                <h3 className="text-sm font-medium text-foreground">Video quality</h3>
-                <p className="text-xs text-muted-foreground">Higher quality = larger files & more CPU</p>
-              </div>
-            </div>
-            <Select
-              value={settings.videoQuality || "balanced"}
-              onValueChange={(value) => handleSettingsChange({ videoQuality: value }, true)}
-            >
-              <SelectTrigger className="w-[160px] h-7 text-xs">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="low">Low (smallest)</SelectItem>
-                <SelectItem value="balanced">Balanced</SelectItem>
-                <SelectItem value="high">High (sharp text)</SelectItem>
-                <SelectItem value="max">Max (best, more CPU)</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Audio Chunk Duration */}
-      <Card className="border-border bg-card">
-        <CardContent className="px-3 py-2.5">
-          <div className="flex items-center space-x-2.5">
-            <Mic className="h-4 w-4 text-muted-foreground shrink-0" />
-            <h3 className="text-sm font-medium text-foreground flex items-center gap-1.5">
-              Audio chunk duration
-              <HelpTooltip text="Duration of each audio recording segment. Shorter chunks lower memory spikes. Longer chunks may improve transcription quality." />
-            </h3>
-          </div>
-          <div className="flex items-center space-x-3 mt-2 ml-[26px]">
-            <Slider id="audioChunkDuration" min={5} max={3000} step={1} value={[settings.audioChunkDuration]} onValueChange={handleAudioChunkDurationChange} className="flex-grow" />
-            <span className="text-xs text-muted-foreground w-10 text-right">{settings.audioChunkDuration}s</span>
-          </div>
-        </CardContent>
-      </Card>
-      </div>
+      </div> */}
 
       
 
@@ -1052,7 +970,43 @@ Your screen is a pipe. Everything you see, hear, and type flows through it. Scre
       <div className="space-y-2 pt-2">
         <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-1">Audio</h2>
 
+        {/* Disable Audio */}
+        <Card className="border-border bg-card">
+          <CardContent className="px-3 py-2.5">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-2.5">
+                <Mic className="h-4 w-4 text-muted-foreground shrink-0" />
+                <div>
+                  <h3 className="text-sm font-medium text-foreground">Disable audio recording</h3>
+                  <p className="text-xs text-muted-foreground">Turn off audio capture completely</p>
+                </div>
+              </div>
+              <Switch id="disableAudio" checked={settings.disableAudio} onCheckedChange={handleDisableAudioChange} />
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Audio Chunk Duration */}
+        {!settings.disableAudio && (
+          <Card className="border-border bg-card">
+            <CardContent className="px-3 py-2.5">
+              <div className="flex items-center space-x-2.5">
+                <Mic className="h-4 w-4 text-muted-foreground shrink-0" />
+                <h3 className="text-sm font-medium text-foreground flex items-center gap-1.5">
+                  Audio chunk duration
+                  <HelpTooltip text="Duration of each audio recording segment. Shorter chunks lower memory spikes. Longer chunks may improve transcription quality." />
+                </h3>
+              </div>
+              <div className="flex items-center space-x-3 mt-2 ml-[26px]">
+                <Slider id="audioChunkDuration" min={5} max={3000} step={1} value={[settings.audioChunkDuration]} onValueChange={handleAudioChunkDurationChange} className="flex-grow" />
+                <span className="text-xs text-muted-foreground w-10 text-right">{settings.audioChunkDuration}s</span>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
         {/* Your Name + Train Voice */}
+        {!settings.disableAudio && (
         <Card className="border-border bg-card">
           <CardContent className="px-3 py-2.5">
             <div className="flex items-center justify-between">
@@ -1105,8 +1059,10 @@ Your screen is a pipe. Everything you see, hear, and type flows through it. Scre
             </div>
           </CardContent>
         </Card>
+        )}
 
         {/* Transcription Engine */}
+        {!settings.disableAudio && (
         <Card className="border-border bg-card">
           <CardContent className="px-3 py-2.5">
             <div className="flex items-center justify-between">
@@ -1159,9 +1115,10 @@ Your screen is a pipe. Everything you see, hear, and type flows through it. Scre
             )}
           </CardContent>
         </Card>
+        )}
 
         {/* Transcription Mode - only for local Whisper engines */}
-        {settings.audioTranscriptionEngine !== "deepgram" &&
+        {!settings.disableAudio && settings.audioTranscriptionEngine !== "deepgram" &&
          settings.audioTranscriptionEngine !== "screenpipe-cloud" &&
          settings.audioTranscriptionEngine !== "disabled" && (
           <Card className="border-border bg-card">
@@ -1190,6 +1147,7 @@ Your screen is a pipe. Everything you see, hear, and type flows through it. Scre
         )}
 
         {/* System Default Audio */}
+        {!settings.disableAudio && (
         <Card className="border-border bg-card">
           <CardContent className="px-3 py-2.5">
             <div className="flex items-center justify-between">
@@ -1208,9 +1166,10 @@ Your screen is a pipe. Everything you see, hear, and type flows through it. Scre
             </div>
           </CardContent>
         </Card>
+        )}
 
         {/* Audio Devices */}
-        {!settings.useSystemDefaultAudio && (
+        {!settings.disableAudio && !settings.useSystemDefaultAudio && (
           <Card className="border-border bg-card">
             <CardContent className="px-3 py-2.5">
               <div className="flex items-center space-x-2.5 mb-2">
@@ -1270,6 +1229,7 @@ Your screen is a pipe. Everything you see, hear, and type flows through it. Scre
         )}
 
         {/* Languages */}
+        {!settings.disableAudio && (
         <Card className="border-border bg-card">
           <CardContent className="px-3 py-2.5">
             <div className="flex items-center justify-between">
@@ -1343,24 +1303,10 @@ Your screen is a pipe. Everything you see, hear, and type flows through it. Scre
             </div>
           </CardContent>
         </Card>
-
-        {/* Disable Audio */}
-        <Card className="border-border bg-card">
-          <CardContent className="px-3 py-2.5">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center space-x-2.5">
-                <Mic className="h-4 w-4 text-muted-foreground shrink-0" />
-                <div>
-                  <h3 className="text-sm font-medium text-foreground">Disable audio recording</h3>
-                  <p className="text-xs text-muted-foreground">Turn off audio completely</p>
-                </div>
-              </div>
-              <Switch id="disableAudio" checked={settings.disableAudio} onCheckedChange={handleDisableAudioChange} />
-            </div>
-          </CardContent>
-        </Card>
+        )}
 
         {/* VAD Sensitivity */}
+        {!settings.disableAudio && (
         <Card className="border-border bg-card">
           <CardContent className="px-3 py-2.5">
             <div className="flex items-center space-x-2.5">
@@ -1376,6 +1322,7 @@ Your screen is a pipe. Everything you see, hear, and type flows through it. Scre
             </div>
           </CardContent>
         </Card>
+        )}
       </div>
 
       
@@ -1400,6 +1347,94 @@ Your screen is a pipe. Everything you see, hear, and type flows through it. Scre
           </CardContent>
         </Card>
 
+        {/* Use All Monitors - right below disable screen recording */}
+        {!settings.disableVision && (
+          <Card className="border-border bg-card">
+            <CardContent className="px-3 py-2.5">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center space-x-2.5">
+                  <Monitor className="h-4 w-4 text-muted-foreground shrink-0" />
+                  <div>
+                    <h3 className="text-sm font-medium text-foreground">Use all monitors</h3>
+                    <p className="text-xs text-muted-foreground">Take screenshot from all available monitors</p>
+                  </div>
+                </div>
+                <Switch id="useAllMonitors" checked={settings.useAllMonitors} onCheckedChange={(checked) => handleSettingsChange({ useAllMonitors: checked }, true)} />
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Monitor Selection */}
+        {!settings.disableVision && !settings.useAllMonitors && (
+          <Card className="border-border bg-card overflow-hidden">
+            <CardContent className="px-3 py-2.5">
+              <div className="flex items-center space-x-2.5 mb-3">
+                <Monitor className="h-4 w-4 text-muted-foreground shrink-0" />
+                <h3 className="text-sm font-medium text-foreground">Monitors</h3>
+              </div>
+
+              <div className="flex items-end justify-center gap-6 py-2">
+                {/* Default option as a monitor */}
+                <button
+                  className="flex flex-col items-center gap-1.5 group"
+                  onClick={() => {
+                    const isDefaultSelected = settings.monitorIds.includes("default");
+                    if (isDefaultSelected) { handleSettingsChange({ monitorIds: settings.monitorIds.filter(id => id !== "default") }, true); }
+                    else { handleSettingsChange({ monitorIds: ["default"] }, true); }
+                  }}
+                >
+                  {/* Monitor SVG */}
+                  <svg width="80" height="56" viewBox="0 0 80 56" fill="none" className={cn("transition-opacity", settings.monitorIds.includes("default") ? "opacity-100" : "opacity-40 group-hover:opacity-60")}>
+                    <rect x="4" y="2" width="72" height="42" rx="3" className="fill-muted stroke-border" strokeWidth="1.5" />
+                    <rect x="8" y="6" width="64" height="34" rx="1" className={cn(settings.monitorIds.includes("default") ? "fill-foreground/10" : "fill-background")} />
+                    <path d="M30 44 L30 50 L50 50 L50 44" className="stroke-border" strokeWidth="1.5" fill="none" />
+                    <line x1="24" y1="50" x2="56" y2="50" className="stroke-border" strokeWidth="1.5" strokeLinecap="round" />
+                    {settings.monitorIds.includes("default") && (
+                      <path d="M32 20 L37 25 L48 14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-foreground" />
+                    )}
+                  </svg>
+                  <span className={cn("text-[11px] font-medium", settings.monitorIds.includes("default") ? "text-foreground" : "text-muted-foreground")}>
+                    Default
+                  </span>
+                </button>
+
+                {availableMonitors.map((monitor) => {
+                  const isSelected = settings.monitorIds.includes(monitor.stableId);
+                  return (
+                    <button
+                      key={monitor.stableId}
+                      className="flex flex-col items-center gap-1.5 group"
+                      onClick={() => {
+                        const newIds = isSelected
+                          ? settings.monitorIds.filter(id => id !== monitor.stableId)
+                          : [...settings.monitorIds.filter(id => id !== "default"), monitor.stableId];
+                        handleSettingsChange({ monitorIds: newIds }, true);
+                      }}
+                    >
+                      <svg width="80" height="56" viewBox="0 0 80 56" fill="none" className={cn("transition-opacity", isSelected ? "opacity-100" : "opacity-40 group-hover:opacity-60")}>
+                        <rect x="4" y="2" width="72" height="42" rx="3" className="fill-muted stroke-border" strokeWidth="1.5" />
+                        <rect x="8" y="6" width="64" height="34" rx="1" className={cn(isSelected ? "fill-foreground/10" : "fill-background")} />
+                        <path d="M30 44 L30 50 L50 50 L50 44" className="stroke-border" strokeWidth="1.5" fill="none" />
+                        <line x1="24" y1="50" x2="56" y2="50" className="stroke-border" strokeWidth="1.5" strokeLinecap="round" />
+                        {isSelected && (
+                          <path d="M32 20 L37 25 L48 14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-foreground" />
+                        )}
+                      </svg>
+                      <div className="text-center">
+                        <span className={cn("text-[11px] font-medium block", isSelected ? "text-foreground" : "text-muted-foreground")}>
+                          {monitor.name || `Monitor ${monitor.id}`}
+                        </span>
+                        <p className="text-[10px] text-muted-foreground">{monitor.width}x{monitor.height}</p>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
         {/* Text extraction methods - shown when screen recording is on */}
         {!settings.disableVision && (
           <Card className="border-border bg-card">
@@ -1420,6 +1455,28 @@ Your screen is a pipe. Everything you see, hear, and type flows through it. Scre
                 </div>
                 <Switch className="shrink-0" id="enableOcr" checked={!(settings.disableOcr ?? false)} onCheckedChange={(checked) => handleSettingsChange({ disableOcr: !checked }, true)} />
               </div>
+
+              {/* OCR Engine - shown when OCR is enabled */}
+              {!(settings.disableOcr ?? false) && (
+                <>
+                  <div className="flex items-center justify-between ml-[26px] gap-3">
+                    <h4 className="text-sm text-foreground flex items-center gap-1.5">
+                      OCR engine
+                      <HelpTooltip text="Apple Native: fast, uses built-in macOS OCR. Tesseract: open-source, cross-platform. Windows Native: uses Windows OCR APIs." />
+                    </h4>
+                    <Select value={settings.ocrEngine} onValueChange={handleOcrModelChange}>
+                      <SelectTrigger className="w-[160px] h-7 text-xs">
+                        <SelectValue placeholder="Select" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {isMacOS && <SelectItem value="apple-native">Apple Native</SelectItem>}
+                        {!isMacOS && platform() === "windows" && <SelectItem value="windows-native">Windows Native</SelectItem>}
+                        {!isMacOS && platform() !== "windows" && <SelectItem value="tesseract">Tesseract</SelectItem>}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </>
+              )}
 
               {(isMacOS || platform() === "windows") && <Separator />}
 
@@ -1466,116 +1523,6 @@ Your screen is a pipe. Everything you see, hear, and type flows through it. Scre
             </CardContent>
           </Card>
         )}
-
-        {/* Use All Monitors */}
-        <Card className="border-border bg-card">
-          <CardContent className="px-3 py-2.5">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center space-x-2.5">
-                <Monitor className="h-4 w-4 text-muted-foreground shrink-0" />
-                <div>
-                  <h3 className="text-sm font-medium text-foreground">Use all monitors</h3>
-                  <p className="text-xs text-muted-foreground">Record from all available monitors</p>
-                </div>
-              </div>
-              <Switch id="useAllMonitors" checked={settings.useAllMonitors} onCheckedChange={(checked) => handleSettingsChange({ useAllMonitors: checked }, true)} />
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Monitor Selection */}
-        {!settings.useAllMonitors && (
-          <Card className="border-border bg-card overflow-hidden">
-            <CardContent className="px-3 py-2.5">
-              <div className="flex items-center space-x-2.5 mb-3">
-                <Monitor className="h-4 w-4 text-muted-foreground shrink-0" />
-                <h3 className="text-sm font-medium text-foreground">Monitors</h3>
-              </div>
-
-              <div className="flex items-end justify-center gap-6 py-2">
-                {/* Default option as a monitor */}
-                <button
-                  className="flex flex-col items-center gap-1.5 group"
-                  onClick={() => {
-                    const isDefaultSelected = settings.monitorIds.includes("default");
-                    if (isDefaultSelected) { handleSettingsChange({ monitorIds: settings.monitorIds.filter(id => id !== "default") }, true); }
-                    else { handleSettingsChange({ monitorIds: ["default"] }, true); }
-                  }}
-                >
-                  {/* Monitor SVG */}
-                  <svg width="80" height="56" viewBox="0 0 80 56" fill="none" className={cn("transition-opacity", settings.monitorIds.includes("default") ? "opacity-100" : "opacity-40 group-hover:opacity-60")}>
-                    <rect x="4" y="2" width="72" height="42" rx="3" className="fill-muted stroke-border" strokeWidth="1.5" />
-                    <rect x="8" y="6" width="64" height="34" rx="1" className={cn(settings.monitorIds.includes("default") ? "fill-foreground/10" : "fill-background")} />
-                    <path d="M30 44 L30 50 L50 50 L50 44" className="stroke-border" strokeWidth="1.5" fill="none" />
-                    <line x1="24" y1="50" x2="56" y2="50" className="stroke-border" strokeWidth="1.5" strokeLinecap="round" />
-                    {settings.monitorIds.includes("default") && (
-                      <path d="M32 20 L37 25 L48 14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-foreground" />
-                    )}
-                  </svg>
-                  <span className={cn("text-[11px] font-medium", settings.monitorIds.includes("default") ? "text-foreground" : "text-muted-foreground")}>
-                    Default
-                  </span>
-                </button>
-
-                {availableMonitors.map((monitor) => {
-                  const isSelected = settings.monitorIds.includes(monitor.stableId);
-                  return (
-                    <button
-                      key={monitor.stableId}
-                      className="flex flex-col items-center gap-1.5 group"
-                      onClick={() => {
-                        const currentIds = settings.monitorIds.filter(id => id !== "default");
-                        const monitorId = monitor.stableId;
-                        const updatedIds = currentIds.includes(monitorId) ? currentIds.filter(id => id !== monitorId) : [...currentIds, monitorId];
-                        handleSettingsChange({ monitorIds: updatedIds }, true);
-                      }}
-                    >
-                      {/* Monitor SVG */}
-                      <svg width="80" height="56" viewBox="0 0 80 56" fill="none" className={cn("transition-opacity", isSelected ? "opacity-100" : "opacity-40 group-hover:opacity-60")}>
-                        <rect x="4" y="2" width="72" height="42" rx="3" className="fill-muted stroke-border" strokeWidth="1.5" />
-                        <rect x="8" y="6" width="64" height="34" rx="1" className={cn(isSelected ? "fill-foreground/10" : "fill-background")} />
-                        <path d="M30 44 L30 50 L50 50 L50 44" className="stroke-border" strokeWidth="1.5" fill="none" />
-                        <line x1="24" y1="50" x2="56" y2="50" className="stroke-border" strokeWidth="1.5" strokeLinecap="round" />
-                        {isSelected && (
-                          <path d="M32 20 L37 25 L48 14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-foreground" />
-                        )}
-                      </svg>
-                      <div className="text-center">
-                        <p className={cn("text-[11px] font-medium", isSelected ? "text-foreground" : "text-muted-foreground")}>{monitor.name}</p>
-                        <p className="text-[10px] text-muted-foreground">{monitor.width}x{monitor.height}</p>
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
-            </CardContent>
-          </Card>
-        )}
-
-        {/* OCR Engine */}
-        <Card className="border-border bg-card">
-          <CardContent className="px-3 py-2.5">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center space-x-2.5">
-                <Eye className="h-4 w-4 text-muted-foreground shrink-0" />
-                <h3 className="text-sm font-medium text-foreground flex items-center gap-1.5">
-                  OCR engine
-                  <HelpTooltip text="Apple Native: fast, uses built-in macOS OCR. Tesseract: open-source, cross-platform. Windows Native: uses Windows OCR APIs." />
-                </h3>
-              </div>
-              <Select value={settings.ocrEngine} onValueChange={handleOcrModelChange}>
-                <SelectTrigger className="w-[160px] h-7 text-xs">
-                  <SelectValue placeholder="Select" />
-                </SelectTrigger>
-                <SelectContent>
-                  {isMacOS && <SelectItem value="apple-native">Apple Native</SelectItem>}
-                  {!isMacOS && platform() === "windows" && <SelectItem value="windows-native">Windows Native</SelectItem>}
-                  {!isMacOS && platform() !== "windows" && <SelectItem value="tesseract">Tesseract</SelectItem>}
-                </SelectContent>
-              </Select>
-            </div>
-          </CardContent>
-        </Card>
 
         {/* PII Removal */}
         <Card className="border-border bg-card">
@@ -1976,6 +1923,25 @@ Your screen is a pipe. Everything you see, hear, and type flows through it. Scre
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* Floating apply & restart button — always visible when changes pending */}
+      {hasUnsavedChanges && (
+        <div className="sticky bottom-4 flex justify-end pointer-events-none z-50">
+          <Button
+            onClick={handleUpdate}
+            disabled={isUpdating || Object.keys(validationErrors).length > 0}
+            size="sm"
+            className="pointer-events-auto flex items-center gap-1.5 h-9 px-4 text-sm bg-foreground text-background hover:bg-background hover:text-foreground transition-colors duration-150 shadow-lg"
+          >
+            {isUpdating ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <RefreshCw className="h-3.5 w-3.5" />
+            )}
+            Apply & Restart
+          </Button>
+        </div>
+      )}
     </div>
   );
 }

@@ -296,7 +296,119 @@ Not phased. One PR per step, each shippable independently, but all ship in the s
 - [ ] Section 9: DB concurrent access — no "database is locked" errors
 - [ ] Section 12: Timeline navigation, search results, frame deep links all work
 
-## 6. Success Criteria
+## 6. E2E Robot Testing
+
+### Principle: Use Accessibility to Test Accessibility
+
+The same APIs we use for capture can drive automated E2E tests. On macOS, `osascript` opens apps, clicks buttons, types text, switches windows. On Windows, PowerShell + UI Automation does the same. Tests perform real user actions, wait for captures to appear in the DB, and assert correctness.
+
+### Test Layers
+
+**Layer 1: Unit tests** (fast, CI, no UI)
+- Debounce: rapid events → correct trigger count
+- Frame dedup: identical images → skip, different → capture
+- SnapshotWriter: valid JPEG, correct path format
+- DB: insert_snapshot_frame → query returns correct data
+- Search: accessibility_text FTS matches
+
+**Layer 2: Integration tests** (CI, headless)
+- Paired capture: screenshot + accessibility return together
+- OCR fallback: accessibility empty → OCR runs
+- Legacy compat: video-chunk frames still serve via FFmpeg
+
+**Layer 3: E2E robot tests** (real machines, real UI, nightly CI)
+
+```bash
+# macOS: osascript drives real apps
+# Windows: PowerShell + [System.Windows.Automation] drives real apps
+
+test_app_switch_capture:
+  1. open TextEdit, type "test document alpha"
+  2. open Safari, navigate to example.com
+  3. sleep 1s
+  4. query DB: frames WHERE capture_trigger = 'app_switch' AND timestamp > test_start
+  5. assert: >= 2 frames
+  6. assert: frame 1 accessibility_text contains "test document alpha"
+  7. assert: frame 2 app_name = "Safari"
+  8. assert: both snapshot_path files are valid JPEGs
+
+test_typing_pause_capture:
+  1. focus TextEdit, type "meeting notes for project X"
+  2. sleep 1s
+  3. assert: frame with capture_trigger = 'typing_pause'
+  4. assert: accessibility_text contains "meeting notes for project X"
+
+test_scroll_capture:
+  1. open Safari, navigate to long page
+  2. scroll down 5 times
+  3. sleep 1s
+  4. assert: frame with capture_trigger = 'scroll_stop'
+  5. assert: content differs from pre-scroll frame
+
+test_click_capture:
+  1. open System Settings, click "General"
+  2. sleep 500ms
+  3. assert: frame with capture_trigger = 'click'
+
+test_idle_fallback:
+  1. do nothing for 12s
+  2. assert: >= 1 frame with capture_trigger = 'idle'
+
+test_rapid_events_debounce:
+  1. click 20 times in 1s
+  2. sleep 1s
+  3. assert: <= 5 frames (200ms min interval)
+
+test_search_thumbnail_correctness:
+  1. open TextEdit, type "unique_term_xyz"
+  2. switch to Safari
+  3. sleep 2s
+  4. GET /search?q=unique_term_xyz
+  5. assert: result thumbnail shows TextEdit, not Safari
+```
+
+**Layer 4: Soak test** (8 hours real use, before every release)
+- Run event-driven capture during a full workday
+- End-of-day assertions:
+  - No crashes, no DB corruption, no orphaned files
+  - Frame count: 3,000–5,000 (reasonable for 8hr active day)
+  - Disk: ~300 MB total
+  - Search responds in <2s on full-day DB
+  - CPU never exceeded 10% sustained
+
+### CI Integration
+
+- Unit + integration tests: every PR (fast, headless)
+- E2E robot tests: nightly on macOS + Windows runners (too slow for PRs)
+- Soak test: manual before each release, automated weekly on dev machines
+
+## 7. Windows Compatibility
+
+~90% of new code is platform-agnostic (debounce, paired capture, snapshot writer, DB, search). Platform-specific code already exists and is abstracted:
+
+| Component | macOS | Windows | New code needed? |
+|-----------|-------|---------|-----------------|
+| Event detection | CGEventTap | SetWindowsHookEx | No — already exists in `platform/` |
+| Screenshot | ScreenCaptureKit | DXGI/GDI | No — already abstracted |
+| Accessibility tree | AX API | UI Automation | No — already in `tree/` |
+| Debounce/dedup | Pure Rust | Same | No |
+| Snapshot writer | File I/O | Same | No |
+| JPEG encoding | `image` crate | Same | No |
+| DB | SQLite | Same | No |
+
+**One platform-specific tuning**: UIA tree walk is slower on Windows (200-500ms vs 10-50ms on macOS). The accessibility timeout constant needs `#[cfg(target_os)]`:
+```rust
+#[cfg(target_os = "macos")]
+const AX_WALK_TIMEOUT_MS: u64 = 200;
+#[cfg(target_os = "windows")]
+const AX_WALK_TIMEOUT_MS: u64 = 350;
+```
+
+E2E robot tests use platform-native automation:
+- macOS: `osascript` (AppleScript)
+- Windows: PowerShell + `System.Windows.Automation`
+
+## 8. Success Criteria
 
 | Metric | Today | Target |
 |--------|-------|--------|

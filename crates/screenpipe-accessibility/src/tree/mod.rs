@@ -14,9 +14,18 @@ pub mod cache;
 
 use anyhow::Result;
 use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::time::Duration;
+
+/// A single node extracted from the accessibility tree, preserving role and hierarchy.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AccessibilityTreeNode {
+    pub role: String,
+    pub text: String,
+    pub depth: u8,
+}
 
 /// A snapshot of all visible text from the focused window's accessibility tree.
 #[derive(Debug, Clone)]
@@ -24,6 +33,8 @@ pub struct TreeSnapshot {
     pub app_name: String,
     pub window_name: String,
     pub text_content: String,
+    /// Structured nodes preserving role and hierarchy from the accessibility tree.
+    pub nodes: Vec<AccessibilityTreeNode>,
     pub browser_url: Option<String>,
     pub timestamp: DateTime<Utc>,
     pub node_count: usize,

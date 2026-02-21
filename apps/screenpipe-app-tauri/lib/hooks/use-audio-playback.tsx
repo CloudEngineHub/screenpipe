@@ -13,9 +13,10 @@ const PRELOAD_BEHIND_MS = 5_000; // also preload 5s behind to cover current posi
 
 interface AudioSegment {
   filePath: string;
-  audioBuffer: AudioBuffer;
-  /** Currently playing source node (one-shot, must recreate on seek/resume) */
-  activeSource: AudioBufferSourceNode | null;
+  /** Blob URL for the audio data */
+  blobUrl: string;
+  /** HTMLAudioElement for playback with preservesPitch support */
+  audioElement: HTMLAudioElement;
   /** Wall-clock start time of this audio file (ms), parsed from filename */
   recordingStartMs: number;
   /** Duration of the audio file in seconds (from metadata) */
@@ -24,6 +25,8 @@ interface AudioSegment {
   chunkId: number;
   /** Whether this is from an input device (mic) */
   isInput: boolean;
+  /** Whether this segment is currently playing */
+  playing: boolean;
 }
 
 interface UseAudioPlaybackArgs {
@@ -110,9 +113,6 @@ export function useAudioPlayback({
   const playbackStartWallRef = useRef(0);
   const playbackStartTsRef = useRef(0);
 
-  // AudioContext — created once, unlocked on first user gesture
-  const audioCtxRef = useRef<AudioContext | null>(null);
-
   // Audio segments currently loaded, keyed by file path
   const segmentsRef = useRef<Map<string, AudioSegment>>(new Map());
   // Paths currently being loaded (to avoid duplicate fetches)
@@ -140,42 +140,13 @@ export function useAudioPlayback({
     return false;
   })();
 
-  /** Ensure AudioContext exists (create if needed). */
-  const ensureAudioContext = useCallback((): AudioContext => {
-    if (!audioCtxRef.current || audioCtxRef.current.state === "closed") {
-      audioCtxRef.current = new AudioContext();
-    }
-    return audioCtxRef.current;
-  }, []);
-
-  /**
-   * Unlock audio playback on user gesture.
-   * WebKit/WKWebView blocks AudioContext unless resumed from a user gesture context.
-   * We create the AudioContext and resume it, then play a silent buffer to fully unlock.
-   */
-  const unlockAudio = useCallback(() => {
-    const ctx = ensureAudioContext();
-    if (ctx.state === "suspended") {
-      ctx.resume().catch(() => {});
-    }
-    // Play a tiny silent buffer to fully unlock the AudioContext
-    try {
-      const buffer = ctx.createBuffer(1, 1, 22050);
-      const source = ctx.createBufferSource();
-      source.buffer = buffer;
-      source.connect(ctx.destination);
-      source.start(0);
-    } catch { /* ignore */ }
-  }, [ensureAudioContext]);
-
-  /** Load an audio file, decode it into an AudioBuffer. */
+  /** Load an audio file into an HTMLAudioElement with blob URL. */
   const loadAudioSegment = useCallback(
     async (filePath: string, chunkId: number, isInput: boolean, durationSecs: number, fallbackTsMs: number) => {
       if (segmentsRef.current.has(filePath) || loadingPathsRef.current.has(filePath)) return;
       loadingPathsRef.current.add(filePath);
 
       try {
-        const ctx = ensureAudioContext();
         const { data } = await getMediaFile(filePath);
         const binaryData = atob(data);
         const bytes = new Uint8Array(binaryData.length);
@@ -183,27 +154,48 @@ export function useAudioPlayback({
           bytes[i] = binaryData.charCodeAt(i);
         }
 
-        // Decode into AudioBuffer (works even when AudioContext is suspended)
-        const audioBuffer = await ctx.decodeAudioData(bytes.buffer.slice(0) as ArrayBuffer);
+        // Create blob URL for HTMLAudioElement
+        const blob = new Blob([bytes], { type: "audio/mp4" });
+        const blobUrl = URL.createObjectURL(blob);
+
+        // Create audio element with pitch preservation
+        const audioElement = new Audio(blobUrl);
+        audioElement.preservesPitch = true;
+        audioElement.playbackRate = speedRef.current;
+        audioElement.preload = "auto";
+
+        // Wait for metadata to load to get accurate duration
+        await new Promise<void>((resolve) => {
+          if (audioElement.readyState >= 1) {
+            resolve();
+          } else {
+            audioElement.addEventListener("loadedmetadata", () => resolve(), { once: true });
+            audioElement.addEventListener("error", () => resolve(), { once: true });
+          }
+        });
 
         // Parse the actual recording start from the file path
         const recordingStartMs = parseRecordingStartFromPath(filePath) ?? fallbackTsMs;
+        const actualDuration = audioElement.duration && isFinite(audioElement.duration)
+          ? audioElement.duration
+          : durationSecs;
 
         segmentsRef.current.set(filePath, {
           filePath,
-          audioBuffer,
-          activeSource: null,
+          blobUrl,
+          audioElement,
           recordingStartMs,
-          durationSecs: audioBuffer.duration || durationSecs,
+          durationSecs: actualDuration,
           chunkId,
           isInput,
+          playing: false,
         });
 
         console.log(
           "[audio-playback] Loaded segment:",
           filePath.split("/").pop(),
           "recordingStart:", new Date(recordingStartMs).toISOString(),
-          "duration:", audioBuffer.duration.toFixed(1) + "s",
+          "duration:", actualDuration.toFixed(1) + "s",
         );
       } catch (err) {
         console.warn("[audio-playback] Failed to load audio segment:", filePath, err);
@@ -211,7 +203,7 @@ export function useAudioPlayback({
         loadingPathsRef.current.delete(filePath);
       }
     },
-    [ensureAudioContext],
+    [],
   );
 
   /** Preload audio segments near the current playback position. */
@@ -249,54 +241,32 @@ export function useAudioPlayback({
     [loadAudioSegment],
   );
 
-  /** Stop all currently playing audio source nodes. */
+  /** Stop all currently playing audio elements. */
   const stopAllAudio = useCallback(() => {
     for (const seg of segmentsRef.current.values()) {
-      if (seg.activeSource) {
+      if (seg.playing) {
         try {
-          seg.activeSource.stop();
-        } catch { /* ignore - might already be stopped */ }
-        seg.activeSource = null;
+          seg.audioElement.pause();
+        } catch { /* ignore */ }
+        seg.playing = false;
       }
     }
   }, []);
 
   /**
-   * Start an AudioBufferSourceNode for a segment at the given offset.
-   * Returns the created source node.
+   * Start playback of a segment at the given offset.
    */
   const startSegmentPlayback = useCallback(
-    (seg: AudioSegment, offsetSecs: number): AudioBufferSourceNode | null => {
-      const ctx = audioCtxRef.current;
-      if (!ctx || ctx.state === "closed") return null;
-
-      // Stop any existing source for this segment
-      if (seg.activeSource) {
-        try { seg.activeSource.stop(); } catch { /* ignore */ }
-        seg.activeSource = null;
-      }
-
+    (seg: AudioSegment, offsetSecs: number) => {
       try {
-        const source = ctx.createBufferSource();
-        source.buffer = seg.audioBuffer;
-        source.playbackRate.value = speedRef.current;
-        source.connect(ctx.destination);
-
-        const clampedOffset = Math.max(0, Math.min(offsetSecs, seg.audioBuffer.duration - 0.01));
-        source.start(0, clampedOffset);
-
-        // Clean up reference when source naturally ends
-        source.onended = () => {
-          if (seg.activeSource === source) {
-            seg.activeSource = null;
-          }
-        };
-
-        seg.activeSource = source;
-        return source;
+        const clampedOffset = Math.max(0, Math.min(offsetSecs, seg.durationSecs - 0.01));
+        seg.audioElement.currentTime = clampedOffset;
+        seg.audioElement.playbackRate = speedRef.current;
+        seg.audioElement.preservesPitch = true;
+        seg.audioElement.play().catch(() => {});
+        seg.playing = true;
       } catch (err) {
         console.warn("[audio-playback] Failed to start source:", seg.filePath.split("/").pop(), err);
-        return null;
       }
     },
     [],
@@ -304,26 +274,22 @@ export function useAudioPlayback({
 
   /**
    * Sync audio: start segments whose recording window covers currentTsMs,
-   * stop all others. Uses AudioBufferSourceNode through the unlocked AudioContext
-   * so no autoplay policy issues.
+   * stop all others.
    */
   const syncAudio = useCallback(
     (currentTsMs: number) => {
-      const ctx = audioCtxRef.current;
-      if (!ctx || ctx.state === "closed") return;
-
       for (const [, seg] of segmentsRef.current) {
         const segEndMs = seg.recordingStartMs + seg.durationSecs * 1000;
         const shouldBeActive = currentTsMs >= seg.recordingStartMs && currentTsMs <= segEndMs;
 
-        if (shouldBeActive && !seg.activeSource) {
+        if (shouldBeActive && !seg.playing) {
           // Start playing this segment
           const offsetSecs = (currentTsMs - seg.recordingStartMs) / 1000;
           startSegmentPlayback(seg, offsetSecs);
-        } else if (!shouldBeActive && seg.activeSource) {
+        } else if (!shouldBeActive && seg.playing) {
           // Stop this segment
-          try { seg.activeSource.stop(); } catch { /* ignore */ }
-          seg.activeSource = null;
+          try { seg.audioElement.pause(); } catch { /* ignore */ }
+          seg.playing = false;
         }
         // If already active, playbackRate is updated in setPlaybackSpeed
       }
@@ -383,9 +349,6 @@ export function useAudioPlayback({
     const currentFrame = f[idx];
     if (!currentFrame) return;
 
-    // Unlock AudioContext on user gesture — MUST happen synchronously in the click handler
-    unlockAudio();
-
     const startTs = new Date(currentFrame.timestamp).getTime();
     playbackStartTsRef.current = startTs;
     playbackStartWallRef.current = performance.now();
@@ -408,7 +371,7 @@ export function useAudioPlayback({
 
     // Start the animation loop
     rafIdRef.current = requestAnimationFrame(tick);
-  }, [tick, preloadAround, unlockAudio, startSegmentPlayback]);
+  }, [tick, preloadAround, startSegmentPlayback]);
 
   /** Pause playback. */
   const pause = useCallback(() => {
@@ -435,12 +398,13 @@ export function useAudioPlayback({
     speedRef.current = speed;
     setPlaybackSpeedState(speed);
 
-    // If currently playing, update all active source nodes' playbackRate
+    // If currently playing, update all active audio elements' playbackRate
     if (isPlayingRef.current) {
       for (const seg of segmentsRef.current.values()) {
-        if (seg.activeSource) {
+        if (seg.playing) {
           try {
-            seg.activeSource.playbackRate.value = speed;
+            seg.audioElement.playbackRate = speed;
+            seg.audioElement.preservesPitch = true;
           } catch { /* ignore */ }
         }
       }
@@ -462,14 +426,12 @@ export function useAudioPlayback({
         cancelAnimationFrame(rafIdRef.current);
       }
       for (const seg of segmentsRef.current.values()) {
-        if (seg.activeSource) {
-          try { seg.activeSource.stop(); } catch { /* ignore */ }
+        if (seg.playing) {
+          try { seg.audioElement.pause(); } catch { /* ignore */ }
         }
+        URL.revokeObjectURL(seg.blobUrl);
       }
       segmentsRef.current.clear();
-      if (audioCtxRef.current) {
-        audioCtxRef.current.close().catch(() => {});
-      }
     };
   }, []);
 

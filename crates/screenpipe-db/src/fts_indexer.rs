@@ -200,9 +200,10 @@ async fn index_frames_fts(db: &DatabaseManager) -> Result<i64, sqlx::Error> {
     }
 
     // Pre-read source data OUTSIDE the write transaction.
-    let rows: Vec<(i64, String, String, String, String, String)> = sqlx::query_as(
+    let rows: Vec<(i64, String, String, String, String, String, String)> = sqlx::query_as(
         "SELECT id, COALESCE(name, ''), COALESCE(browser_url, ''), \
-                COALESCE(app_name, ''), COALESCE(window_name, ''), CAST(COALESCE(focused, 0) AS TEXT) \
+                COALESCE(app_name, ''), COALESCE(window_name, ''), CAST(COALESCE(focused, 0) AS TEXT), \
+                COALESCE(accessibility_text, '') \
          FROM frames WHERE rowid > ?1 ORDER BY rowid LIMIT ?2",
     )
     .bind(last)
@@ -220,10 +221,10 @@ async fn index_frames_fts(db: &DatabaseManager) -> Result<i64, sqlx::Error> {
         let chunk_max_id = chunk.last().unwrap().0;
 
         let mut tx = db.begin_immediate_with_retry().await?;
-        for (id, name, browser_url, app_name, window_name, focused) in chunk {
+        for (id, name, browser_url, app_name, window_name, focused, accessibility_text) in chunk {
             sqlx::query(
-                "INSERT OR IGNORE INTO frames_fts(id, name, browser_url, app_name, window_name, focused) \
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                "INSERT OR IGNORE INTO frames_fts(id, name, browser_url, app_name, window_name, focused, accessibility_text) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
             )
             .bind(id)
             .bind(name)
@@ -231,6 +232,7 @@ async fn index_frames_fts(db: &DatabaseManager) -> Result<i64, sqlx::Error> {
             .bind(app_name)
             .bind(window_name)
             .bind(focused)
+            .bind(accessibility_text)
             .execute(&mut **tx.conn())
             .await?;
         }
