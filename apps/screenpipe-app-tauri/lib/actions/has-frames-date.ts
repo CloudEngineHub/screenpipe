@@ -53,13 +53,17 @@ export async function hasFramesForDate(date: Date): Promise<boolean> {
 }
 
 /**
- * Find the nearest date with frames in a single SQL query.
+ * Find the nearest date (local calendar day) with frames in a single SQL query.
  * Replaces the recursive hasFramesForDate loop (up to 7 HTTP calls → 1).
  *
- * @param targetDate - The date to search from
+ * Returns a Date at midnight local time for the day that has frames.
+ * This matches what Calendar picker and startOfDay produce, avoiding
+ * timezone bugs where a UTC timestamp maps to the wrong local date.
+ *
+ * @param targetDate - The date to search from (local time)
  * @param direction - "backward" searches older dates, "forward" searches newer
  * @param maxDays - Maximum number of days to search (default 7)
- * @returns The nearest Date with frames, or null if none found
+ * @returns A Date at midnight local time for the nearest day with frames, or null
  */
 export async function findNearestDateWithFrames(
 	targetDate: Date,
@@ -128,9 +132,18 @@ export async function findNearestDateWithFrames(
 			return null;
 		}
 
+		// Convert UTC timestamp to LOCAL midnight for that calendar day.
+		// The DB stores UTC, but startOfDay/endOfDay in the caller use local time.
+		// Without this, a UTC timestamp like "2026-02-20T03:00Z" becomes Feb 19
+		// in PST, causing fetchTimeRange to load the wrong day's frames.
 		const nearestTimestamp = new Date(result[0].timestamp);
-		console.log("findNearestDateWithFrames:", targetDate.toISOString(), "→", nearestTimestamp.toISOString());
-		return nearestTimestamp;
+		const localMidnight = new Date(
+			nearestTimestamp.getFullYear(),
+			nearestTimestamp.getMonth(),
+			nearestTimestamp.getDate(),
+		);
+		console.log("findNearestDateWithFrames:", targetDate.toISOString(), "→ DB:", result[0].timestamp, "→ local day:", localMidnight.toISOString());
+		return localMidnight;
 	} catch (e) {
 		console.error("Error finding nearest date with frames:", e);
 		return null;

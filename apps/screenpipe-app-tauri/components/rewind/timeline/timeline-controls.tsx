@@ -7,7 +7,6 @@
 import { Button } from "@/components/ui/button";
 import { ChevronLeft, ChevronRight, RefreshCw, CalendarIcon, Search, Play, Pause, Loader2 } from "lucide-react";
 import {
-	endOfDay,
 	format,
 	isAfter,
 	isSameDay,
@@ -139,13 +138,15 @@ export function TimelineControls({
 	);
 
 	const jumpDay = async (days: number) => {
-		const today = new Date();
+		const today = startOfDay(new Date());
 
-		const newDate = endOfDay(new Date(currentDate));
+		// Use startOfDay so the date passed to handleDateChange is a clean
+		// midnight — identical to what the Calendar picker sends.
+		const newDate = startOfDay(new Date(currentDate));
 		newDate.setDate(newDate.getDate() + days);
 
 		// Prevent jumping to future dates
-		if (isAfter(startOfDay(newDate), startOfDay(today))) {
+		if (isAfter(newDate, today)) {
 			await onDateChange(today);
 			return;
 		}
