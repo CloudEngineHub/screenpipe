@@ -32,6 +32,7 @@ const SUITES = [
   { name: "chat", file: "test-chat.ts" },
   { name: "tray", file: "test-tray.ts" },
   { name: "windows", file: "test-windows.ts" },
+  { name: "capture-fidelity", file: "test-capture-fidelity.ts" },
   // lifecycle runs LAST — it kills and restarts the app
   { name: "lifecycle", file: "test-lifecycle.ts" },
 ];
