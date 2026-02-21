@@ -64,4 +64,6 @@ screenpipe-app-tauri/src-tauri/.next/
 .wrangler/
 
 
+
 .playwright*
+crates/screenpipe-audio/onnxruntime-win-x64-1.19.2.zip

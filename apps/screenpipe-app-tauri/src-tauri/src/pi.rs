@@ -25,15 +25,16 @@ static PI_INSTALL_DONE: AtomicBool = AtomicBool::new(false);
 
 /// On Windows, `.cmd` files cannot be spawned directly with `Command::new()` since
 /// Rust 1.77+ (CVE-2024-24576 fix). We must use `cmd.exe /C` to run them.
-/// For `.exe` shims from `bun add -g`, run via bundled bun to ensure the JS
-/// entrypoint resolves correctly (the shim alone fails with exit code 255 on
-/// some Windows machines where bun isn't in PATH).
+/// `.exe` shims (from `bun add -g`) are native executables — run them directly.
+/// Only wrap non-exe paths (e.g. JS files) with bun.
 #[cfg(windows)]
 fn build_command_for_path(path: &str) -> Command {
     if path.ends_with(".cmd") || path.ends_with(".bat") {
         let mut cmd = Command::new("cmd.exe");
         cmd.args(["/C", path]);
         cmd
+    } else if path.ends_with(".exe") {
+        Command::new(path)
     } else if let Some(bun) = find_bun_executable() {
         let mut cmd = Command::new(bun);
         cmd.arg(path);
@@ -63,6 +64,8 @@ fn build_async_command_for_path(path: &str) -> tokio::process::Command {
         let mut cmd = tokio::process::Command::new("cmd.exe");
         cmd.args(["/C", path]);
         cmd
+    } else if path.ends_with(".exe") {
+        tokio::process::Command::new(path)
     } else if let Some(bun) = find_bun_executable() {
         let mut cmd = tokio::process::Command::new(bun);
         cmd.arg(path);
