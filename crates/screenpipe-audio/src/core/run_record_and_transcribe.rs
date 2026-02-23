@@ -103,13 +103,20 @@ pub async fn run_record_and_transcribe(
                 .duration_since(UNIX_EPOCH)
                 .expect("Time went backwards")
                 .as_secs();
-            match whisper_sender.try_send(AudioInput {
-                data: Arc::new(collected_audio.clone()),
-                device: audio_stream.device.clone(),
-                sample_rate: audio_stream.device_config.sample_rate().0,
-                channels: audio_stream.device_config.channels(),
-                capture_timestamp,
-            }) {
+            // Use send_timeout instead of try_send to apply backpressure when the
+            // Whisper consumer falls behind.  The 30s timeout matches the chunk
+            // accumulation duration — if the consumer can't clear one slot in 30s
+            // it is truly stuck and dropping is the only option.
+            match whisper_sender.send_timeout(
+                AudioInput {
+                    data: Arc::new(collected_audio.clone()),
+                    device: audio_stream.device.clone(),
+                    sample_rate: audio_stream.device_config.sample_rate().0,
+                    channels: audio_stream.device_config.channels(),
+                    capture_timestamp,
+                },
+                Duration::from_secs(30),
+            ) {
                 Ok(_) => {
                     debug!("sent audio segment to audio model");
                     metrics.record_chunk_sent();
@@ -122,10 +129,12 @@ pub async fn run_record_and_transcribe(
                     if e.is_disconnected() {
                         error!("whisper channel disconnected, restarting recording process");
                         return Err(anyhow!("Whisper channel disconnected"));
-                    } else if e.is_full() {
+                    } else if e.is_timeout() {
                         metrics.record_channel_full();
-                        warn!("whisper channel full, dropping audio segment");
-                        tokio::time::sleep(Duration::from_millis(100)).await;
+                        warn!(
+                            "whisper channel still full after 30s, dropping audio segment for {}",
+                            device_name
+                        );
                     }
                 }
             }

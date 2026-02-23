@@ -236,10 +236,27 @@ pub async fn health_check(State(state): State<Arc<AppState>>) -> JsonResponse<He
         false
     };
 
+    // Audio degradation: chunks_channel_full > 0 means the Whisper consumer
+    // couldn't keep up and audio was dropped even after a 30s backpressure wait.
+    let audio_degraded = if !state.audio_disabled && audio_snap.uptime_secs > 120.0 {
+        if audio_snap.chunks_channel_full > 0 {
+            warn!(
+                "health_check: {} audio chunk(s) dropped (transcription engine too slow)",
+                audio_snap.chunks_channel_full
+            );
+            true
+        } else {
+            false
+        }
+    } else {
+        false
+    };
+
     let (overall_status, message, verbose_instructions, status_code) = if (frame_status == "ok"
         || frame_status == "disabled")
         && (audio_status == "ok" || audio_status == "disabled")
         && !vision_degraded
+        && !audio_degraded
     {
         (
             "healthy",
@@ -258,6 +275,9 @@ pub async fn health_check(State(state): State<Arc<AppState>>) -> JsonResponse<He
         if audio_status != "ok" && audio_status != "disabled" {
             unhealthy_systems.push("audio");
         }
+        if audio_degraded && !unhealthy_systems.contains(&"audio") {
+            unhealthy_systems.push("audio");
+        }
 
         let mut detail_parts = Vec::new();
         if vision_degraded {
@@ -273,6 +293,12 @@ pub async fn health_check(State(state): State<Arc<AppState>>) -> JsonResponse<He
                     vision_snap.avg_db_latency_ms
                 ));
             }
+        }
+        if audio_degraded {
+            detail_parts.push(format!(
+                "{} audio chunk(s) dropped — transcription too slow",
+                audio_snap.chunks_channel_full
+            ));
         }
 
         let systems_str = unhealthy_systems.join(", ");
@@ -451,7 +477,7 @@ pub(crate) fn get_verbose_instructions(unhealthy_systems: &[&str]) -> String {
     }
 
     if unhealthy_systems.contains(&"audio") {
-        instructions.push_str("Audio system is not working properly. Check if microphone permissions are enabled and devices are connected.\n");
+        instructions.push_str("Audio system is not working properly. Check if microphone permissions are enabled and devices are connected. If audio chunks are being dropped, try switching to a smaller Whisper model or using cloud transcription.\n");
     }
 
     if instructions.is_empty() {

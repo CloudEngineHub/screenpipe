@@ -306,6 +306,20 @@ const HealthStatus = ({ className }: { className?: string }) => {
                     </div>
                   </div>
 
+                  {/* Audio Drops Warning */}
+                  {!settings.disableAudio &&
+                    health?.audio_pipeline &&
+                    health.audio_pipeline.chunks_channel_full > 0 && (
+                      <div className="flex items-center gap-2 p-2 bg-yellow-500/10 border border-yellow-500/20 rounded-md">
+                        <AlertTriangle className="h-4 w-4 text-yellow-500 flex-shrink-0" />
+                        <span className="text-xs text-yellow-700 dark:text-yellow-400">
+                          {health.audio_pipeline.chunks_channel_full} audio chunk(s)
+                          dropped — transcription engine is too slow. try a smaller
+                          whisper model or switch to cloud transcription.
+                        </span>
+                      </div>
+                    )}
+
                   {/* Audio Devices Status */}
                   {!settings.disableAudio && health?.device_status_details && (
                     <div className="mt-1 mb-2 relative">

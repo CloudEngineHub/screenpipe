@@ -1,6 +1,22 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { debounce } from "lodash";
 
+interface AudioPipelineHealth {
+  chunks_sent: number;
+  chunks_channel_full: number;
+  stream_timeouts: number;
+  vad_passed: number;
+  vad_rejected: number;
+  transcriptions_completed: number;
+  transcription_errors: number;
+  db_inserted: number;
+  total_words: number;
+  words_per_minute: number;
+  transcription_paused?: boolean;
+  meeting_detected?: boolean;
+  meeting_app?: string;
+}
+
 interface HealthCheckResponse {
   status: string;
   status_code: number;
@@ -13,6 +29,7 @@ interface HealthCheckResponse {
   message: string;
   verbose_instructions?: string | null;
   device_status_details?: string | null;
+  audio_pipeline?: AudioPipelineHealth | null;
 }
 
 function isHealthChanged(
