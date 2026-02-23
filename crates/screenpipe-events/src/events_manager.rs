@@ -72,9 +72,12 @@ impl<T: DeserializeOwned + Unpin + 'static> Stream for EventSubscription<T> {
     ) -> std::task::Poll<Option<Self::Item>> {
         let me = self.get_mut();
 
-        // Update last_used timestamp when polling
-        if let Some(manager) = EVENT_MANAGER.subscriptions.write().get_mut(&me.event_name) {
-            manager.last_used = Instant::now();
+        // Update last_used timestamp when polling — use try_write to avoid
+        // blocking the async runtime if cleanup is holding the lock.
+        if let Some(mut subs) = EVENT_MANAGER.subscriptions.try_write() {
+            if let Some(entry) = subs.get_mut(&me.event_name) {
+                entry.last_used = Instant::now();
+            }
         }
 
         loop {
@@ -99,13 +102,14 @@ impl<T: DeserializeOwned + Unpin + 'static> Stream for EventSubscription<T> {
 
 impl<T> Drop for EventSubscription<T> {
     fn drop(&mut self) {
-        // Remove subscription from manager when dropped
-        if let Some(manager) = EVENT_MANAGER
-            .subscriptions
-            .write()
-            .get_mut(&self.event_name)
-        {
-            manager.last_used = Instant::now();
+        // Try to update last_used, but never block.
+        // cleanup_stale_subscriptions() holds this write lock while dropping
+        // entries via retain() — if Drop also tries to acquire the same lock,
+        // parking_lot deadlocks (it's not reentrant for write locks).
+        if let Some(mut subs) = EVENT_MANAGER.subscriptions.try_write() {
+            if let Some(entry) = subs.get_mut(&self.event_name) {
+                entry.last_used = Instant::now();
+            }
         }
     }
 }

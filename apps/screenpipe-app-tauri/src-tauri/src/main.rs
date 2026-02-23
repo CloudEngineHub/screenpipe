@@ -1795,8 +1795,11 @@ async fn main() {
                     .name("screenpipe-server".to_string())
                     .spawn(move || {
                         // Create a dedicated multi-threaded runtime for the server
+                        // Use 16 worker threads: several are permanently consumed by
+                        // blocking crossbeam channel calls (audio handlers, meeting watcher),
+                        // so we need enough headroom for async I/O and HTTP handling.
                         let server_runtime = tokio::runtime::Builder::new_multi_thread()
-                            .worker_threads(4)
+                            .worker_threads(16)
                             .thread_name("screenpipe-worker")
                             .enable_all()
                             .build()
