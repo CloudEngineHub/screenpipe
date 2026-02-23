@@ -97,19 +97,21 @@ impl ImmediateTx {
 impl Drop for ImmediateTx {
     fn drop(&mut self) {
         if !self.committed {
-            if let Some(mut conn) = self.conn.take() {
-                // Move the write permit into the rollback task so the semaphore
-                // is NOT released until the ROLLBACK actually completes and frees
-                // the SQLite write lock.
-                let permit = self._write_permit.take();
-                warn!("ImmediateTx dropped without commit — scheduling rollback");
-                tokio::spawn(async move {
-                    if let Err(e) = sqlx::query("ROLLBACK").execute(&mut *conn).await {
-                        error!("failed to rollback on drop: {}", e);
-                        let _raw = conn.detach();
-                    }
-                    drop(permit);
-                });
+            if let Some(conn) = self.conn.take() {
+                // Detach the connection immediately so it never returns to the pool
+                // with an open transaction. The previous approach (spawning an async
+                // ROLLBACK) had a race: if the rollback task hadn't completed before
+                // the connection was reused, the next caller would see
+                // "cannot start a transaction within a transaction" → stuck transaction
+                // cascade → pool exhaustion.
+                //
+                // Detaching drops the raw connection (SQLite auto-rollbacks on close).
+                // This "leaks" one pool slot temporarily, but the pool creates a
+                // replacement connection on next acquire(). Much safer than risking
+                // a stuck transaction that poisons the entire pool.
+                warn!("ImmediateTx dropped without commit — detaching connection");
+                let _raw = conn.detach();
+                // Release the write permit so other writers can proceed
             }
         }
     }
