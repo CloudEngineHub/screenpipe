@@ -27,6 +27,9 @@ pub struct AudioInsertInfo {
     pub start_time: Option<f64>,
     pub end_time: Option<f64>,
     pub speaker_id: Option<i64>,
+    /// Epoch seconds when the audio was originally captured (not processed).
+    /// Use this for timeline placement so deferred audio appears at the correct time.
+    pub capture_timestamp: u64,
 }
 
 /// Callback invoked after each successful audio transcription DB insert.
@@ -120,6 +123,7 @@ pub async fn handle_new_transcript(
         let end_time = Some(transcription.end_time);
         let duration_secs = transcription.end_time - transcription.start_time;
         let insert_transcription = current_transcript.clone().unwrap_or_default();
+        let capture_timestamp = transcription.input.capture_timestamp;
 
         // Process the transcription result
         match process_transcription_result(
@@ -160,6 +164,7 @@ pub async fn handle_new_transcript(
                         start_time,
                         end_time,
                         speaker_id: result.speaker_id,
+                        capture_timestamp,
                     });
                 }
             }

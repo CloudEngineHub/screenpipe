@@ -300,14 +300,21 @@ impl SCServer {
         });
 
         // Use pre-set hot frame cache or create a new one, then warm from DB.
-        // IMPORTANT: Await warm_from_db here (not spawned) so the cache has
-        // audio data before the first WebSocket client connects. Without this,
-        // the initial frame batch would have empty audio arrays.
+        // Spawn warm_from_db in the background — the cache starts empty but fills
+        // within seconds. This avoids blocking server start for 40+ seconds on large DBs.
+        // WS clients that connect before warm completes will see frames without audio
+        // initially, then audio appears as the cache populates.
         let hot_frame_cache = self
             .hot_frame_cache
             .clone()
             .unwrap_or_else(|| Arc::new(HotFrameCache::new()));
-        hot_frame_cache.warm_from_db(&self.db, 2).await;
+        {
+            let cache = hot_frame_cache.clone();
+            let db = self.db.clone();
+            tokio::spawn(async move {
+                cache.warm_from_db(&db, 2).await;
+            });
+        }
 
         let app_state = Arc::new(AppState {
             db: self.db.clone(),

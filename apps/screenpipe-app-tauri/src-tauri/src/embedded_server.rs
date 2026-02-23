@@ -146,10 +146,15 @@ pub async fn start_embedded_server(
         let rt = tokio::runtime::Handle::current();
         audio_manager.set_on_transcription_insert(std::sync::Arc::new(move |info| {
             let cache = cache.clone();
+            // Use the actual capture time (when audio was recorded), not Utc::now().
+            // In smart/batch mode, transcription can be deferred by minutes — using
+            // Utc::now() would place audio far from the frames it belongs to.
+            let ts = chrono::DateTime::from_timestamp(info.capture_timestamp as i64, 0)
+                .unwrap_or_else(chrono::Utc::now);
             rt.spawn(async move {
                 cache.push_audio(screenpipe_server::hot_frame_cache::HotAudio {
                     audio_chunk_id: info.audio_chunk_id,
-                    timestamp: chrono::Utc::now(),
+                    timestamp: ts,
                     transcription: info.transcription,
                     device_name: info.device_name,
                     is_input: info.is_input,

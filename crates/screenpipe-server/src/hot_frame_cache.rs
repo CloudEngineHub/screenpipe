@@ -238,12 +238,15 @@ impl HotFrameCache {
     }
 }
 
-/// Find audio entries within ±15s of a frame timestamp (same window as find_video_chunks).
+/// Find audio entries within ±60s of a frame timestamp.
+/// Wider than the DB's ±15s window because smart/batch mode can delay
+/// transcription by minutes — audio is keyed by capture_timestamp which
+/// may differ from frame timestamps by up to the chunk duration (~30s).
 fn find_audio_for_frame(
     audio_map: &BTreeMap<DateTime<Utc>, Vec<HotAudio>>,
     frame_ts: DateTime<Utc>,
 ) -> Vec<AudioEntry> {
-    let pad = chrono::Duration::seconds(15);
+    let pad = chrono::Duration::seconds(60);
     let search_start = frame_ts - pad;
     let search_end = frame_ts + pad;
 
