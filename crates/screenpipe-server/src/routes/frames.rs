@@ -93,7 +93,11 @@ pub async fn get_frame_data(
                             cache.put(frame_id, (file_path.clone(), Instant::now()));
                         }
                     }
-                    debug!("Snapshot frame {} served in {:?}", frame_id, start_time.elapsed());
+                    debug!(
+                        "Snapshot frame {} served in {:?}",
+                        frame_id,
+                        start_time.elapsed()
+                    );
                     return serve_file(&file_path).await;
                 }
 
@@ -454,14 +458,13 @@ pub async fn get_frame_context(
     Path(frame_id): Path<i64>,
 ) -> Result<JsonResponse<FrameContextResponse>, (StatusCode, JsonResponse<Value>)> {
     // Try to get accessibility data; gracefully handle missing columns (pre-migration DBs)
-    let (a11y_text, a11y_tree_json) = match state
-        .db
-        .get_frame_accessibility_data(frame_id)
-        .await
-    {
+    let (a11y_text, a11y_tree_json) = match state.db.get_frame_accessibility_data(frame_id).await {
         Ok(data) => data,
         Err(e) => {
-            debug!("Accessibility data unavailable for frame {} ({}), falling back to OCR", frame_id, e);
+            debug!(
+                "Accessibility data unavailable for frame {} ({}), falling back to OCR",
+                frame_id, e
+            );
             (None, None)
         }
     };
@@ -485,10 +488,7 @@ pub async fn get_frame_context(
                         .and_then(|v| v.as_str())
                         .unwrap_or("")
                         .to_string();
-                    let depth = node_val
-                        .get("depth")
-                        .and_then(|v| v.as_u64())
-                        .unwrap_or(0) as u32;
+                    let depth = node_val.get("depth").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
 
                     if !text.is_empty() {
                         nodes.push(AccessibilityNode {
@@ -568,7 +568,13 @@ fn extract_url_from_text(text: &str) -> Option<String> {
     let trimmed = text.trim();
     if trimmed.starts_with("http://") || trimmed.starts_with("https://") {
         // Take just the URL part (stop at whitespace)
-        Some(trimmed.split_whitespace().next().unwrap_or(trimmed).to_string())
+        Some(
+            trimmed
+                .split_whitespace()
+                .next()
+                .unwrap_or(trimmed)
+                .to_string(),
+        )
     } else {
         None
     }
@@ -578,8 +584,11 @@ fn extract_url_from_text(text: &str) -> Option<String> {
 fn extract_urls_regex(text: &str) -> Vec<String> {
     let mut urls = Vec::new();
     for word in text.split_whitespace() {
-        let trimmed = word.trim_matches(|c: char| c == ',' || c == ')' || c == ']' || c == '>' || c == '"' || c == '\'');
-        if (trimmed.starts_with("http://") || trimmed.starts_with("https://")) && trimmed.len() > 10 {
+        let trimmed = word.trim_matches(|c: char| {
+            c == ',' || c == ')' || c == ']' || c == '>' || c == '"' || c == '\''
+        });
+        if (trimmed.starts_with("http://") || trimmed.starts_with("https://")) && trimmed.len() > 10
+        {
             urls.push(trimmed.to_string());
         }
     }

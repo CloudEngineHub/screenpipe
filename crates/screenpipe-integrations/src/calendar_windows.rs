@@ -46,12 +46,11 @@ pub struct ScreenpipeCalendar {
 impl ScreenpipeCalendar {
     /// Open the appointment store. Desktop apps get access without a popup.
     pub fn new() -> Result<Self, String> {
-        let store = AppointmentManager::RequestStoreAsync(
-            AppointmentStoreAccessType::AllCalendarsReadOnly,
-        )
-        .map_err(|e| format!("RequestStoreAsync failed: {}", e))?
-        .get()
-        .map_err(|e| format!("failed to open appointment store: {}", e))?;
+        let store =
+            AppointmentManager::RequestStoreAsync(AppointmentStoreAccessType::AllCalendarsReadOnly)
+                .map_err(|e| format!("RequestStoreAsync failed: {}", e))?
+                .get()
+                .map_err(|e| format!("failed to open appointment store: {}", e))?;
 
         Ok(Self { store })
     }
@@ -76,10 +75,7 @@ impl ScreenpipeCalendar {
         for i in 0..calendars.Size().unwrap_or(0) {
             if let Ok(cal) = calendars.GetAt(i) {
                 let id = cal.LocalId().map(|s| s.to_string()).unwrap_or_default();
-                let name = cal
-                    .DisplayName()
-                    .map(|s| s.to_string())
-                    .unwrap_or_default();
+                let name = cal.DisplayName().map(|s| s.to_string()).unwrap_or_default();
                 result.push((id, name));
             }
         }
@@ -144,10 +140,7 @@ impl ScreenpipeCalendar {
                 .map(|s| s.to_string())
                 .filter(|s| !s.is_empty());
             let is_all_day = appt.AllDay().unwrap_or(false);
-            let id = appt
-                .LocalId()
-                .map(|s| s.to_string())
-                .unwrap_or_default();
+            let id = appt.LocalId().map(|s| s.to_string()).unwrap_or_default();
 
             // Calendar name: look up via CalendarId
             let calendar_name = appt
@@ -164,14 +157,11 @@ impl ScreenpipeCalendar {
                 .unwrap_or_default();
 
             // Time conversion
-            let win_start = appt
-                .StartTime()
-                .map_err(|e| format!("StartTime: {}", e))?;
+            let win_start = appt.StartTime().map_err(|e| format!("StartTime: {}", e))?;
             let win_duration = appt.Duration().map_err(|e| format!("Duration: {}", e))?;
 
             let start_utc = win_datetime_to_utc(&win_start);
-            let end_utc = start_utc
-                + chrono::Duration::nanoseconds(win_duration.Duration * 100);
+            let end_utc = start_utc + chrono::Duration::nanoseconds(win_duration.Duration * 100);
             let start_local = start_utc.with_timezone(&Local);
             let end_local = end_utc.with_timezone(&Local);
 

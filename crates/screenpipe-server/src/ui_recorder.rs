@@ -279,9 +279,7 @@ pub async fn start_ui_recording(
                                     window_name: db_event.window_title.clone().unwrap_or_default(),
                                 })
                             }
-                            screenpipe_db::UiEventType::Click => {
-                                Some(CaptureTrigger::Click)
-                            }
+                            screenpipe_db::UiEventType::Click => Some(CaptureTrigger::Click),
                             screenpipe_db::UiEventType::Clipboard => {
                                 Some(CaptureTrigger::Clipboard)
                             }
@@ -646,7 +644,9 @@ impl UiRecorderHandle {
 pub async fn start_ui_recording(
     _db: std::sync::Arc<screenpipe_db::DatabaseManager>,
     _config: UiRecorderConfig,
-    _capture_trigger_tx: Option<tokio::sync::broadcast::Sender<crate::event_driven_capture::CaptureTrigger>>,
+    _capture_trigger_tx: Option<
+        tokio::sync::broadcast::Sender<crate::event_driven_capture::CaptureTrigger>,
+    >,
 ) -> anyhow::Result<UiRecorderHandle> {
     Ok(UiRecorderHandle)
 }

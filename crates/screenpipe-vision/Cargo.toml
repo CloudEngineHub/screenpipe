@@ -34,7 +34,6 @@ rusty-tesseract = { git = "https://github.com/screenpipe/rusty-tesseract.git", b
 anyhow = "1.0.86"
 
 image-compare = "0.4.1"
-clap = { version = "4.0", features = ["derive"] }
 
 # Integrations
 screenpipe-integrations = { path = "../screenpipe-integrations" }
@@ -43,7 +42,6 @@ screenpipe-integrations = { path = "../screenpipe-integrations" }
 screenpipe-core = { path = "../screenpipe-core" }
 screenpipe-db = { path = "../screenpipe-db" }
 
-tracing-subscriber = { workspace = true }
 tracing = { workspace = true }
 serde = "1.0.200"
 
@@ -58,17 +56,10 @@ criterion = { workspace = true }
 strsim = "0.10.0"
 memory-stats = "1.2.0"
 
-# websocket example
-futures-util = "0.3"
-tokio-tungstenite = "0.24"
 serde = "1.0.200"
 
 [package.metadata.osx]
 framework = ["Vision", "AppKit"]
-
-[[bench]]
-name = "vision_benchmark"
-harness = false
 
 [[bench]]
 name = "ocr_benchmark"
@@ -85,10 +76,6 @@ harness = false
 [[bench]]
 name = "multi_monitor_bench"
 harness = false
-
-[[example]]
-name = "screenpipe-vision-websocket"
-path = "examples/websocket.rs"
 
 # Platform-specific dependencies
 

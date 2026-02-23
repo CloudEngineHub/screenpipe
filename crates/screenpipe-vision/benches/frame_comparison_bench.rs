@@ -201,8 +201,7 @@ fn bench_static_vs_active_scenario(c: &mut Criterion) {
         b.iter(|| {
             let mut comparer = FrameComparer::new(FrameComparisonConfig::default());
             for frame in &static_frames {
-                let hash = calculate_image_hash(frame);
-                comparer.compare(black_box(frame), hash);
+                comparer.compare(black_box(frame));
             }
         });
     });
@@ -225,8 +224,7 @@ fn bench_static_vs_active_scenario(c: &mut Criterion) {
         b.iter(|| {
             let mut comparer = FrameComparer::new(FrameComparisonConfig::default());
             for frame in &active_frames {
-                let hash = calculate_image_hash(frame);
-                comparer.compare(black_box(frame), hash);
+                comparer.compare(black_box(frame));
             }
         });
     });

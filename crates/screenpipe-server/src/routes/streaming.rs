@@ -277,9 +277,8 @@ async fn handle_stream_frames_socket(
 
                         if is_today {
                             // Read from hot cache — pure in-memory, <1ms
-                            let frames = cache_clone
-                                .get_frames_in_range(start_time, end_time)
-                                .await;
+                            let frames =
+                                cache_clone.get_frames_in_range(start_time, end_time).await;
 
                             let mut sorted = frames;
                             if is_descending {
@@ -517,7 +516,6 @@ async fn fetch_and_process_frames_with_tracking(
 
     Ok(latest_timestamp)
 }
-
 
 // Helper function to send batched frames
 async fn send_batch(

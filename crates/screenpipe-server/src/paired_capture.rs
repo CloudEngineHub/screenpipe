@@ -21,7 +21,7 @@ use std::time::Instant;
 use tracing::{debug, warn};
 
 #[cfg(feature = "ui-events")]
-use screenpipe_accessibility::tree::{TreeSnapshot, TreeWalkerConfig, create_tree_walker};
+use screenpipe_accessibility::tree::{create_tree_walker, TreeSnapshot, TreeWalkerConfig};
 
 /// Context for a paired capture operation — replaces positional arguments.
 pub struct CaptureContext<'a> {

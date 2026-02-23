@@ -61,10 +61,8 @@ pub async fn poll_meetings_events() -> Result<()> {
             "calendar_events" => {
                 // Signal #5: Calendar events from the event bus
                 if let Ok(events) = serde_json::from_value::<Vec<CalendarEventSignal>>(event) {
-                    current_calendar_events = events
-                        .into_iter()
-                        .filter(|e| !e.is_all_day)
-                        .collect();
+                    current_calendar_events =
+                        events.into_iter().filter(|e| !e.is_all_day).collect();
 
                     // Proactive detection: if a non-all-day calendar event with 2+ attendees
                     // started within the last 2 minutes, emit meeting_started
@@ -89,14 +87,9 @@ pub async fn poll_meetings_events() -> Result<()> {
                                             let _ = send_event(
                                                 "meeting_started",
                                                 MeetingEvent {
-                                                    app: format!(
-                                                        "Calendar: {}",
-                                                        cal_event.title
-                                                    ),
+                                                    app: format!("Calendar: {}", cal_event.title),
                                                     timestamp: Utc::now(),
-                                                    calendar_title: Some(
-                                                        cal_event.title.clone(),
-                                                    ),
+                                                    calendar_title: Some(cal_event.title.clone()),
                                                     calendar_attendees: Some(
                                                         cal_event.attendees.clone(),
                                                     ),
@@ -134,7 +127,8 @@ pub async fn poll_meetings_events() -> Result<()> {
                     && last_meeting_end.is_none_or(|t| t.elapsed() >= MEETING_RESTART_TIMEOUT)
                 {
                     meeting_in_progress = true;
-                    let (cal_title, cal_attendees) = find_overlapping_calendar_event(&current_calendar_events);
+                    let (cal_title, cal_attendees) =
+                        find_overlapping_calendar_event(&current_calendar_events);
                     send_event(
                         "meeting_started",
                         MeetingEvent {
@@ -195,7 +189,8 @@ pub async fn poll_meetings_events() -> Result<()> {
                     && last_meeting_end.is_none_or(|t| t.elapsed() >= MEETING_RESTART_TIMEOUT)
                 {
                     meeting_in_progress = true;
-                    let (cal_title, cal_attendees) = find_overlapping_calendar_event(&current_calendar_events);
+                    let (cal_title, cal_attendees) =
+                        find_overlapping_calendar_event(&current_calendar_events);
                     send_event(
                         "meeting_started",
                         MeetingEvent {
@@ -240,7 +235,8 @@ pub async fn poll_meetings_events() -> Result<()> {
                         && last_meeting_end.is_none_or(|t| t.elapsed() >= MEETING_RESTART_TIMEOUT)
                     {
                         meeting_in_progress = true;
-                        let (cal_title, cal_attendees) = find_overlapping_calendar_event(&current_calendar_events);
+                        let (cal_title, cal_attendees) =
+                            find_overlapping_calendar_event(&current_calendar_events);
                         send_event(
                             "meeting_started",
                             MeetingEvent {

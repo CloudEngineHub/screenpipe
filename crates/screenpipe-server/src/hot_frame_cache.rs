@@ -150,18 +150,11 @@ impl HotFrameCache {
     }
 
     /// Warm the cache from DB on cold start (load last N hours).
-    pub async fn warm_from_db(
-        &self,
-        db: &screenpipe_db::DatabaseManager,
-        hours: i64,
-    ) {
+    pub async fn warm_from_db(&self, db: &screenpipe_db::DatabaseManager, hours: i64) {
         let end = Utc::now();
         let start = end - chrono::Duration::hours(hours);
 
-        info!(
-            "hot_frame_cache: warming from DB ({} to {})",
-            start, end
-        );
+        info!("hot_frame_cache: warming from DB ({} to {})", start, end);
 
         match db.find_video_chunks(start, end).await {
             Ok(chunks) => {
@@ -217,10 +210,7 @@ impl HotFrameCache {
                     }
                 }
 
-                info!(
-                    "hot_frame_cache: warmed with {} frame entries",
-                    frame_count
-                );
+                info!("hot_frame_cache: warmed with {} frame entries", frame_count);
             }
             Err(e) => {
                 warn!("hot_frame_cache: failed to warm from DB: {}", e);

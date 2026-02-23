@@ -182,9 +182,7 @@ impl VisionManager {
         monitor_id: u32,
         monitor: screenpipe_vision::monitor::SafeMonitor,
     ) -> Result<JoinHandle<()>> {
-        use crate::event_driven_capture::{
-            event_driven_capture_loop, EventDrivenCaptureConfig,
-        };
+        use crate::event_driven_capture::{event_driven_capture_loop, EventDrivenCaptureConfig};
         use screenpipe_accessibility::tree::TreeWalkerConfig;
         use screenpipe_accessibility::ActivityFeed;
         use screenpipe_vision::snapshot_writer::SnapshotWriter;
@@ -247,10 +245,7 @@ impl VisionManager {
                     monitor_id, e
                 );
             }
-            info!(
-                "Event-driven capture for monitor {} exited",
-                monitor_id
-            );
+            info!("Event-driven capture for monitor {} exited", monitor_id);
         });
 
         Ok(handle)

@@ -454,14 +454,10 @@ pub async fn list_monitors_detailed() -> std::result::Result<Vec<SafeMonitor>, M
                 tracing::debug!("Using sck-rs for screen capture (macOS 12.3+)");
                 match SckMonitor::all() {
                     Ok(monitors) if monitors.is_empty() => Err(MonitorListError::NoMonitorsFound),
-                    Ok(monitors) => {
-                        Ok(monitors.into_iter().map(SafeMonitor::from_sck).collect())
-                    }
+                    Ok(monitors) => Ok(monitors.into_iter().map(SafeMonitor::from_sck).collect()),
                     Err(e) => {
                         let err_str = e.to_string();
-                        if err_str.contains("permission")
-                            || err_str.contains("Screen recording")
-                        {
+                        if err_str.contains("permission") || err_str.contains("Screen recording") {
                             Err(MonitorListError::PermissionDenied)
                         } else if err_str.contains("No monitors") {
                             Err(MonitorListError::NoMonitorsFound)
@@ -474,14 +470,10 @@ pub async fn list_monitors_detailed() -> std::result::Result<Vec<SafeMonitor>, M
                 tracing::info!("Using xcap fallback for screen capture (macOS < 12.3)");
                 match XcapMonitor::all() {
                     Ok(monitors) if monitors.is_empty() => Err(MonitorListError::NoMonitorsFound),
-                    Ok(monitors) => {
-                        Ok(monitors.into_iter().map(SafeMonitor::from_xcap).collect())
-                    }
+                    Ok(monitors) => Ok(monitors.into_iter().map(SafeMonitor::from_xcap).collect()),
                     Err(e) => {
                         let err_str = e.to_string();
-                        if err_str.contains("permission")
-                            || err_str.contains("Screen recording")
-                        {
+                        if err_str.contains("permission") || err_str.contains("Screen recording") {
                             Err(MonitorListError::PermissionDenied)
                         } else {
                             Err(MonitorListError::Other(err_str))

@@ -12,7 +12,9 @@
 //! All operations are synchronous and safe to call from a tokio blocking task.
 
 use chrono::{DateTime, Duration, Local, TimeZone, Utc};
-use eventkit::{AuthorizationStatus, CalendarInfo, EventKitError, EventsManager, Result as EKResult};
+use eventkit::{
+    AuthorizationStatus, CalendarInfo, EventKitError, EventsManager, Result as EKResult,
+};
 use objc2::rc::Retained;
 use objc2_event_kit::{EKCalendar, EKEventStore};
 use objc2_foundation::{NSArray, NSDate};
@@ -84,10 +86,8 @@ impl ScreenpipeCalendar {
     /// Get events happening right now.
     pub fn get_current_events(&self) -> EKResult<Vec<CalendarEvent>> {
         let now = Local::now();
-        let events = self.fetch_events_with_attendees(
-            now - Duration::minutes(1),
-            now + Duration::minutes(1),
-        )?;
+        let events = self
+            .fetch_events_with_attendees(now - Duration::minutes(1), now + Duration::minutes(1))?;
         // Filter to events that actually overlap with now
         let now_utc = Utc::now();
         Ok(events

@@ -552,10 +552,7 @@ pub(crate) async fn execute_raw_sql(
 ) -> Result<JsonResponse<serde_json::Value>, (StatusCode, JsonResponse<serde_json::Value>)> {
     // Pre-execution validation: catch unbounded queries before they hit the DB
     if let Err(msg) = validate_raw_sql(&payload.query) {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            JsonResponse(json!({"error": msg})),
-        ));
+        return Err((StatusCode::BAD_REQUEST, JsonResponse(json!({"error": msg}))));
     }
 
     match state.db.execute_raw_sql(&payload.query).await {

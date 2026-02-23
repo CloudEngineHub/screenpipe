@@ -1075,12 +1075,20 @@ mod tests {
         // But frame 9 (last Chrome) → frame 10 (first VS Code) = 1s gap → assigned to Chrome
         let chrome = result.iter().find(|e| e.app_name == "Chrome").unwrap();
         assert_eq!(chrome.frame_count, 10);
-        assert!((chrome.duration_secs - 10.0).abs() < 0.1, "Chrome: {}", chrome.duration_secs);
+        assert!(
+            (chrome.duration_secs - 10.0).abs() < 0.1,
+            "Chrome: {}",
+            chrome.duration_secs
+        );
 
         // VS Code: frames at 10..14, gaps = 4 seconds (10→11, ..., 13→14), last frame has 0
         let vscode = result.iter().find(|e| e.app_name == "VS Code").unwrap();
         assert_eq!(vscode.frame_count, 5);
-        assert!((vscode.duration_secs - 4.0).abs() < 0.1, "VS Code: {}", vscode.duration_secs);
+        assert!(
+            (vscode.duration_secs - 4.0).abs() < 0.1,
+            "VS Code: {}",
+            vscode.duration_secs
+        );
     }
 
     #[test]
@@ -1099,18 +1107,37 @@ mod tests {
 
         let result = compute_app_usage(&frames, 300.0);
         let chrome = &result[0];
-        assert!((chrome.duration_secs - 300.0).abs() < 0.1, "Should cap at 300s, got {}", chrome.duration_secs);
+        assert!(
+            (chrome.duration_secs - 300.0).abs() < 0.1,
+            "Should cap at 300s, got {}",
+            chrome.duration_secs
+        );
     }
 
     #[test]
     fn test_compute_app_usage_interleaved() {
         // Simulate switching between apps every 2 seconds
         let frames = vec![
-            FrameTimestamp { timestamp: "2026-02-20T10:00:00Z".into(), app_name: "Chrome".into() },
-            FrameTimestamp { timestamp: "2026-02-20T10:00:02Z".into(), app_name: "Slack".into() },
-            FrameTimestamp { timestamp: "2026-02-20T10:00:04Z".into(), app_name: "Chrome".into() },
-            FrameTimestamp { timestamp: "2026-02-20T10:00:06Z".into(), app_name: "Slack".into() },
-            FrameTimestamp { timestamp: "2026-02-20T10:00:08Z".into(), app_name: "Chrome".into() },
+            FrameTimestamp {
+                timestamp: "2026-02-20T10:00:00Z".into(),
+                app_name: "Chrome".into(),
+            },
+            FrameTimestamp {
+                timestamp: "2026-02-20T10:00:02Z".into(),
+                app_name: "Slack".into(),
+            },
+            FrameTimestamp {
+                timestamp: "2026-02-20T10:00:04Z".into(),
+                app_name: "Chrome".into(),
+            },
+            FrameTimestamp {
+                timestamp: "2026-02-20T10:00:06Z".into(),
+                app_name: "Slack".into(),
+            },
+            FrameTimestamp {
+                timestamp: "2026-02-20T10:00:08Z".into(),
+                app_name: "Chrome".into(),
+            },
         ];
 
         let result = compute_app_usage(&frames, 300.0);
@@ -1128,22 +1155,44 @@ mod tests {
     #[test]
     fn test_compute_app_usage_percentages() {
         let frames = vec![
-            FrameTimestamp { timestamp: "2026-02-20T10:00:00Z".into(), app_name: "A".into() },
-            FrameTimestamp { timestamp: "2026-02-20T10:00:30Z".into(), app_name: "B".into() },
-            FrameTimestamp { timestamp: "2026-02-20T10:01:00Z".into(), app_name: "A".into() },
+            FrameTimestamp {
+                timestamp: "2026-02-20T10:00:00Z".into(),
+                app_name: "A".into(),
+            },
+            FrameTimestamp {
+                timestamp: "2026-02-20T10:00:30Z".into(),
+                app_name: "B".into(),
+            },
+            FrameTimestamp {
+                timestamp: "2026-02-20T10:01:00Z".into(),
+                app_name: "A".into(),
+            },
         ];
 
         let result = compute_app_usage(&frames, 300.0);
         let total_pct: f64 = result.iter().map(|e| e.percentage).sum();
-        assert!((total_pct - 100.0).abs() < 0.1, "Percentages should sum to 100, got {}", total_pct);
+        assert!(
+            (total_pct - 100.0).abs() < 0.1,
+            "Percentages should sum to 100, got {}",
+            total_pct
+        );
     }
 
     #[test]
     fn test_compute_app_usage_skips_empty_names() {
         let frames = vec![
-            FrameTimestamp { timestamp: "2026-02-20T10:00:00Z".into(), app_name: "".into() },
-            FrameTimestamp { timestamp: "2026-02-20T10:00:01Z".into(), app_name: "Chrome".into() },
-            FrameTimestamp { timestamp: "2026-02-20T10:00:02Z".into(), app_name: "".into() },
+            FrameTimestamp {
+                timestamp: "2026-02-20T10:00:00Z".into(),
+                app_name: "".into(),
+            },
+            FrameTimestamp {
+                timestamp: "2026-02-20T10:00:01Z".into(),
+                app_name: "Chrome".into(),
+            },
+            FrameTimestamp {
+                timestamp: "2026-02-20T10:00:02Z".into(),
+                app_name: "".into(),
+            },
         ];
 
         let result = compute_app_usage(&frames, 300.0);
@@ -1157,10 +1206,22 @@ mod tests {
     fn test_compute_app_usage_unsorted_input() {
         // Frames arrive out of order — should still work
         let frames = vec![
-            FrameTimestamp { timestamp: "2026-02-20T10:00:04Z".into(), app_name: "B".into() },
-            FrameTimestamp { timestamp: "2026-02-20T10:00:00Z".into(), app_name: "A".into() },
-            FrameTimestamp { timestamp: "2026-02-20T10:00:02Z".into(), app_name: "A".into() },
-            FrameTimestamp { timestamp: "2026-02-20T10:00:06Z".into(), app_name: "B".into() },
+            FrameTimestamp {
+                timestamp: "2026-02-20T10:00:04Z".into(),
+                app_name: "B".into(),
+            },
+            FrameTimestamp {
+                timestamp: "2026-02-20T10:00:00Z".into(),
+                app_name: "A".into(),
+            },
+            FrameTimestamp {
+                timestamp: "2026-02-20T10:00:02Z".into(),
+                app_name: "A".into(),
+            },
+            FrameTimestamp {
+                timestamp: "2026-02-20T10:00:06Z".into(),
+                app_name: "B".into(),
+            },
         ];
 
         let result = compute_app_usage(&frames, 300.0);
@@ -1304,7 +1365,10 @@ mod tests {
 
         println!("\n--- AI Analysis ---");
         println!("Response:\n{}\n", result.text);
-        println!("Time: {:.0}ms (wall: {:?})", result.metrics.total_time_ms, wall_time);
+        println!(
+            "Time: {:.0}ms (wall: {:?})",
+            result.metrics.total_time_ms, wall_time
+        );
         println!(
             "Prompt size: {} chars (~{} tokens)",
             context.len(),

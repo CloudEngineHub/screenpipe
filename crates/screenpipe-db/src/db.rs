@@ -214,7 +214,7 @@ impl DatabaseManager {
         let mut migrator = sqlx::migrate!("./src/migrations");
         migrator.set_ignore_missing(true);
         match migrator.run(pool).await {
-            Ok(_) => {},
+            Ok(_) => {}
             Err(e) => {
                 let err_str = e.to_string();
                 // Handle checksum mismatch from modified migrations.
@@ -281,12 +281,11 @@ impl DatabaseManager {
         ];
 
         for (col_name, col_type) in missing_columns {
-            let row: (i64,) = sqlx::query_as(
-                "SELECT COUNT(*) FROM pragma_table_info('frames') WHERE name = ?1",
-            )
-            .bind(col_name)
-            .fetch_one(pool)
-            .await?;
+            let row: (i64,) =
+                sqlx::query_as("SELECT COUNT(*) FROM pragma_table_info('frames') WHERE name = ?1")
+                    .bind(col_name)
+                    .fetch_one(pool)
+                    .await?;
 
             if row.0 == 0 {
                 tracing::info!("Adding missing column frames.{}", col_name);
@@ -325,7 +324,7 @@ impl DatabaseManager {
             sqlx::query(
                 "CREATE VIRTUAL TABLE IF NOT EXISTS frames_fts USING fts5(\
                     name, browser_url, app_name, window_name, focused, \
-                    accessibility_text, id UNINDEXED, tokenize='unicode61')"
+                    accessibility_text, id UNINDEXED, tokenize='unicode61')",
             )
             .execute(pool)
             .await?;
@@ -375,7 +374,7 @@ impl DatabaseManager {
             sqlx::query(
                 "CREATE TRIGGER IF NOT EXISTS frames_ad AFTER DELETE ON frames BEGIN \
                     DELETE FROM frames_fts WHERE id = OLD.id; \
-                END"
+                END",
             )
             .execute(pool)
             .await?;
@@ -415,16 +414,12 @@ impl DatabaseManager {
         let max_retries = 3;
         let mut last_error = None;
         for attempt in 1..=max_retries {
-            let mut conn = match tokio::time::timeout(
-                Duration::from_secs(3),
-                self.pool.acquire(),
-            )
-            .await
-            {
-                Ok(Ok(conn)) => conn,
-                Ok(Err(e)) => return Err(e),
-                Err(_) => return Err(sqlx::Error::PoolTimedOut),
-            };
+            let mut conn =
+                match tokio::time::timeout(Duration::from_secs(3), self.pool.acquire()).await {
+                    Ok(Ok(conn)) => conn,
+                    Ok(Err(e)) => return Err(e),
+                    Err(_) => return Err(sqlx::Error::PoolTimedOut),
+                };
             match sqlx::query("BEGIN IMMEDIATE").execute(&mut *conn).await {
                 Ok(_) => {
                     return Ok(ImmediateTx {
@@ -464,12 +459,10 @@ impl DatabaseManager {
     /// Check if the error indicates a stuck/nested transaction on the connection.
     fn is_nested_transaction_error(e: &sqlx::Error) -> bool {
         match e {
-            sqlx::Error::Database(db_err) => {
-                db_err
-                    .message()
-                    .to_lowercase()
-                    .contains("cannot start a transaction within a transaction")
-            }
+            sqlx::Error::Database(db_err) => db_err
+                .message()
+                .to_lowercase()
+                .contains("cannot start a transaction within a transaction"),
             _ => false,
         }
     }
@@ -1083,10 +1076,22 @@ impl DatabaseManager {
         simhash: Option<i64>,
     ) -> Result<i64, sqlx::Error> {
         self.insert_snapshot_frame_with_ocr(
-            device_name, timestamp, snapshot_path, app_name, window_name,
-            browser_url, focused, capture_trigger, accessibility_text, text_source,
-            accessibility_tree_json, content_hash, simhash, None,
-        ).await
+            device_name,
+            timestamp,
+            snapshot_path,
+            app_name,
+            window_name,
+            browser_url,
+            focused,
+            capture_trigger,
+            accessibility_text,
+            text_source,
+            accessibility_tree_json,
+            content_hash,
+            simhash,
+            None,
+        )
+        .await
     }
 
     /// Insert a snapshot frame AND optional OCR text positions in a single transaction.
@@ -1158,7 +1163,12 @@ impl DatabaseManager {
         }
 
         tx.commit().await?;
-        debug!("insert_snapshot_frame: id={}, trigger={:?}, has_ocr={}", id, capture_trigger, ocr_data.is_some());
+        debug!(
+            "insert_snapshot_frame: id={}, trigger={:?}, has_ocr={}",
+            id,
+            capture_trigger,
+            ocr_data.is_some()
+        );
         Ok(id)
     }
 
@@ -1934,12 +1944,11 @@ impl DatabaseManager {
         frame_id: i64,
     ) -> Result<Option<(String, i64, bool)>, sqlx::Error> {
         // First check if it's a snapshot frame
-        let snapshot: Option<(Option<String>,)> = sqlx::query_as(
-            "SELECT snapshot_path FROM frames WHERE id = ?1",
-        )
-        .bind(frame_id)
-        .fetch_optional(&self.pool)
-        .await?;
+        let snapshot: Option<(Option<String>,)> =
+            sqlx::query_as("SELECT snapshot_path FROM frames WHERE id = ?1")
+                .bind(frame_id)
+                .fetch_optional(&self.pool)
+                .await?;
 
         match snapshot {
             Some((Some(path),)) => Ok(Some((path, 0, true))),
@@ -2729,23 +2738,15 @@ impl DatabaseManager {
                 audio_entries: Vec::new(),
             });
 
-            let text: String = row
-                .try_get::<String, _>("text")
-                .unwrap_or_default();
-            let video_path: String = row
-                .try_get::<String, _>("video_path")
-                .unwrap_or_default();
+            let text: String = row.try_get::<String, _>("text").unwrap_or_default();
+            let video_path: String = row.try_get::<String, _>("video_path").unwrap_or_default();
             // Create an entry if we have text OR a file path (event-driven snapshots
             // may have no OCR text but still need to appear on the timeline).
             if !text.is_empty() || !video_path.is_empty() {
                 frame_data.ocr_entries.push(OCREntry {
                     text,
-                    app_name: row
-                        .try_get::<String, _>("app_name")
-                        .unwrap_or_default(),
-                    window_name: row
-                        .try_get::<String, _>("window_name")
-                        .unwrap_or_default(),
+                    app_name: row.try_get::<String, _>("app_name").unwrap_or_default(),
+                    window_name: row.try_get::<String, _>("window_name").unwrap_or_default(),
                     device_name: row
                         .try_get::<String, _>("screen_device")
                         .unwrap_or_default(),
@@ -3399,13 +3400,11 @@ impl DatabaseManager {
         let ocr_deleted = ocr_result.rows_affected();
 
         // 5. Delete frames — triggers frames_fts delete; vision_tags CASCADE'd automatically
-        let frames_result = sqlx::query(
-            "DELETE FROM frames WHERE timestamp BETWEEN ?1 AND ?2",
-        )
-        .bind(&start_str)
-        .bind(&end_str)
-        .execute(&mut **tx.conn())
-        .await?;
+        let frames_result = sqlx::query("DELETE FROM frames WHERE timestamp BETWEEN ?1 AND ?2")
+            .bind(&start_str)
+            .bind(&end_str)
+            .execute(&mut **tx.conn())
+            .await?;
         let frames_deleted = frames_result.rows_affected();
 
         // 6. Delete orphaned video_chunks (no frames reference them anymore)
@@ -3417,13 +3416,12 @@ impl DatabaseManager {
         let video_chunks_deleted = video_chunks_result.rows_affected();
 
         // 7. Delete audio_transcriptions — triggers audio_transcriptions_fts delete
-        let audio_transcriptions_result = sqlx::query(
-            "DELETE FROM audio_transcriptions WHERE timestamp BETWEEN ?1 AND ?2",
-        )
-        .bind(&start_str)
-        .bind(&end_str)
-        .execute(&mut **tx.conn())
-        .await?;
+        let audio_transcriptions_result =
+            sqlx::query("DELETE FROM audio_transcriptions WHERE timestamp BETWEEN ?1 AND ?2")
+                .bind(&start_str)
+                .bind(&end_str)
+                .execute(&mut **tx.conn())
+                .await?;
         let audio_transcriptions_deleted = audio_transcriptions_result.rows_affected();
 
         // 8. Delete orphaned audio_chunks — audio_tags CASCADE'd automatically
@@ -3435,23 +3433,21 @@ impl DatabaseManager {
         let audio_chunks_deleted = audio_chunks_result.rows_affected();
 
         // 9. Delete accessibility — triggers accessibility_fts delete
-        let accessibility_result = sqlx::query(
-            "DELETE FROM accessibility WHERE timestamp BETWEEN ?1 AND ?2",
-        )
-        .bind(&start_str)
-        .bind(&end_str)
-        .execute(&mut **tx.conn())
-        .await?;
+        let accessibility_result =
+            sqlx::query("DELETE FROM accessibility WHERE timestamp BETWEEN ?1 AND ?2")
+                .bind(&start_str)
+                .bind(&end_str)
+                .execute(&mut **tx.conn())
+                .await?;
         let accessibility_deleted = accessibility_result.rows_affected();
 
         // 10. Delete ui_events — triggers ui_events_fts delete
-        let ui_events_result = sqlx::query(
-            "DELETE FROM ui_events WHERE timestamp BETWEEN ?1 AND ?2",
-        )
-        .bind(&start_str)
-        .bind(&end_str)
-        .execute(&mut **tx.conn())
-        .await?;
+        let ui_events_result =
+            sqlx::query("DELETE FROM ui_events WHERE timestamp BETWEEN ?1 AND ?2")
+                .bind(&start_str)
+                .bind(&end_str)
+                .execute(&mut **tx.conn())
+                .await?;
         let ui_events_deleted = ui_events_result.rows_affected();
 
         // 11. Commit — if this fails, no files are touched (auto-rollback)

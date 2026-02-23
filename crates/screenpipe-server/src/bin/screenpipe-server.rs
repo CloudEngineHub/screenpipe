@@ -25,14 +25,13 @@ use screenpipe_db::DatabaseManager;
 use screenpipe_server::{
     analytics,
     cli::{
-        get_or_create_machine_id, AudioCommand, Cli, CliAudioTranscriptionEngine,
-        Command, McpCommand, OutputFormat, RecordArgs, SyncCommand, VisionCommand,
+        get_or_create_machine_id, AudioCommand, Cli, CliAudioTranscriptionEngine, Command,
+        McpCommand, OutputFormat, RecordArgs, SyncCommand, VisionCommand,
     },
     cli_pipe::handle_pipe_command,
     cli_status::handle_status_command,
     hot_frame_cache::HotFrameCache,
-    start_meeting_watcher, start_sleep_monitor,
-    start_speaker_identification, start_ui_recording,
+    start_meeting_watcher, start_sleep_monitor, start_speaker_identification, start_ui_recording,
     sync_provider::ScreenpipeSyncProvider,
     vision_manager::{start_monitor_watcher, stop_monitor_watcher, VisionManager},
     watch_pid, ResourceMonitor, SCServer,
@@ -672,19 +671,21 @@ async fn main() -> anyhow::Result<()> {
                     .unwrap_or_else(chrono::Utc::now);
                 rt.spawn(async move {
                     use screenpipe_server::hot_frame_cache::HotAudio;
-                    cache.push_audio(HotAudio {
-                        audio_chunk_id: info.audio_chunk_id,
-                        timestamp: ts,
-                        transcription: info.transcription,
-                        device_name: info.device_name,
-                        is_input: info.is_input,
-                        audio_file_path: info.audio_file_path,
-                        duration_secs: info.duration_secs,
-                        start_time: info.start_time,
-                        end_time: info.end_time,
-                        speaker_id: info.speaker_id,
-                        speaker_name: None,
-                    }).await;
+                    cache
+                        .push_audio(HotAudio {
+                            audio_chunk_id: info.audio_chunk_id,
+                            timestamp: ts,
+                            transcription: info.transcription,
+                            device_name: info.device_name,
+                            is_input: info.is_input,
+                            audio_file_path: info.audio_file_path,
+                            duration_secs: info.duration_secs,
+                            start_time: info.start_time,
+                            end_time: info.end_time,
+                            speaker_id: info.speaker_id,
+                            speaker_name: None,
+                        })
+                        .await;
                 });
             }));
             Arc::new(manager)
@@ -700,15 +701,12 @@ async fn main() -> anyhow::Result<()> {
 
     // Create VisionManager for event-driven capture on all monitors
     let (handle, capture_trigger_tx) = if !config.disable_vision {
-        let vision_config = config.to_vision_manager_config(
-            output_path_clone.to_string(),
-            vision_metrics.clone(),
+        let vision_config =
+            config.to_vision_manager_config(output_path_clone.to_string(), vision_metrics.clone());
+        let vision_manager = Arc::new(
+            VisionManager::new(vision_config, db_clone.clone(), vision_handle.clone())
+                .with_hot_frame_cache(hot_frame_cache.clone()),
         );
-        let vision_manager = Arc::new(VisionManager::new(
-            vision_config,
-            db_clone.clone(),
-            vision_handle.clone(),
-        ).with_hot_frame_cache(hot_frame_cache.clone()));
 
         // Get the broadcast trigger sender BEFORE moving the VisionManager into
         // the spawned task. This sender is passed to start_ui_recording so UI

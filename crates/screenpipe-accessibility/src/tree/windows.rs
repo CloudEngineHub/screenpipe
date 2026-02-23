@@ -206,7 +206,13 @@ impl TreeWalkerPlatform for WindowsTreeWalker {
         // Extract text from the tree (matching macOS text extraction behavior)
         let mut text_buffer = String::with_capacity(4096);
         let mut nodes = Vec::with_capacity(256);
-        extract_text_from_tree(&root, 0, self.config.max_depth, &mut text_buffer, &mut nodes);
+        extract_text_from_tree(
+            &root,
+            0,
+            self.config.max_depth,
+            &mut text_buffer,
+            &mut nodes,
+        );
 
         if text_buffer.is_empty() {
             return Ok(None);

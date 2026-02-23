@@ -328,8 +328,7 @@ async fn run_speaker_identification_loop(
 
     let mut meeting_sub =
         screenpipe_events::subscribe_to_event::<MeetingEventData>("meeting_started");
-    let mut ended_sub =
-        screenpipe_events::subscribe_to_event::<MeetingEventData>("meeting_ended");
+    let mut ended_sub = screenpipe_events::subscribe_to_event::<MeetingEventData>("meeting_ended");
 
     loop {
         // Phase 1: Wait for a meeting to start with calendar attendees
@@ -585,11 +584,7 @@ mod tests {
 
     #[test]
     fn test_find_other_three_attendees() {
-        let attendees = vec![
-            "Alice".into(),
-            "Bob".into(),
-            "Charlie".into(),
-        ];
+        let attendees = vec!["Alice".into(), "Bob".into(), "Charlie".into()];
         assert_eq!(
             find_other_attendee(&attendees, &Some("Alice".into())),
             None // Not a 1:1 meeting
@@ -639,10 +634,7 @@ mod tests {
     #[test]
     fn test_rule1_no_user_name_skips_input() {
         let context = ctx(&["Alice Smith", "Bob Jones"], None, None);
-        let observations = vec![
-            speaker(1, "", true, 5),
-            speaker(2, "", false, 5),
-        ];
+        let observations = vec![speaker(1, "", true, 5), speaker(2, "", false, 5)];
         let decisions = decide_speaker_names(&context, &observations);
 
         // Should not name input speaker (no user_name), but should not name
@@ -714,11 +706,7 @@ mod tests {
         let decisions = decide_speaker_names(&context, &observations);
 
         assert_eq!(decisions.names.len(), 2);
-        let output_decision = decisions
-            .names
-            .iter()
-            .find(|d| d.speaker_id == 2)
-            .unwrap();
+        let output_decision = decisions.names.iter().find(|d| d.speaker_id == 2).unwrap();
         assert_eq!(output_decision.name, "Bob Jones");
         assert!(output_decision.reason.contains("1:1"));
     }
@@ -790,10 +778,7 @@ mod tests {
     #[test]
     fn test_whitespace_user_name_treated_as_empty() {
         let context = ctx(&["Alice", "Bob"], Some("  "), None);
-        let observations = vec![
-            speaker(1, "", true, 5),
-            speaker(2, "", false, 5),
-        ];
+        let observations = vec![speaker(1, "", true, 5), speaker(2, "", false, 5)];
         let decisions = decide_speaker_names(&context, &observations);
 
         // No naming — user_name is effectively empty
@@ -805,7 +790,7 @@ mod tests {
         let context = ctx(&["Alice Smith", "Bob Jones"], Some("Alice Smith"), None);
         let observations = vec![
             speaker(1, "Alice Smith", true, 10), // already named
-            speaker(2, "", false, 5),             // unnamed output
+            speaker(2, "", false, 5),            // unnamed output
         ];
         let decisions = decide_speaker_names(&context, &observations);
 
@@ -822,27 +807,16 @@ mod tests {
             Some("alice.smith@example.com"),
             None,
         );
-        let observations = vec![
-            speaker(1, "", true, 5),
-            speaker(2, "", false, 5),
-        ];
+        let observations = vec![speaker(1, "", true, 5), speaker(2, "", false, 5)];
         let decisions = decide_speaker_names(&context, &observations);
 
         // Both should be named: input as the email, output as Bob Jones
         assert_eq!(decisions.names.len(), 2);
 
-        let input_d = decisions
-            .names
-            .iter()
-            .find(|d| d.speaker_id == 1)
-            .unwrap();
+        let input_d = decisions.names.iter().find(|d| d.speaker_id == 1).unwrap();
         assert_eq!(input_d.name, "alice.smith@example.com");
 
-        let output_d = decisions
-            .names
-            .iter()
-            .find(|d| d.speaker_id == 2)
-            .unwrap();
+        let output_d = decisions.names.iter().find(|d| d.speaker_id == 2).unwrap();
         assert_eq!(output_d.name, "Bob Jones");
     }
 }

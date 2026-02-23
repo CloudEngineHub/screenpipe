@@ -135,8 +135,7 @@ impl EventDrivenCapture {
 
     /// Check if enough time has passed since the last capture (debounce).
     pub fn can_capture(&self) -> bool {
-        self.last_capture.elapsed()
-            >= Duration::from_millis(self.config.min_capture_interval_ms)
+        self.last_capture.elapsed() >= Duration::from_millis(self.config.min_capture_interval_ms)
     }
 
     /// Record that a capture just happened.
@@ -146,8 +145,7 @@ impl EventDrivenCapture {
 
     /// Check if we need an idle capture (no capture for too long).
     pub fn needs_idle_capture(&self) -> bool {
-        self.last_capture.elapsed()
-            >= Duration::from_millis(self.config.idle_capture_interval_ms)
+        self.last_capture.elapsed() >= Duration::from_millis(self.config.idle_capture_interval_ms)
     }
 
     /// Poll activity state and return a trigger if a capture should happen.
@@ -265,8 +263,7 @@ pub async fn event_driven_capture_loop(
                     }
                 }
                 vision_metrics.record_capture();
-                vision_metrics
-                    .record_db_write(Duration::from_millis(result.duration_ms as u64));
+                vision_metrics.record_db_write(Duration::from_millis(result.duration_ms as u64));
                 // Push to hot cache for zero-DB timeline reads
                 if let Some(ref cache) = hot_frame_cache {
                     push_to_hot_cache(cache, &result, &device_name, &CaptureTrigger::Manual).await;
@@ -296,7 +293,10 @@ pub async fn event_driven_capture_loop(
                 state.poll_activity(&activity_feed)
             }
             Err(broadcast::error::TryRecvError::Lagged(n)) => {
-                debug!("trigger channel lagged by {} messages on monitor {}", n, monitor_id);
+                debug!(
+                    "trigger channel lagged by {} messages on monitor {}",
+                    n, monitor_id
+                );
                 // Drain missed triggers, just capture now
                 Some(CaptureTrigger::Manual)
             }
@@ -326,7 +326,10 @@ pub async fn event_driven_capture_loop(
                         }
                     }
                     Err(e) => {
-                        debug!("visual check screenshot failed for monitor {}: {}", monitor_id, e);
+                        debug!(
+                            "visual check screenshot failed for monitor {}: {}",
+                            monitor_id, e
+                        );
                     }
                 }
             }
@@ -370,9 +373,8 @@ pub async fn event_driven_capture_loop(
 
                         // Update vision metrics so health check reports "ok"
                         vision_metrics.record_capture();
-                        vision_metrics.record_db_write(
-                            Duration::from_millis(result.duration_ms as u64),
-                        );
+                        vision_metrics
+                            .record_db_write(Duration::from_millis(result.duration_ms as u64));
 
                         // Push to hot cache for zero-DB timeline reads
                         if let Some(ref cache) = hot_frame_cache {

@@ -188,7 +188,7 @@ apple-intelligence = ["screenpipe-server/apple-intelligence"]
 
 
 [package.metadata.cargo-machete]
-ignored = ["tauri-utils"]
+ignored = ["tauri-utils", "screenpipe-accessibility"]
 
 [profile.release]
 codegen-units = 1

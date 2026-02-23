@@ -24,7 +24,10 @@ use crate::{
             remove_tags, validate_media_handler,
         },
         data::delete_time_range_handler,
-        frames::{get_frame_context, get_frame_data, get_frame_metadata, get_frame_ocr_data, get_next_valid_frame},
+        frames::{
+            get_frame_context, get_frame_data, get_frame_metadata, get_frame_ocr_data,
+            get_next_valid_frame,
+        },
         health::{
             api_list_monitors, api_vision_status, audio_metrics_handler, health_check,
             vision_metrics_handler,

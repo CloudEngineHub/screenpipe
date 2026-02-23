@@ -116,8 +116,8 @@ pub async fn handle_new_transcript(
 
         // Save fields before moving transcription into process_transcription_result
         let device_name = transcription.input.device.to_string();
-        let is_input = transcription.input.device.device_type
-            == crate::core::device::DeviceType::Input;
+        let is_input =
+            transcription.input.device.device_type == crate::core::device::DeviceType::Input;
         let audio_file_path = transcription.path.clone();
         let start_time = Some(transcription.start_time);
         let end_time = Some(transcription.end_time);

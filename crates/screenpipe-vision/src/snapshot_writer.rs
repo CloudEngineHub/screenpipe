@@ -43,7 +43,9 @@ impl SnapshotWriter {
         captured_at: DateTime<Utc>,
         monitor_id: u32,
     ) -> Result<PathBuf> {
-        let date_dir = self.base_dir.join(captured_at.format("%Y-%m-%d").to_string());
+        let date_dir = self
+            .base_dir
+            .join(captured_at.format("%Y-%m-%d").to_string());
         fs::create_dir_all(&date_dir)?;
 
         let timestamp_ms = captured_at.timestamp_millis();
