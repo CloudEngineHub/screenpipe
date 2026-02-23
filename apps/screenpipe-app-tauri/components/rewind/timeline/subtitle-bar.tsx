@@ -5,7 +5,6 @@
 import { useMemo, useRef, useEffect } from "react";
 import { Mic, Volume2 } from "lucide-react";
 import { StreamTimeSeriesResponse, AudioData } from "@/components/rewind/timeline";
-import { deduplicateAudioItems } from "@/lib/hooks/use-meetings";
 
 interface SubtitleBarProps {
 	frames: StreamTimeSeriesResponse[];
@@ -66,8 +65,18 @@ export function SubtitleBar({ frames, currentIndex, onClick }: SubtitleBarProps)
 
 		if (entries.length === 0) return [];
 
-		// Deduplicate
-		const deduped = deduplicateAudioItems(entries);
+		// Aggressive dedup: key on normalized transcription text + device type.
+		// The backend assigns the same audio to many frames (15s padding), and
+		// can also produce multiple chunks with identical text. We only want
+		// one subtitle line per unique piece of speech.
+		const seen = new Map<string, AudioEntry>();
+		for (const entry of entries) {
+			const key = `${entry.is_input}-${entry.transcription.trim().toLowerCase()}`;
+			if (!seen.has(key)) {
+				seen.set(key, entry);
+			}
+		}
+		const deduped = Array.from(seen.values());
 
 		// Filter to entries that are "active" — started before now and haven't
 		// lingered past their expiry.
