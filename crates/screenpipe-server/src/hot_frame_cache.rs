@@ -229,6 +229,15 @@ impl HotFrameCache {
     }
 }
 
+impl HotFrameCache {
+    /// Public wrapper: find audio entries near a given timestamp.
+    /// Used by the streaming handler to attach audio to live frames.
+    pub async fn find_audio_near(&self, frame_ts: DateTime<Utc>) -> Vec<AudioEntry> {
+        let audio_map = self.audio.read().await;
+        find_audio_for_frame(&audio_map, frame_ts)
+    }
+}
+
 /// Find audio entries within ±15s of a frame timestamp (same window as find_video_chunks).
 fn find_audio_for_frame(
     audio_map: &BTreeMap<DateTime<Utc>, Vec<HotAudio>>,

@@ -60,8 +60,8 @@ pub struct DeleteTimeRangeResult {
 /// lock immediately, avoiding SQLITE_BUSY_SNAPSHOT (code 517) that occurs when a
 /// deferred reader tries to upgrade to writer.
 ///
-/// Holds an `OwnedSemaphorePermit` to ensure only one writer is active at a time,
-/// eliminating application-level write contention before it reaches SQLite.
+/// Holds an `OwnedSemaphorePermit` so writers queue in Rust memory (zero overhead)
+/// instead of each holding a pool connection while waiting for SQLite's busy_timeout.
 pub struct ImmediateTx {
     conn: Option<PoolConnection<Sqlite>>,
     committed: bool,
@@ -100,9 +100,7 @@ impl Drop for ImmediateTx {
             if let Some(mut conn) = self.conn.take() {
                 // Move the write permit into the rollback task so the semaphore
                 // is NOT released until the ROLLBACK actually completes and frees
-                // the SQLite write lock. Without this, the next writer acquires
-                // the semaphore while the old connection still holds the SQLite
-                // write lock, causing BEGIN IMMEDIATE to block for 30-62s.
+                // the SQLite write lock.
                 let permit = self._write_permit.take();
                 warn!("ImmediateTx dropped without commit — scheduling rollback");
                 tokio::spawn(async move {
@@ -110,7 +108,6 @@ impl Drop for ImmediateTx {
                         error!("failed to rollback on drop: {}", e);
                         let _raw = conn.detach();
                     }
-                    // permit is dropped here AFTER rollback, releasing the semaphore
                     drop(permit);
                 });
             }
@@ -120,9 +117,10 @@ impl Drop for ImmediateTx {
 
 pub struct DatabaseManager {
     pub pool: SqlitePool,
-    /// Serializes all write transactions. Only one writer can hold this at a time,
-    /// eliminating `BEGIN IMMEDIATE` contention that caused 20-40s lock waits and
-    /// cascading "database is locked" / "cannot start a transaction" errors.
+    /// Serializes write transactions. Writers queue in Rust memory (zero overhead)
+    /// instead of each holding a pool connection while waiting for SQLite's busy_timeout.
+    /// With FTS handled by inline triggers (not the removed background indexer),
+    /// each write holds the semaphore for only a few milliseconds.
     write_semaphore: Arc<Semaphore>,
 }
 
@@ -151,7 +149,10 @@ impl DatabaseManager {
             .parse::<SqliteConnectOptions>()?
             // busy_timeout is per-connection; setting it here ensures ALL pooled
             // connections wait before returning SQLITE_BUSY ("database is locked").
-            .busy_timeout(Duration::from_secs(30))
+            // Keep this short (5s) so pool connections aren't held for ages waiting
+            // for the write lock — the app-level retry in begin_immediate_with_retry
+            // handles retries with backoff.
+            .busy_timeout(Duration::from_secs(5))
             .pragma("journal_mode", "WAL")
             // NORMAL is safe with WAL mode — commits only need to wait for WAL
             // write, not fsync to main DB. Reduces commit latency significantly.
@@ -167,22 +168,39 @@ impl DatabaseManager {
             .pragma("wal_autocheckpoint", "4000");
 
         let pool = SqlitePoolOptions::new()
-            // Pool is primarily for read concurrency. Writes are serialized via
-            // write_semaphore so only 1 connection does writes at a time.
+            // Pool handles both read and write concurrency. Writes are serialized
+            // by SQLite's WAL mode + busy_timeout(5s).
             .max_connections(10)
             .min_connections(3) // Minimum number of idle connections
-            .acquire_timeout(Duration::from_secs(30))
+            .acquire_timeout(Duration::from_secs(10))
             .connect_with(connect_options)
             .await?;
 
         let db_manager = DatabaseManager {
             pool,
-            // 1 permit = serialize writes at the app level. With 2 permits the
-            // second writer's BEGIN IMMEDIATE busy-waits 1-5s inside SQLite,
-            // wasting a connection. With 1 permit, writes queue in Rust (zero
-            // overhead) and BEGIN IMMEDIATE succeeds instantly.
             write_semaphore: Arc::new(Semaphore::new(1)),
         };
+
+        // Checkpoint any stale WAL before running migrations or starting captures.
+        // A large WAL (500MB+) from a previous crash slows every read/write until
+        // checkpointed. TRUNCATE mode resets it to zero bytes.
+        match sqlx::query("PRAGMA wal_checkpoint(TRUNCATE)")
+            .fetch_one(&db_manager.pool)
+            .await
+        {
+            Ok(row) => {
+                let busy: i32 = row.get(0);
+                let log_pages: i32 = row.get(1);
+                let checkpointed: i32 = row.get(2);
+                if log_pages > 0 || busy == 1 {
+                    info!(
+                        "startup wal checkpoint: busy={}, pages={}, checkpointed={}",
+                        busy, log_pages, checkpointed
+                    );
+                }
+            }
+            Err(e) => warn!("startup wal checkpoint failed (continuing): {}", e),
+        }
 
         // Run migrations after establishing the connection
         Self::run_migrations(&db_manager.pool).await?;
@@ -360,13 +378,6 @@ impl DatabaseManager {
             .execute(pool)
             .await?;
 
-            // Reset FTS progress so the background indexer backfills
-            sqlx::query(
-                "UPDATE fts_index_progress SET last_indexed_rowid = 0 WHERE table_name = 'frames'"
-            )
-            .execute(pool)
-            .await?;
-
             tracing::info!("frames_fts rebuilt with accessibility_text column");
         }
 
@@ -375,36 +386,33 @@ impl DatabaseManager {
 
     /// Acquire a connection with `BEGIN IMMEDIATE`, serialized via a single-permit semaphore.
     ///
-    /// Only one writer can hold the semaphore at a time, so `BEGIN IMMEDIATE`
-    /// should always succeed instantly (no SQLITE_BUSY contention at the DB level).
+    /// Writers queue in Rust memory (the semaphore) instead of each holding a pool
+    /// connection while SQLite's busy_timeout retries. With FTS handled by inline
+    /// triggers, each write holds the semaphore for only a few milliseconds.
     ///
-    /// Returns an `ImmediateTx` that automatically detaches the connection on drop
-    /// if not committed (preventing dirty connections from poisoning the pool).
+    /// If a connection has a stuck transaction, it is detached from the pool
+    /// to prevent poisoning other callers.
+    ///
+    /// Returns an `ImmediateTx` that automatically rolls back on drop
+    /// if not committed.
     pub async fn begin_immediate_with_retry(&self) -> Result<ImmediateTx, sqlx::Error> {
-        // Acquire the write semaphore first — this is where serialization happens.
-        // Only one task can pass this point at a time. Use a timeout so captures
-        // don't block indefinitely when FTS holds the semaphore waiting for a pool
-        // connection (which itself may be blocked by streaming queries).
+        // Acquire the write semaphore — this is where serialization happens.
+        // Writers queue here in Rust (zero overhead) instead of each holding
+        // a pool connection during SQLite's busy_timeout.
         let permit = match tokio::time::timeout(
-            Duration::from_secs(5),
+            Duration::from_secs(10),
             Arc::clone(&self.write_semaphore).acquire_owned(),
         )
         .await
         {
             Ok(Ok(permit)) => permit,
             Ok(Err(_)) => return Err(sqlx::Error::PoolClosed),
-            Err(_) => {
-                return Err(sqlx::Error::PoolTimedOut);
-            }
+            Err(_) => return Err(sqlx::Error::PoolTimedOut),
         };
 
-        // With the semaphore held, BEGIN IMMEDIATE should succeed immediately
-        // since no other writer can be active. Retry only for edge cases
-        // (e.g., checkpoint in progress).
         let max_retries = 3;
+        let mut last_error = None;
         for attempt in 1..=max_retries {
-            // Short timeout on pool.acquire — with semaphore held, we don't want
-            // to block for 30s waiting for a pool connection.
             let mut conn = match tokio::time::timeout(
                 Duration::from_secs(3),
                 self.pool.acquire(),
@@ -423,63 +431,44 @@ impl DatabaseManager {
                         _write_permit: Some(permit),
                     })
                 }
+                Err(e) if Self::is_nested_transaction_error(&e) => {
+                    // Connection has a stuck transaction — detach it from the pool
+                    // so it doesn't poison subsequent acquire() calls.
+                    warn!(
+                        "BEGIN IMMEDIATE hit stuck transaction (attempt {}/{}), detaching connection",
+                        attempt, max_retries
+                    );
+                    let _raw = conn.detach();
+                    last_error = Some(e);
+                    tokio::time::sleep(Duration::from_millis(50)).await;
+                    continue;
+                }
                 Err(e) if attempt < max_retries && Self::is_busy_error(&e) => {
                     warn!(
-                        "BEGIN IMMEDIATE busy despite semaphore (attempt {}/{}), retrying...",
+                        "BEGIN IMMEDIATE busy (attempt {}/{}), retrying...",
                         attempt, max_retries
                     );
                     drop(conn);
+                    last_error = Some(e);
                     tokio::time::sleep(Duration::from_millis(50 * attempt as u64)).await;
                 }
                 Err(e) => return Err(e),
             }
         }
-        unreachable!()
+        // All retries exhausted
+        Err(last_error.unwrap_or_else(|| sqlx::Error::PoolTimedOut))
     }
 
-    /// Low-priority version of `begin_immediate_with_retry` for background tasks
-    /// like the FTS indexer. Returns `None` if the write semaphore is already held,
-    /// so the caller can skip and retry later instead of blocking real-time captures.
-    ///
-    /// IMPORTANT: pool.acquire has a short timeout to prevent holding the write
-    /// semaphore while waiting for a pool connection. Without this, FTS can hold
-    /// the semaphore for up to 30s (pool acquire_timeout), starving captures.
-    pub async fn try_begin_immediate(&self) -> Result<Option<ImmediateTx>, sqlx::Error> {
-        let permit = match Arc::clone(&self.write_semaphore).try_acquire_owned() {
-            Ok(permit) => permit,
-            Err(_) => return Ok(None), // Someone else is writing — yield
-        };
-
-        // Short timeout on pool.acquire — don't hold the write semaphore while
-        // waiting for a pool connection. If the pool is saturated (streaming queries),
-        // release the semaphore immediately so captures aren't blocked.
-        let conn = match tokio::time::timeout(
-            Duration::from_millis(500),
-            self.pool.acquire(),
-        )
-        .await
-        {
-            Ok(Ok(conn)) => conn,
-            Ok(Err(e)) => return Err(e),
-            Err(_) => {
-                // Pool busy — drop semaphore permit so captures can proceed
-                drop(permit);
-                return Ok(None);
+    /// Check if the error indicates a stuck/nested transaction on the connection.
+    fn is_nested_transaction_error(e: &sqlx::Error) -> bool {
+        match e {
+            sqlx::Error::Database(db_err) => {
+                db_err
+                    .message()
+                    .to_lowercase()
+                    .contains("cannot start a transaction within a transaction")
             }
-        };
-
-        let mut conn = conn;
-        match sqlx::query("BEGIN IMMEDIATE").execute(&mut *conn).await {
-            Ok(_) => Ok(Some(ImmediateTx {
-                conn: Some(conn),
-                committed: false,
-                _write_permit: Some(permit),
-            })),
-            Err(e) if Self::is_busy_error(&e) => {
-                drop(conn);
-                Ok(None) // DB busy (e.g. checkpoint) — yield
-            }
-            Err(e) => Err(e),
+            _ => false,
         }
     }
 

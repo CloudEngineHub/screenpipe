@@ -75,6 +75,9 @@ pub struct AudioManager {
     meeting_detector: Option<Arc<MeetingDetector>>,
     /// Whether transcription is currently paused due to high CPU or meeting (batch/smart mode).
     pub transcription_paused: Arc<AtomicBool>,
+    /// Optional callback invoked after each audio transcription DB insert.
+    /// Used by the hot frame cache to receive live audio updates.
+    on_transcription_insert: Option<crate::transcription::AudioInsertCallback>,
 }
 
 impl AudioManager {
@@ -131,9 +134,16 @@ impl AudioManager {
             idle_detector,
             meeting_detector,
             transcription_paused: Arc::new(AtomicBool::new(false)),
+            on_transcription_insert: None,
         };
 
         Ok(manager)
+    }
+
+    /// Set a callback that fires after each audio transcription is inserted into DB.
+    /// Must be called before `start()`.
+    pub fn set_on_transcription_insert(&mut self, cb: crate::transcription::AudioInsertCallback) {
+        self.on_transcription_insert = Some(cb);
     }
 
     pub async fn start(&self) -> Result<()> {
@@ -500,12 +510,14 @@ impl AudioManager {
         let use_pii_removal = options.use_pii_removal;
         drop(options); // Release lock before spawning
         let metrics = self.metrics.clone();
+        let on_insert = self.on_transcription_insert.clone();
         Ok(tokio::spawn(handle_new_transcript(
             db,
             transcription_receiver,
             transcription_engine,
             use_pii_removal,
             metrics,
+            on_insert,
         )))
     }
 

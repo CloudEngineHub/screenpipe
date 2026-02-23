@@ -517,8 +517,8 @@ impl Default for SettingsStore {
             show_shortcut_overlay: true,
             device_id: uuid::Uuid::new_v4().to_string(),
             adaptive_fps: false,
-            enable_input_capture: false,
-            enable_accessibility: false,
+            enable_input_capture: true,
+            enable_accessibility: true,
             auto_update: true,
             overlay_mode: "fullscreen".to_string(),
             show_overlay_in_screen_recording: false,
@@ -578,8 +578,8 @@ impl SettingsStore {
             disable_audio: self.disable_audio,
             disable_vision: self.disable_vision,
             use_pii_removal: self.use_pii_removal,
-            enable_input_capture: self.enable_input_capture,
-            enable_accessibility: self.enable_accessibility,
+            enable_input_capture: true, // always enabled, setting removed from UI
+            enable_accessibility: true, // always enabled, setting removed from UI
             audio_transcription_engine: audio_engine_str.parse()
                 .unwrap_or(AudioTranscriptionEngine::WhisperLargeV3Turbo),
             vad_sensitivity: self.vad_sensitivity.parse()

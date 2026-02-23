@@ -299,18 +299,15 @@ impl SCServer {
             }
         });
 
-        // Use pre-set hot frame cache or create a new one, then warm from DB
+        // Use pre-set hot frame cache or create a new one, then warm from DB.
+        // IMPORTANT: Await warm_from_db here (not spawned) so the cache has
+        // audio data before the first WebSocket client connects. Without this,
+        // the initial frame batch would have empty audio arrays.
         let hot_frame_cache = self
             .hot_frame_cache
             .clone()
             .unwrap_or_else(|| Arc::new(HotFrameCache::new()));
-        {
-            let cache = hot_frame_cache.clone();
-            let db = self.db.clone();
-            tokio::spawn(async move {
-                cache.warm_from_db(&db, 2).await;
-            });
-        }
+        hot_frame_cache.warm_from_db(&self.db, 2).await;
 
         let app_state = Arc::new(AppState {
             db: self.db.clone(),
@@ -416,18 +413,6 @@ impl SCServer {
             .route(
                 "/sync/download",
                 axum::routing::post(sync_api::sync_download),
-            )
-            // Trigger immediate FTS indexing (used by onboarding so search works right away)
-            .route(
-                "/fts/index",
-                axum::routing::post({
-                    use axum::extract::State;
-                    use axum::Json;
-                    |State(state): State<Arc<AppState>>| async move {
-                        let count = screenpipe_db::fts_indexer::index_all_tables(&state.db).await;
-                        Json(json!({ "indexed": count }))
-                    }
-                }),
             )
             // Vision status endpoint (not in OpenAPI spec to avoid oasgen registration issues)
             .route("/vision/status", get(api_vision_status))

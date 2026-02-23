@@ -128,10 +128,41 @@ pub async fn start_embedded_server(
         audio_manager_builder = audio_manager_builder.meeting_detector(detector.clone());
     }
 
-    let audio_manager = audio_manager_builder
+    // Create shared hot frame cache for zero-DB timeline reads.
+    // Shared between VisionManager (push), HTTP server/AppState (read),
+    // and the audio pipeline (push new transcriptions).
+    let hot_frame_cache = Arc::new(HotFrameCache::new());
+
+    let mut audio_manager = audio_manager_builder
         .build(db.clone())
         .await
         .map_err(|e| format!("Failed to build audio manager: {}", e))?;
+
+    // Wire up audio → hot cache: when a transcription is inserted into DB,
+    // also push it to the hot cache so the WS streaming handler can attach
+    // audio to live frames.
+    {
+        let cache = hot_frame_cache.clone();
+        let rt = tokio::runtime::Handle::current();
+        audio_manager.set_on_transcription_insert(std::sync::Arc::new(move |info| {
+            let cache = cache.clone();
+            rt.spawn(async move {
+                cache.push_audio(screenpipe_server::hot_frame_cache::HotAudio {
+                    audio_chunk_id: info.audio_chunk_id,
+                    timestamp: chrono::Utc::now(),
+                    transcription: info.transcription,
+                    device_name: info.device_name,
+                    is_input: info.is_input,
+                    audio_file_path: info.audio_file_path,
+                    duration_secs: info.duration_secs,
+                    start_time: info.start_time,
+                    end_time: info.end_time,
+                    speaker_id: info.speaker_id,
+                    speaker_name: None,
+                }).await;
+            });
+        }));
+    }
 
     let audio_manager = Arc::new(audio_manager);
 
@@ -148,10 +179,6 @@ pub async fn start_embedded_server(
     // Capture trigger sender — set by VisionManager when vision is enabled.
     // Passed to start_ui_recording so UI events (clicks, app switches) trigger captures.
     let mut capture_trigger_tx: Option<screenpipe_server::event_driven_capture::TriggerSender> = None;
-
-    // Create shared hot frame cache for zero-DB timeline reads.
-    // Shared between VisionManager (push) and HTTP server/AppState (read).
-    let hot_frame_cache = Arc::new(HotFrameCache::new());
 
     // Start vision recording (event-driven capture via VisionManager)
     if !config.disable_vision {
@@ -249,9 +276,6 @@ pub async fn start_embedded_server(
         db.clone(),
         config.user_name.clone(),
     );
-
-    // Start background FTS indexer (replaces synchronous INSERT triggers)
-    let _fts_handle = screenpipe_db::fts_indexer::start_fts_indexer(db.clone());
 
     // Start resource monitor
     let resource_monitor = ResourceMonitor::new(config.analytics_enabled);

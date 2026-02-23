@@ -74,7 +74,6 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { exists } from "@tauri-apps/plugin-fs";
 import { ToastAction } from "@/components/ui/toast";
 import { open as openUrl } from "@tauri-apps/plugin-shell";
-import { Separator } from "@/components/ui/separator";
 import { Dialog, DialogContent, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Progress } from "@/components/ui/progress";
 import { Card, CardContent } from "@/components/ui/card";
@@ -1428,58 +1427,7 @@ Your screen is a pipe. Everything you see, hear, and type flows through it. Scre
           </Card>
         )}
 
-        {/* Text extraction methods - shown when screen recording is on */}
-        {!settings.disableVision && (
-          <Card className="border-border bg-card">
-            <CardContent className="px-3 py-2.5 space-y-3">
-              <div className="flex items-center space-x-2.5">
-                <Eye className="h-4 w-4 text-muted-foreground shrink-0" />
-                <h3 className="text-sm font-medium text-foreground">Text extraction</h3>
-              </div>
-
-              {/* Accessibility text capture (AX tree walker) */}
-              {(isMacOS || platform() === "windows") && (
-                <div className="flex items-center justify-between ml-[26px] gap-3">
-                  <div className="min-w-0">
-                    <h4 className="text-sm text-foreground flex items-center gap-1.5">
-                      Accessibility text
-                      <Badge variant="outline" className="text-[10px] px-1 py-0">beta</Badge>
-                      <HelpTooltip text="Reads text directly from UI elements using macOS/Windows accessibility APIs. Much lower CPU usage (~2-5%) than OCR. Works great for native apps, browsers, and standard UI. May miss text in images, games, terminals with GPU rendering, or custom-drawn content. Both methods can run together for best coverage." />
-                    </h4>
-                    <p className="text-xs text-muted-foreground">Reads UI elements directly — lower CPU, may miss some content</p>
-                  </div>
-                  <Switch
-                    className="shrink-0"
-                    id="enableAccessibility"
-                    checked={settings.enableAccessibility ?? true}
-                    onCheckedChange={(checked) => handleSettingsChange({ enableAccessibility: checked }, true)}
-                  />
-                </div>
-              )}
-
-              {(isMacOS || platform() === "windows") && <Separator />}
-
-              {/* Input capture (keyboard, mouse, clipboard) */}
-              {(isMacOS || platform() === "windows") && (
-                <div className="flex items-center justify-between ml-[26px] gap-3">
-                  <div className="min-w-0">
-                    <h4 className="text-sm text-foreground flex items-center gap-1.5">
-                      Input capture
-                      <HelpTooltip text="Records clicks, keystrokes, and clipboard events. Useful for detailed activity tracking and workflow analysis. Requires input monitoring permission on macOS." />
-                    </h4>
-                    <p className="text-xs text-muted-foreground">Records clicks, keystrokes, and clipboard</p>
-                  </div>
-                  <Switch
-                    className="shrink-0"
-                    id="enableInputCapture"
-                    checked={settings.enableInputCapture ?? false}
-                    onCheckedChange={(checked) => handleSettingsChange({ enableInputCapture: checked }, true)}
-                  />
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        )}
+        {/* Text extraction — accessibility and input capture are always enabled (defaults in store.rs) */}
 
         {/* PII Removal */}
         <Card className="border-border bg-card">

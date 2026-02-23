@@ -13,12 +13,32 @@ use tracing::{error, info};
 
 use super::TranscriptionResult;
 
+/// Information about a successfully inserted audio transcription.
+/// Passed to the optional on_insert callback so callers (e.g. the hot
+/// frame cache) can react to new audio without a cross-crate dependency.
+#[derive(Debug, Clone)]
+pub struct AudioInsertInfo {
+    pub audio_chunk_id: i64,
+    pub transcription: String,
+    pub device_name: String,
+    pub is_input: bool,
+    pub audio_file_path: String,
+    pub duration_secs: f64,
+    pub start_time: Option<f64>,
+    pub end_time: Option<f64>,
+    pub speaker_id: Option<i64>,
+}
+
+/// Callback invoked after each successful audio transcription DB insert.
+pub type AudioInsertCallback = Arc<dyn Fn(AudioInsertInfo) + Send + Sync>;
+
 pub async fn handle_new_transcript(
     db: Arc<DatabaseManager>,
     transcription_receiver: Arc<crossbeam::channel::Receiver<TranscriptionResult>>,
     transcription_engine: Arc<AudioTranscriptionEngine>,
     use_pii_removal: bool,
     metrics: Arc<AudioPipelineMetrics>,
+    on_insert: Option<AudioInsertCallback>,
 ) {
     let mut previous_transcript = "".to_string();
     let mut previous_transcript_id: Option<i64> = None;
@@ -91,8 +111,15 @@ pub async fn handle_new_transcript(
             .map(|t| t.split_whitespace().count())
             .unwrap_or(0);
 
-        // Save device name before moving transcription
+        // Save fields before moving transcription into process_transcription_result
         let device_name = transcription.input.device.to_string();
+        let is_input = transcription.input.device.device_type
+            == crate::core::device::DeviceType::Input;
+        let audio_file_path = transcription.path.clone();
+        let start_time = Some(transcription.start_time);
+        let end_time = Some(transcription.end_time);
+        let duration_secs = transcription.end_time - transcription.start_time;
+        let insert_transcription = current_transcript.clone().unwrap_or_default();
 
         // Process the transcription result
         match process_transcription_result(
@@ -106,8 +133,12 @@ pub async fn handle_new_transcript(
         .await
         {
             Err(e) => error!("Error processing audio result: {}", e),
-            Ok(id) => {
-                previous_transcript_id = id;
+            Ok(result) => {
+                if let Some(ref result) = result {
+                    previous_transcript_id = Some(result.audio_chunk_id);
+                } else {
+                    previous_transcript_id = None;
+                }
                 metrics.record_db_insert(word_count as u64);
 
                 if was_trimmed {
@@ -115,6 +146,21 @@ pub async fn handle_new_transcript(
                         "device {} inserted trimmed transcript ({} words)",
                         device_name, word_count
                     );
+                }
+
+                // Notify the hot frame cache (or other listeners)
+                if let (Some(ref callback), Some(ref result)) = (&on_insert, &result) {
+                    callback(AudioInsertInfo {
+                        audio_chunk_id: result.audio_chunk_id,
+                        transcription: insert_transcription.clone(),
+                        device_name: device_name.clone(),
+                        is_input,
+                        audio_file_path: audio_file_path.clone(),
+                        duration_secs,
+                        start_time,
+                        end_time,
+                        speaker_id: result.speaker_id,
+                    });
                 }
             }
         }

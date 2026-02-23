@@ -653,8 +653,37 @@ async fn main() -> anyhow::Result<()> {
         audio_manager_builder = audio_manager_builder.meeting_detector(detector.clone());
     }
 
+    // Create shared hot frame cache for zero-DB timeline reads.
+    // Created BEFORE audio manager so we can wire up the transcription callback.
+    let hot_frame_cache = Arc::new(HotFrameCache::new());
+
     let audio_manager = match audio_manager_builder.build(db.clone()).await {
-        Ok(manager) => Arc::new(manager),
+        Ok(mut manager) => {
+            // Wire up audio → hot cache: push new transcriptions so the WS
+            // streaming handler can attach audio to live frames.
+            let cache = hot_frame_cache.clone();
+            let rt = tokio::runtime::Handle::current();
+            manager.set_on_transcription_insert(std::sync::Arc::new(move |info| {
+                let cache = cache.clone();
+                rt.spawn(async move {
+                    use screenpipe_server::hot_frame_cache::HotAudio;
+                    cache.push_audio(HotAudio {
+                        audio_chunk_id: info.audio_chunk_id,
+                        timestamp: chrono::Utc::now(),
+                        transcription: info.transcription,
+                        device_name: info.device_name,
+                        is_input: info.is_input,
+                        audio_file_path: info.audio_file_path,
+                        duration_secs: info.duration_secs,
+                        start_time: info.start_time,
+                        end_time: info.end_time,
+                        speaker_id: info.speaker_id,
+                        speaker_name: None,
+                    }).await;
+                });
+            }));
+            Arc::new(manager)
+        }
         Err(e) => {
             error!("{e}");
             return Ok(());
@@ -663,9 +692,6 @@ async fn main() -> anyhow::Result<()> {
 
     // Create shared pipeline metrics (used by recording + health endpoint + PostHog)
     let vision_metrics = Arc::new(screenpipe_vision::PipelineMetrics::new());
-
-    // Create shared hot frame cache for zero-DB timeline reads.
-    let hot_frame_cache = Arc::new(HotFrameCache::new());
 
     // Create VisionManager for event-driven capture on all monitors
     let (handle, capture_trigger_tx) = if !config.disable_vision {
@@ -1044,9 +1070,6 @@ async fn main() -> anyhow::Result<()> {
 
     // Start calendar-assisted speaker identification
     let _speaker_id_handle = start_speaker_identification(db.clone(), config.user_name.clone());
-
-    // Start background FTS indexer (replaces synchronous INSERT triggers)
-    let _fts_handle = screenpipe_db::fts_indexer::start_fts_indexer(db.clone());
 
     // Periodic WAL checkpoint to prevent unbounded WAL growth
     db.start_wal_maintenance();

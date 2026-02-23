@@ -339,9 +339,11 @@ pub async fn event_driven_capture_loop(
                 vision_metrics.record_capture_attempt();
 
                 // Timeout prevents the capture loop from blocking indefinitely
-                // when the DB pool is saturated (e.g., FTS backfill + streaming).
+                // if the DB is truly stuck. 15s is generous — normal captures take
+                // 1-3s on debug builds. The semaphore serializes writes so they
+                // don't pile up, but each write still needs time.
                 let capture_result = tokio::time::timeout(
-                    Duration::from_secs(5),
+                    Duration::from_secs(15),
                     do_capture(
                         &db,
                         &monitor,

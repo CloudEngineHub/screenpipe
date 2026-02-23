@@ -54,6 +54,13 @@ impl TranscriptionResult {
     }
 }
 
+/// Result of a successful audio transcription DB insert.
+#[derive(Debug, Clone)]
+pub struct AudioInsertResult {
+    pub audio_chunk_id: i64,
+    pub speaker_id: Option<i64>,
+}
+
 pub async fn process_transcription_result(
     db: &DatabaseManager,
     result: TranscriptionResult,
@@ -61,7 +68,7 @@ pub async fn process_transcription_result(
     previous_transcript: Option<String>,
     previous_transcript_id: Option<i64>,
     use_pii_removal: bool,
-) -> Result<Option<i64>, anyhow::Error> {
+) -> Result<Option<AudioInsertResult>, anyhow::Error> {
     if result.error.is_some() || result.transcription.is_none() {
         error!(
             "Error in audio recording: {}. Not inserting audio result",
@@ -82,6 +89,7 @@ pub async fn process_transcription_result(
         raw_transcription
     };
     let transcription_engine = audio_transcription_engine.to_string();
+    let speaker_id = Some(speaker.id);
     let mut chunk_id: Option<i64> = None;
 
     info!(
@@ -148,7 +156,10 @@ pub async fn process_transcription_result(
             result.input.device, e
         ),
     }
-    Ok(chunk_id)
+    Ok(chunk_id.map(|id| AudioInsertResult {
+        audio_chunk_id: id,
+        speaker_id,
+    }))
 }
 
 async fn get_or_create_speaker_from_embedding(

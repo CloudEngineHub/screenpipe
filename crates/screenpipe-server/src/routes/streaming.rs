@@ -393,8 +393,11 @@ async fn handle_stream_frames_socket(
                                 continue;
                             }
 
+                            // Look up nearby audio from the hot cache so live
+                            // frames include transcriptions (not just empty audio).
+                            let audio_entries = cache.find_audio_near(hot_frame.timestamp).await;
+
                             // Convert HotFrame to StreamTimeSeriesResponse
-                            // Audio will be empty for live push — acceptable for timeline dots
                             let response = StreamTimeSeriesResponse {
                                 timestamp: hot_frame.timestamp,
                                 devices: vec![DeviceFrameResponse {
@@ -409,7 +412,20 @@ async fn handle_stream_frames_socket(
                                         ocr_text: hot_frame.ocr_text_preview.clone(),
                                         browser_url: hot_frame.browser_url.clone(),
                                     },
-                                    audio: vec![],
+                                    audio: audio_entries
+                                        .into_iter()
+                                        .map(|a| AudioData {
+                                            device_name: a.device_name,
+                                            is_input: a.is_input,
+                                            transcription: a.transcription,
+                                            audio_file_path: a.audio_file_path,
+                                            duration_secs: a.duration_secs,
+                                            start_offset: a.start_time.unwrap_or(0.0),
+                                            audio_chunk_id: a.audio_chunk_id,
+                                            speaker_id: a.speaker_id,
+                                            speaker_name: a.speaker_name,
+                                        })
+                                        .collect(),
                                 }],
                             };
 
