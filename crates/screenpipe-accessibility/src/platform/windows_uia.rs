@@ -368,13 +368,40 @@ pub fn run_uia_thread(
         }
     }
 
-    // Initialize UIA context
-    let uia = match UiaContext::new() {
-        Ok(ctx) => ctx,
-        Err(e) => {
-            error!("Failed to initialize UI Automation: {:?}", e);
-            unsafe { CoUninitialize() };
-            return;
+    // Initialize UIA context with retries — COM services may not be ready
+    // immediately after system boot or when resuming from sleep.
+    let uia = {
+        let mut last_err = None;
+        let mut ctx = None;
+        for attempt in 0..4 {
+            match UiaContext::new() {
+                Ok(c) => {
+                    ctx = Some(c);
+                    break;
+                }
+                Err(e) => {
+                    let delay_secs = 1u64 << attempt.min(2); // 1, 2, 4, 4
+                    warn!(
+                        "UIA init attempt {} failed: {:?}, retrying in {}s",
+                        attempt + 1,
+                        e,
+                        delay_secs
+                    );
+                    last_err = Some(e);
+                    std::thread::sleep(std::time::Duration::from_secs(delay_secs));
+                }
+            }
+        }
+        match ctx {
+            Some(c) => c,
+            None => {
+                error!(
+                    "Failed to initialize UI Automation after 4 attempts: {:?}",
+                    last_err
+                );
+                unsafe { CoUninitialize() };
+                return;
+            }
         }
     };
 

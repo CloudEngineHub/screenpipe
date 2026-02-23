@@ -110,8 +110,32 @@ impl WindowsTreeWalker {
             state.com_initialized = true;
         }
         if state.uia.is_none() {
-            state.uia =
-                Some(UiaContext::new().map_err(|e| anyhow::anyhow!("UIA init failed: {:?}", e))?);
+            let mut last_err = None;
+            for attempt in 0..4 {
+                match UiaContext::new() {
+                    Ok(c) => {
+                        state.uia = Some(c);
+                        break;
+                    }
+                    Err(e) => {
+                        let delay_secs = 1u64 << attempt.min(2);
+                        tracing::warn!(
+                            "UIA lazy-init attempt {} failed: {:?}, retrying in {}s",
+                            attempt + 1,
+                            e,
+                            delay_secs
+                        );
+                        last_err = Some(e);
+                        std::thread::sleep(std::time::Duration::from_secs(delay_secs));
+                    }
+                }
+            }
+            if state.uia.is_none() {
+                return Err(anyhow::anyhow!(
+                    "UIA init failed after 4 attempts: {:?}",
+                    last_err
+                ));
+            }
         }
         Ok(state.uia.as_ref().unwrap())
     }
