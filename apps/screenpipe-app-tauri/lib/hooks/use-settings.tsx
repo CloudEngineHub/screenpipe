@@ -474,6 +474,21 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 		};
 	}, []);
 
+	// Auto-refresh user data from API when app starts with a stored token.
+	// This ensures subscription status (cloud_subscribed) stays current —
+	// e.g. when a subscription is granted after the user last logged in.
+	useEffect(() => {
+		if (!isSettingsLoaded) return;
+		const token = settings.user?.token;
+		if (!token) return;
+
+		// Force reload to bypass localforage cache
+		loadUser(token, true).catch((err) => {
+			console.warn("auto-refresh user data failed:", err);
+		});
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [isSettingsLoaded]);
+
 	// Identify with persistent analyticsId for consistent tracking across frontend/backend
 	useEffect(() => {
 		if (settings.analyticsId) {
