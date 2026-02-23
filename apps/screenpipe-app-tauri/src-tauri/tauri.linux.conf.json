@@ -1,5 +1,6 @@
 {
     "bundle": {
+        "publisher": "Mediar, Inc.",
         "externalBin": [
             "bun"
         ],
