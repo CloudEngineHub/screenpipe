@@ -242,7 +242,7 @@ function ToolCallBlock({ toolCall }: { toolCall: ToolCall }) {
           : JSON.stringify(toolCall.args).slice(0, 100);
 
   return (
-    <div className="rounded-lg border border-border/50 bg-background/50 text-xs font-mono overflow-hidden">
+    <div className="rounded-lg border border-border/50 bg-background/50 text-xs font-mono overflow-hidden max-w-full">
       <button
         onClick={() => setExpanded(!expanded)}
         className="w-full flex items-center gap-2 px-3 py-1.5 hover:bg-muted/50 transition-colors text-left"
@@ -264,7 +264,7 @@ function ToolCallBlock({ toolCall }: { toolCall: ToolCall }) {
           {/* Args */}
           <div className="px-3 py-2 bg-neutral-900 dark:bg-neutral-950 text-neutral-300">
             <div className="text-[10px] uppercase tracking-wider text-neutral-500 mb-1">input</div>
-            <pre className="whitespace-pre-wrap break-words text-neutral-100 max-h-[200px] overflow-y-auto">
+            <pre className="whitespace-pre-wrap break-words text-neutral-100 max-h-[200px] overflow-y-auto overflow-x-hidden max-w-full">
               {toolCall.toolName === "bash" ? toolCall.args.command : JSON.stringify(toolCall.args, null, 2)}
             </pre>
           </div>
@@ -275,7 +275,7 @@ function ToolCallBlock({ toolCall }: { toolCall: ToolCall }) {
                 {toolCall.isError ? "error" : "output"}
               </div>
               <pre className={cn(
-                "whitespace-pre-wrap break-words max-h-[300px] overflow-y-auto",
+                "whitespace-pre-wrap break-words max-h-[300px] overflow-y-auto overflow-x-hidden max-w-full",
                 toolCall.isError ? "text-red-400" : "text-neutral-100"
               )}>
                 {toolCall.result}
@@ -302,7 +302,7 @@ function ThinkingBlock({ text, isThinking, durationMs }: { text: string; isThink
   const seconds = isThinking ? elapsed : durationMs ? Math.round(durationMs / 1000) : 0;
 
   return (
-    <div className="rounded-lg border border-border/30 bg-muted/20 text-xs overflow-hidden">
+    <div className="rounded-lg border border-border/30 bg-muted/20 text-xs overflow-hidden max-w-full">
       <button
         onClick={() => setExpanded(!expanded)}
         className="w-full flex items-center gap-2 px-3 py-2 hover:bg-muted/40 transition-colors text-left"
@@ -329,7 +329,7 @@ function MarkdownBlock({ text, isUser }: { text: string; isUser: boolean }) {
   return (
     <MemoizedReactMarkdown
       className={cn(
-        "prose prose-sm max-w-none break-words overflow-hidden",
+        "prose prose-sm max-w-full break-words overflow-hidden [word-break:break-word]",
         isUser
           ? "prose-invert dark:prose dark:text-background"
           : "dark:prose-invert"
@@ -415,7 +415,7 @@ function MarkdownBlock({ text, isUser }: { text: string; isUser: boolean }) {
 
           if (isCodeBlock) {
             return (
-              <code className="font-mono text-xs block whitespace-pre text-neutral-100" {...props}>
+              <code className="font-mono text-xs block whitespace-pre-wrap break-all text-neutral-100" {...props}>
                 {content}
               </code>
             );
@@ -2258,7 +2258,7 @@ export function StandaloneChat({ className }: { className?: string } = {}) {
 
         {/* Messages */}
         <div
-          className="relative flex-1 overflow-y-auto p-4 space-y-4"
+          className="relative flex-1 overflow-y-auto overflow-x-hidden p-4 space-y-4"
           onContextMenu={(e) => {
             if (messages.length === 0) return;
             e.preventDefault();
@@ -2376,7 +2376,7 @@ export function StandaloneChat({ className }: { className?: string } = {}) {
               <div className="group/message flex-1 flex flex-col min-w-0">
               <div
                 className={cn(
-                  "relative rounded-xl px-4 py-3 text-sm border overflow-hidden",
+                  "relative rounded-xl px-4 py-3 text-sm border overflow-hidden max-w-full",
                   message.role === "user"
                     ? "bg-foreground text-background border-foreground"
                     : "bg-muted/30 border-border/50"
