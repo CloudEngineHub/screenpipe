@@ -2,7 +2,7 @@
 
 import { getStore, useSettings } from "@/lib/hooks/use-settings";
 
-import React, { useEffect, useState, useRef, useCallback } from "react";
+import React, { useEffect, useState, useRef, useCallback, ErrorInfo } from "react";
 import NotificationHandler from "@/components/notification-handler";
 import { useToast } from "@/components/ui/use-toast";
 import { useOnboarding } from "@/lib/hooks/use-onboarding";
@@ -26,6 +26,45 @@ import SplashScreen from "@/components/splash-screen";
 import { useTimelineStore } from "@/lib/hooks/use-timeline-store";
 import { hasCachedData } from "@/lib/hooks/use-timeline-cache";
 import { invoke } from "@tauri-apps/api/core";
+
+class TimelineErrorBoundary extends React.Component<
+  { children: React.ReactNode },
+  { hasError: boolean; error: Error | null }
+> {
+  constructor(props: { children: React.ReactNode }) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+
+  static getDerivedStateFromError(error: Error) {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error: Error, info: ErrorInfo) {
+    console.error("Timeline crashed:", error.message, error.stack, info.componentStack);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="flex items-center justify-center h-screen bg-background">
+          <div className="text-center space-y-4 max-w-md">
+            <p className="text-lg font-medium">timeline crashed</p>
+            <p className="text-sm text-muted-foreground">{this.state.error?.message}</p>
+            <Button
+              onClick={() => this.setState({ hasError: false, error: null })}
+              variant="outline"
+            >
+              <RefreshCw className="h-4 w-4 mr-2" />
+              retry
+            </Button>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 export default function Home() {
   const { settings, updateSettings, loadUser, reloadStore, isSettingsLoaded, loadingError } = useSettings();
@@ -236,7 +275,9 @@ export default function Home() {
                   </div>
                 </div>
               )}
-              <Timeline />
+              <TimelineErrorBoundary>
+                <Timeline />
+              </TimelineErrorBoundary>
             </div>
           ) : showServerError ? (
             <div className="flex items-center justify-center h-screen p-4 bg-background w-full">
