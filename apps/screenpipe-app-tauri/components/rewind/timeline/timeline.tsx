@@ -5,7 +5,7 @@ import { StreamTimeSeriesResponse, TimeRange } from "@/components/rewind/timelin
 import { useTimelineSelection } from "@/lib/hooks/use-timeline-selection";
 import { getStore, type ChatConversation } from "@/lib/hooks/use-settings";
 import { isAfter, subDays, format } from "date-fns";
-import { motion, useScroll, useTransform } from "framer-motion";
+import { motion } from "framer-motion";
 import { ZoomIn, ZoomOut, Mic } from "lucide-react";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
@@ -187,11 +187,6 @@ export const TimelineSlider = ({
 	const containerRef = useRef<HTMLDivElement>(null);
 	const observerTargetRef = useRef<HTMLDivElement>(null);
 	const lastFetchRef = useRef<Date | null>(null);
-	const { scrollXProgress } = useScroll({
-		container: containerRef,
-		offset: ["start end", "end start"],
-	});
-	const lineWidth = useTransform(scrollXProgress, [0, 1], ["0%", "100%"]);
 	const [hoveredTimestamp, setHoveredTimestamp] = useState<string | null>(null);
 	const [hoveredRect, setHoveredRect] = useState<{ x: number; y: number } | null>(null);
 	const [isDragging, setIsDragging] = useState(false);
@@ -625,10 +620,6 @@ export const TimelineSlider = ({
 
 	return (
 		<div className="relative w-full" dir="rtl">
-			<motion.div
-				className="absolute top-0 h-1 bg-foreground/30"
-				style={{ width: lineWidth }}
-			/>
 			{/* Zoom controls + monitor dots - floating on left side */}
 			<div className="absolute left-3 top-1/2 -translate-y-1/2 z-30 flex flex-col gap-1 bg-background/80 backdrop-blur-sm border border-border rounded-lg p-1">
 				{/* Monitor filter dots — above zoom, only with 2+ monitors */}
