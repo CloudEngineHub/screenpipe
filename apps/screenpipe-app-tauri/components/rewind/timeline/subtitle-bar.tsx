@@ -11,6 +11,8 @@ interface SubtitleBarProps {
 	currentIndex: number;
 	isPlaying?: boolean;
 	onClick?: () => void;
+	transcriptionPaused?: boolean;
+	meetingApp?: string;
 }
 
 interface AudioEntry extends AudioData {
@@ -26,7 +28,7 @@ const MAX_LINES = 3;
 /** How many seconds a line stays visible after its audio ends */
 const LINGER_SECS = 4;
 
-export function SubtitleBar({ frames, currentIndex, onClick }: SubtitleBarProps) {
+export function SubtitleBar({ frames, currentIndex, onClick, transcriptionPaused, meetingApp }: SubtitleBarProps) {
 	// Collect all active audio entries within a window around the current frame,
 	// sorted chronologically. We show the most recent MAX_LINES.
 	const activeEntries = useMemo(() => {
@@ -123,7 +125,8 @@ export function SubtitleBar({ frames, currentIndex, onClick }: SubtitleBarProps)
 		}
 	}, [activeEntries.length]);
 
-	if (activeEntries.length === 0) return null;
+	// Show paused indicator even when no active entries
+	if (activeEntries.length === 0 && !transcriptionPaused) return null;
 
 	return (
 		<div
@@ -135,6 +138,16 @@ export function SubtitleBar({ frames, currentIndex, onClick }: SubtitleBarProps)
 				ref={scrollRef}
 				className="flex flex-col gap-1 px-3 py-2 bg-background/80 backdrop-blur-sm rounded border border-border/50 shadow-sm max-w-2xl mx-auto overflow-hidden"
 			>
+				{/* Transcription status indicator */}
+				{transcriptionPaused && (
+					<div className="flex items-center gap-1.5 text-[10px] text-amber-500/80">
+						<span className="relative flex h-1.5 w-1.5">
+							<span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
+							<span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-amber-500"></span>
+						</span>
+						<span>transcription paused{meetingApp ? ` (${meetingApp})` : ""}</span>
+					</div>
+				)}
 				{activeEntries.map((entry, i) => {
 					// Newest line (last) is fully opaque, older lines fade
 					const age = activeEntries.length - 1 - i;

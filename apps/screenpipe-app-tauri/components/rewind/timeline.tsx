@@ -25,6 +25,7 @@ import { findNearestDateWithFrames } from "@/lib/actions/has-frames-date";
 import { CurrentFrameTimeline } from "@/components/rewind/current-frame-timeline";
 import { usePlatform } from "@/lib/hooks/use-platform";
 import { useAudioPlayback } from "@/lib/hooks/use-audio-playback";
+import { useHealthCheck } from "@/lib/hooks/use-health-check";
 
 import posthog from "posthog-js";
 import { toast } from "@/components/ui/use-toast";
@@ -80,9 +81,11 @@ const easeOutCubic = (x: number): number => {
 
 export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 	const { isMac } = usePlatform();
+	const { health } = useHealthCheck();
 	const [currentIndex, setCurrentIndex] = useState(0);
 	const [showAudioTranscript, setShowAudioTranscript] = useState(false);
 	const [showSearchModal, setShowSearchModal] = useState(false);
+	const [selectedDeviceId, setSelectedDeviceId] = useState<string>("all");
 
 
 	const containerRef = useRef<HTMLDivElement | null>(null);
@@ -183,7 +186,7 @@ export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 	const isAtLiveEdge = currentIndex === 0;
 	const prevFramesLengthRef = useRef(frames.length);
 
-	// collect unique device ids across all frames (for monitor pill)
+	// collect unique device ids across all frames (for monitor filter)
 	const allDeviceIds = useMemo(() => {
 		const ids = new Set<string>();
 		for (const frame of frames) {
@@ -191,8 +194,16 @@ export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 				if (d.device_id) ids.add(d.device_id);
 			}
 		}
-		return [...ids];
+		return [...ids].sort();
 	}, [frames]);
+
+	// Filter current frame's devices by selected monitor for display
+	const displayFrame = useMemo(() => {
+		if (!currentFrame || selectedDeviceId === "all" || allDeviceIds.length <= 1) return currentFrame;
+		const filtered = currentFrame.devices.filter((d) => d.device_id === selectedDeviceId);
+		if (filtered.length === 0) return currentFrame; // fallback if device not in this frame
+		return { ...currentFrame, devices: filtered };
+	}, [currentFrame, selectedDeviceId, allDeviceIds.length]);
 
 	// When new frames arrive and user is NOT at live edge, adjust index to stay on same frame
 	useEffect(() => {
@@ -1303,9 +1314,9 @@ export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 			>
 				{/* Main Image - Full Screen - Should fill entire viewport */}
 				<div className={`absolute inset-0 z-10 ${embedded ? "bg-background" : "bg-black"}`}>
-					{currentFrame ? (
+					{displayFrame ? (
 						<CurrentFrameTimeline
-							currentFrame={currentFrame}
+							currentFrame={displayFrame}
 							allDeviceIds={allDeviceIds}
 							onNavigate={(direction) => {
 								const newIndex = direction === "next"
@@ -1435,6 +1446,22 @@ export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 					/>
 					{/* Top right buttons */}
 					<div className={`absolute ${embedded ? "top-2" : "top-[calc(env(safe-area-inset-top)+16px)]"} right-4 flex items-center gap-2`}>
+						{/* Monitor filter — only show when multiple monitors */}
+						{allDeviceIds.length > 1 && (
+							<select
+								value={selectedDeviceId}
+								onChange={(e) => setSelectedDeviceId(e.target.value)}
+								className="h-8 px-2 text-xs bg-background/80 hover:bg-background border border-border rounded-md transition-colors text-foreground appearance-none cursor-pointer"
+								title="Filter by monitor"
+							>
+								<option value="all">all monitors</option>
+								{allDeviceIds.map((id) => (
+									<option key={id} value={id}>
+										{id.replace("monitor_", "monitor ")}
+									</option>
+								))}
+							</select>
+						)}
 						{/* Refresh button */}
 						<button
 							onClick={handleRefresh}
@@ -1458,6 +1485,8 @@ export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 						currentIndex={currentIndex}
 						isPlaying={isPlaying}
 						onClick={() => setShowAudioTranscript(true)}
+						transcriptionPaused={health?.audio_pipeline?.transcription_paused}
+						meetingApp={health?.audio_pipeline?.meeting_app}
 					/>
 				</div>
 
