@@ -61,6 +61,8 @@ pub struct PairedCaptureResult {
     pub window_name: Option<String>,
     /// Browser URL (if detected)
     pub browser_url: Option<String>,
+    /// Content hash from accessibility tree (for dedup)
+    pub content_hash: Option<i64>,
 }
 
 /// Performs a paired capture: screenshot + accessibility tree data.
@@ -219,6 +221,7 @@ pub async fn paired_capture(
         app_name: ctx.app_name.map(String::from),
         window_name: ctx.window_name.map(String::from),
         browser_url: ctx.browser_url.map(String::from),
+        content_hash,
     })
 }
 

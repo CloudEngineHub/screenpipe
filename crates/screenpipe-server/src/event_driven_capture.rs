@@ -100,7 +100,7 @@ impl Default for EventDrivenCaptureConfig {
             capture_on_click: true,
             capture_on_clipboard: true,
             visual_check_interval_ms: 3_000, // check every 3 seconds
-            visual_change_threshold: 0.02,   // ~2% difference triggers capture
+            visual_change_threshold: 0.05,   // ~5% difference triggers capture
         }
     }
 }
@@ -234,6 +234,9 @@ pub async fn event_driven_capture_loop(
     };
     let mut last_visual_check = Instant::now();
 
+    // Track content hash for dedup across captures
+    let mut last_content_hash: Option<i64> = None;
+
     // Capture immediately on startup so the timeline has a frame right away.
     // Also seeds the frame comparer so subsequent visual-change checks work.
     {
@@ -249,6 +252,7 @@ pub async fn event_driven_capture_loop(
             &tree_walker_config,
             &CaptureTrigger::Manual,
             use_pii_removal,
+            None, // first capture — no previous hash
         )
         .await
         {
@@ -257,16 +261,18 @@ pub async fn event_driven_capture_loop(
                 if let Some(ref mut comparer) = frame_comparer {
                     let _ = comparer.compare(&output.image);
                 }
-                vision_metrics.record_capture();
-                vision_metrics.record_db_write(Duration::from_millis(output.result.duration_ms as u64));
-                // Push to hot cache for zero-DB timeline reads
-                if let Some(ref cache) = hot_frame_cache {
-                    push_to_hot_cache(cache, &output.result, &device_name, &CaptureTrigger::Manual).await;
+                if let Some(ref result) = output.result {
+                    last_content_hash = result.content_hash;
+                    vision_metrics.record_capture();
+                    vision_metrics.record_db_write(Duration::from_millis(result.duration_ms as u64));
+                    if let Some(ref cache) = hot_frame_cache {
+                        push_to_hot_cache(cache, result, &device_name, &CaptureTrigger::Manual).await;
+                    }
+                    info!(
+                        "startup capture for monitor {}: frame_id={}, dur={}ms",
+                        monitor_id, result.frame_id, result.duration_ms
+                    );
                 }
-                info!(
-                    "startup capture for monitor {}: frame_id={}, dur={}ms",
-                    monitor_id, output.result.frame_id, output.result.duration_ms
-                );
             }
             Err(e) => {
                 warn!("startup capture failed for monitor {}: {}", monitor_id, e);
@@ -351,6 +357,7 @@ pub async fn event_driven_capture_loop(
                         &tree_walker_config,
                         &trigger,
                         use_pii_removal,
+                        last_content_hash,
                     ),
                 )
                 .await;
@@ -366,23 +373,32 @@ pub async fn event_driven_capture_loop(
                             let _ = comparer.compare(&output.image);
                         }
 
-                        // Update vision metrics so health check reports "ok"
-                        vision_metrics.record_capture();
-                        vision_metrics
-                            .record_db_write(Duration::from_millis(output.result.duration_ms as u64));
+                        if let Some(ref result) = output.result {
+                            // Full capture — update hash, metrics, cache
+                            last_content_hash = result.content_hash;
+                            vision_metrics.record_capture();
+                            vision_metrics
+                                .record_db_write(Duration::from_millis(result.duration_ms as u64));
 
-                        // Push to hot cache for zero-DB timeline reads
-                        if let Some(ref cache) = hot_frame_cache {
-                            push_to_hot_cache(cache, &output.result, &device_name, &trigger).await;
+                            if let Some(ref cache) = hot_frame_cache {
+                                push_to_hot_cache(cache, result, &device_name, &trigger).await;
+                            }
+
+                            debug!(
+                                "event capture: trigger={}, frame_id={}, text_source={:?}, dur={}ms",
+                                trigger.as_str(),
+                                result.frame_id,
+                                result.text_source,
+                                result.duration_ms
+                            );
+                        } else {
+                            // Content dedup — capture skipped, still record heartbeat
+                            debug!(
+                                "content dedup: skipped DB write for monitor {} (trigger={})",
+                                monitor_id,
+                                trigger.as_str()
+                            );
                         }
-
-                        debug!(
-                            "event capture: trigger={}, frame_id={}, text_source={:?}, dur={}ms",
-                            trigger.as_str(),
-                            output.result.frame_id,
-                            output.result.text_source,
-                            output.result.duration_ms
-                        );
                     }
                     Ok(Err(e)) => {
                         error!(
@@ -450,13 +466,19 @@ async fn push_to_hot_cache(
 
 /// Result of do_capture: paired capture result + the screenshot image for comparer reuse.
 struct CaptureOutput {
-    result: PairedCaptureResult,
+    /// None when content dedup skipped the capture (identical accessibility text).
+    result: Option<PairedCaptureResult>,
     /// The captured image — reused for frame comparer update to avoid taking
     /// a redundant extra screenshot after each capture.
     image: image::DynamicImage,
 }
 
 /// Perform a single event-driven capture.
+///
+/// When `previous_content_hash` is `Some` and matches the current accessibility
+/// tree hash, the capture is skipped (content dedup). The returned
+/// `CaptureOutput.result` will be `None` in that case — the caller should still
+/// update the frame comparer with the image but skip DB/metrics work.
 async fn do_capture(
     db: &DatabaseManager,
     monitor: &SafeMonitor,
@@ -466,6 +488,7 @@ async fn do_capture(
     tree_walker_config: &TreeWalkerConfig,
     trigger: &CaptureTrigger,
     use_pii_removal: bool,
+    previous_content_hash: Option<i64>,
 ) -> Result<CaptureOutput> {
     let captured_at = Utc::now();
 
@@ -482,6 +505,25 @@ async fn do_capture(
         crate::paired_capture::walk_accessibility_tree(&config)
     })
     .await?;
+
+    // Content dedup: skip capture if accessibility text hasn't changed
+    if let Some(ref snap) = tree_snapshot {
+        if !snap.text_content.is_empty() {
+            let new_hash = snap.content_hash as i64;
+            if let Some(prev) = previous_content_hash {
+                if prev == new_hash && new_hash != 0 {
+                    debug!(
+                        "content dedup: skipping capture for monitor {} (hash={}, trigger={})",
+                        monitor_id, new_hash, trigger.as_str()
+                    );
+                    return Ok(CaptureOutput {
+                        result: None,
+                        image,
+                    });
+                }
+            }
+        }
+    }
 
     // Use tree snapshot metadata for app/window/url if available
     let (app_name_owned, window_name_owned, browser_url_owned) = match &tree_snapshot {
@@ -513,7 +555,7 @@ async fn do_capture(
     // because paired_capture no longer retains a clone.
     let image = Arc::try_unwrap(ctx.image)
         .unwrap_or_else(|arc| (*arc).clone());
-    Ok(CaptureOutput { result, image })
+    Ok(CaptureOutput { result: Some(result), image })
 }
 
 #[cfg(test)]
@@ -619,6 +661,6 @@ mod tests {
         assert!(config.capture_on_click);
         assert!(config.capture_on_clipboard);
         assert_eq!(config.visual_check_interval_ms, 3_000);
-        assert!((config.visual_change_threshold - 0.02).abs() < f64::EPSILON);
+        assert!((config.visual_change_threshold - 0.05).abs() < f64::EPSILON);
     }
 }
