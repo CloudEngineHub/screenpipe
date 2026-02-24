@@ -86,27 +86,40 @@ pub async fn paired_capture(
         ctx.capture_trigger
     );
 
-    // --- Run OCR to get text positions with bounding boxes (for TextOverlay) ---
-    // Always run OCR regardless of accessibility data so the timeline has
-    // clickable text blocks that users can hover/click to copy.
-    let image_for_ocr = ctx.image.clone();
-    let ocr_result = tokio::task::spawn_blocking(move || {
-        #[cfg(target_os = "macos")]
-        {
-            let (text, json, confidence) =
-                screenpipe_vision::perform_ocr_apple(&image_for_ocr, &[]);
-            (text, json, confidence)
-        }
-        #[cfg(not(target_os = "macos"))]
-        {
-            let _ = image_for_ocr;
-            (String::new(), "[]".to_string(), None::<f64>)
-        }
-    })
-    .await
-    .unwrap_or_else(|_| (String::new(), "[]".to_string(), None));
+    // --- Check if accessibility tree already provides text ---
+    // When the tree snapshot has text we skip OCR entirely. This avoids
+    // ~50-200ms of Apple Vision CPU work per capture AND prevents cloning
+    // the Arc<DynamicImage> into the spawn_blocking closure (which would
+    // make Arc::try_unwrap fail later, forcing a full image copy).
+    #[cfg(feature = "ui-events")]
+    let has_accessibility_text = tree_snapshot
+        .map(|s| !s.text_content.is_empty())
+        .unwrap_or(false);
+    #[cfg(not(feature = "ui-events"))]
+    let has_accessibility_text = false;
 
-    let (ocr_text, ocr_text_json, _ocr_confidence) = ocr_result;
+    // Only run OCR when accessibility tree returned no text (games, terminals, etc.)
+    let (ocr_text, ocr_text_json) = if !has_accessibility_text {
+        let image_for_ocr = ctx.image.clone();
+        let ocr_result = tokio::task::spawn_blocking(move || {
+            #[cfg(target_os = "macos")]
+            {
+                let (text, json, _confidence) =
+                    screenpipe_vision::perform_ocr_apple(&image_for_ocr, &[]);
+                (text, json)
+            }
+            #[cfg(not(target_os = "macos"))]
+            {
+                let _ = image_for_ocr;
+                (String::new(), "[]".to_string())
+            }
+        })
+        .await
+        .unwrap_or_else(|_| (String::new(), "[]".to_string()));
+        ocr_result
+    } else {
+        (String::new(), "[]".to_string())
+    };
 
     // --- Extract data from tree snapshot, fall back to OCR text ---
     #[cfg(feature = "ui-events")]
@@ -157,8 +170,6 @@ pub async fn paired_capture(
     };
 
     // Insert snapshot frame + OCR text positions in a single transaction.
-    // Combining both writes avoids opening two separate transactions per capture,
-    // which halves pool pressure during high-frequency event-driven captures.
     let ocr_data = if !ocr_text.is_empty() {
         Some((ocr_text.as_str(), ocr_text_json.as_str(), "AppleNative"))
     } else {
