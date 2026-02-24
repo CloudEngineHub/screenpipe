@@ -31,6 +31,7 @@ const EXCLUDED_APPS: &[&str] = &[
     "dashlane",
     "keepassxc",
     "credential manager",
+    "logonui",
 ];
 
 /// Window title patterns that indicate sensitive content.

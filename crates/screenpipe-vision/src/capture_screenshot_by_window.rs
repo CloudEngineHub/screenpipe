@@ -230,10 +230,21 @@ impl WindowFilters {
         }
     }
 
+    /// Apps that are always excluded — system lock screen processes.
+    const BUILTIN_IGNORED: &'static [&'static str] = &["loginwindow", "logonui"];
+
     // O(n) - we could figure out a better way to do this
     pub fn is_valid(&self, app_name: &str, title: &str) -> bool {
         let app_name_lower = app_name.to_lowercase();
         let title_lower = title.to_lowercase();
+
+        // Always reject built-in system apps (lock screen, etc.)
+        if Self::BUILTIN_IGNORED
+            .iter()
+            .any(|b| app_name_lower == *b)
+        {
+            return false;
+        }
 
         // Check ignore list first — always reject ignored windows
         if !self.ignore_set.is_empty()

@@ -159,6 +159,21 @@ impl MacosTreeWalker {
 
 impl TreeWalkerPlatform for MacosTreeWalker {
     fn walk_focused_window(&self) -> Result<Option<TreeSnapshot>> {
+        // Wrap in autorelease pool — cidre AX/NS APIs create autoreleased
+        // ObjC objects. Without this, objects accumulate on the tokio
+        // blocking thread (reused across calls), causing a memory leak
+        // proportional to capture rate.
+        // Note: ar_pool requires R: Clone, so we return Result<_, String>
+        // and convert back to anyhow::Error.
+        cidre::objc::ar_pool(|| -> Result<Option<TreeSnapshot>, String> {
+            self.walk_focused_window_inner().map_err(|e| format!("{}", e))
+        })
+        .map_err(|s| anyhow::anyhow!(s))
+    }
+}
+
+impl MacosTreeWalker {
+    fn walk_focused_window_inner(&self) -> Result<Option<TreeSnapshot>> {
         let start = Instant::now();
 
         // 1. Get the focused (active) application via NSWorkspace
@@ -185,6 +200,7 @@ impl TreeWalkerPlatform for MacosTreeWalker {
             "keepassxc",
             "keychain access",
             "screenpipe",
+            "loginwindow",
         ];
         if EXCLUDED_APPS.iter().any(|ex| app_lower.contains(ex)) {
             return Ok(None);

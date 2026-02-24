@@ -45,8 +45,6 @@ pub struct PairedCaptureResult {
     pub frame_id: i64,
     /// Path to the JPEG snapshot on disk
     pub snapshot_path: String,
-    /// The captured screenshot image
-    pub image: Arc<DynamicImage>,
     /// Accessibility text (if available)
     pub accessibility_text: Option<String>,
     /// How text was extracted: "accessibility", "ocr", or None
@@ -196,7 +194,6 @@ pub async fn paired_capture(
     Ok(PairedCaptureResult {
         frame_id,
         snapshot_path: snapshot_path_str,
-        image: ctx.image.clone(),
         accessibility_text,
         text_source: text_source.map(String::from),
         capture_trigger: ctx.capture_trigger.to_string(),
@@ -325,6 +322,9 @@ mod tests {
                 walk_duration: std::time::Duration::from_millis(5),
                 content_hash: 12345,
                 simhash: 67890,
+                truncated: false,
+                truncation_reason: screenpipe_accessibility::tree::TruncationReason::None,
+                max_depth_reached: 0,
             };
             paired_capture(&ctx, Some(&snap)).await.unwrap()
         };
@@ -380,6 +380,9 @@ mod tests {
                 walk_duration: std::time::Duration::from_millis(1),
                 content_hash: 0,
                 simhash: 0,
+                truncated: false,
+                truncation_reason: screenpipe_accessibility::tree::TruncationReason::None,
+                max_depth_reached: 0,
             };
             paired_capture(&ctx, Some(&snap)).await.unwrap()
         };

@@ -9,7 +9,7 @@
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
-use super::{hamming_distance, TreeSnapshot, TruncationReason};
+use super::{hamming_distance, TreeSnapshot};
 
 const MAX_ENTRIES: usize = 100;
 const DEFAULT_TTL: Duration = Duration::from_secs(60);
@@ -92,6 +92,7 @@ impl Default for TreeCache {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tree::TruncationReason;
     use chrono::Utc;
 
     fn make_snapshot(app: &str, window: &str, text: &str) -> TreeSnapshot {

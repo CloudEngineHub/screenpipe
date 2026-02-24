@@ -255,22 +255,20 @@ pub async fn event_driven_capture_loop(
         )
         .await
         {
-            Ok(result) => {
+            Ok(output) => {
                 state.mark_captured();
                 if let Some(ref mut comparer) = frame_comparer {
-                    if let Ok((img, _)) = capture_monitor_image(&monitor).await {
-                        let _ = comparer.compare(&img);
-                    }
+                    let _ = comparer.compare(&output.image);
                 }
                 vision_metrics.record_capture();
-                vision_metrics.record_db_write(Duration::from_millis(result.duration_ms as u64));
+                vision_metrics.record_db_write(Duration::from_millis(output.result.duration_ms as u64));
                 // Push to hot cache for zero-DB timeline reads
                 if let Some(ref cache) = hot_frame_cache {
-                    push_to_hot_cache(cache, &result, &device_name, &CaptureTrigger::Manual).await;
+                    push_to_hot_cache(cache, &output.result, &device_name, &CaptureTrigger::Manual).await;
                 }
                 info!(
                     "startup capture for monitor {}: frame_id={}, dur={}ms",
-                    monitor_id, result.frame_id, result.duration_ms
+                    monitor_id, output.result.frame_id, output.result.duration_ms
                 );
             }
             Err(e) => {
@@ -360,33 +358,32 @@ pub async fn event_driven_capture_loop(
                 .await;
 
                 match capture_result {
-                    Ok(Ok(result)) => {
+                    Ok(Ok(output)) => {
                         state.mark_captured();
 
                         // Feed the captured frame to comparer so we don't
-                        // re-trigger on the same visual state
+                        // re-trigger on the same visual state (reuses capture
+                        // image — no extra screenshot needed)
                         if let Some(ref mut comparer) = frame_comparer {
-                            if let Ok((img, _)) = capture_monitor_image(&monitor).await {
-                                let _ = comparer.compare(&img);
-                            }
+                            let _ = comparer.compare(&output.image);
                         }
 
                         // Update vision metrics so health check reports "ok"
                         vision_metrics.record_capture();
                         vision_metrics
-                            .record_db_write(Duration::from_millis(result.duration_ms as u64));
+                            .record_db_write(Duration::from_millis(output.result.duration_ms as u64));
 
                         // Push to hot cache for zero-DB timeline reads
                         if let Some(ref cache) = hot_frame_cache {
-                            push_to_hot_cache(cache, &result, &device_name, &trigger).await;
+                            push_to_hot_cache(cache, &output.result, &device_name, &trigger).await;
                         }
 
                         debug!(
                             "event capture: trigger={}, frame_id={}, text_source={:?}, dur={}ms",
                             trigger.as_str(),
-                            result.frame_id,
-                            result.text_source,
-                            result.duration_ms
+                            output.result.frame_id,
+                            output.result.text_source,
+                            output.result.duration_ms
                         );
                     }
                     Ok(Err(e)) => {
@@ -454,6 +451,15 @@ async fn push_to_hot_cache(
     cache.push_frame(hot).await;
 }
 
+/// Result of do_capture: paired capture result + the screenshot image for comparer reuse.
+#[cfg(feature = "ui-events")]
+struct CaptureOutput {
+    result: PairedCaptureResult,
+    /// The captured image — reused for frame comparer update to avoid taking
+    /// a redundant extra screenshot after each capture.
+    image: image::DynamicImage,
+}
+
 /// Perform a single event-driven capture.
 #[cfg(feature = "ui-events")]
 async fn do_capture(
@@ -464,7 +470,7 @@ async fn do_capture(
     snapshot_writer: &SnapshotWriter,
     tree_walker_config: &TreeWalkerConfig,
     trigger: &CaptureTrigger,
-) -> Result<PairedCaptureResult> {
+) -> Result<CaptureOutput> {
     let captured_at = Utc::now();
 
     // Take screenshot
@@ -505,7 +511,12 @@ async fn do_capture(
         capture_trigger: trigger.as_str(),
     };
 
-    paired_capture(&ctx, tree_snapshot.as_ref()).await
+    let result = paired_capture(&ctx, tree_snapshot.as_ref()).await?;
+    // Extract image from Arc for comparer reuse. Arc::try_unwrap succeeds
+    // because paired_capture no longer retains a clone.
+    let image = Arc::try_unwrap(ctx.image)
+        .unwrap_or_else(|arc| (*arc).clone());
+    Ok(CaptureOutput { result, image })
 }
 
 #[cfg(test)]
