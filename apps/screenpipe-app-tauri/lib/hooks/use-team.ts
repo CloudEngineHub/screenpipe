@@ -400,23 +400,31 @@ export function useTeam() {
   );
 
   // send email invite (calls server API)
-  // TODO: server endpoint POST https://screenpi.pe/api/team/invite must be created in website-screenpipe repo
   const sendInviteEmail = useCallback(
     async (email: string) => {
       if (!token || !state.inviteLink || !state.team)
         throw new Error("no team");
-      const res = await fetch(`${API}/invite`, {
-        method: "POST",
-        headers: headers(),
-        body: JSON.stringify({
-          email,
-          team_name: state.team.name,
-          invite_link: state.inviteLink,
-        }),
-      });
+      let res: Response;
+      try {
+        res = await fetch(`${API}/invite`, {
+          method: "POST",
+          headers: headers(),
+          body: JSON.stringify({
+            email,
+            team_name: state.team.name,
+            invite_link: state.inviteLink,
+          }),
+        });
+      } catch {
+        throw new Error("network error — could not reach server");
+      }
       if (!res.ok) {
-        const err = await res.json();
-        throw new Error(err.error || "failed to send invite");
+        let msg = "failed to send invite";
+        try {
+          const err = await res.json();
+          msg = err.error || msg;
+        } catch {}
+        throw new Error(msg);
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
