@@ -1140,6 +1140,7 @@ async fn main() {
                 recording::get_monitors,
                 recording::get_audio_devices,
                 // Commands from commands.rs
+                commands::is_enterprise_build_cmd,
                 commands::get_disk_usage,
                 commands::open_pipe_window,
                 commands::update_show_screenpipe_shortcut,
@@ -1881,8 +1882,7 @@ async fn main() {
 
             // Setup tray
             if let Some(_) = app_handle.tray_by_id("screenpipe_main") {
-                let update_item = update_manager.update_now_menu_item_ref().clone();
-                if let Err(e) = tray::setup_tray(&app_handle, &update_item) {
+                if let Err(e) = tray::setup_tray(&app_handle, update_manager.update_now_menu_item_ref()) {
                     error!("Failed to setup tray: {}", e);
                 }
             }

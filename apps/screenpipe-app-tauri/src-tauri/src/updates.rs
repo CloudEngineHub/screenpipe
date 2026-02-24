@@ -96,15 +96,16 @@ pub fn is_source_build(_app: &tauri::AppHandle) -> bool {
 }
 
 /// Enterprise build: updates are managed by IT (Intune/RoboPack), not in-app.
-pub fn is_enterprise_build(app: &tauri::AppHandle) -> bool {
-    app.config().identifier.as_str() == "screenpi.pe.enterprise"
+pub fn is_enterprise_build(_app: &tauri::AppHandle) -> bool {
+    cfg!(feature = "enterprise-build")
 }
 
 pub struct UpdatesManager {
     interval: Duration,
     update_available: Arc<Mutex<bool>>,
     app: tauri::AppHandle,
-    update_menu_item: MenuItem<Wry>,
+    /// None for enterprise builds (no in-app update UI).
+    update_menu_item: Option<MenuItem<Wry>>,
     update_installed: Arc<Mutex<bool>>,
     /// Prevents concurrent check_for_updates calls (boot check + periodic race)
     is_checking: AtomicBool,
@@ -112,11 +113,19 @@ pub struct UpdatesManager {
 
 impl UpdatesManager {
     pub fn new(app: &tauri::AppHandle, interval_minutes: u64) -> Result<Self, Error> {
-        // Show different menu text for source builds
-        let menu_text = if is_source_build(app) {
-            "Auto-updates unavailable (source build)"
+        let update_menu_item = if is_enterprise_build(app) {
+            None
         } else {
-            "Screenpipe is up to date"
+            let (menu_text, enabled) = if is_source_build(app) {
+                ("Auto-updates unavailable (source build)", true) // Enable to show info dialog
+            } else {
+                ("Screenpipe is up to date", false)
+            };
+            Some(
+                MenuItemBuilder::with_id("update_now", menu_text)
+                    .enabled(enabled)
+                    .build(app)?,
+            )
         };
 
         Ok(Self {
@@ -124,9 +133,7 @@ impl UpdatesManager {
             update_available: Arc::new(Mutex::new(false)),
             update_installed: Arc::new(Mutex::new(false)),
             app: app.clone(),
-            update_menu_item: MenuItemBuilder::with_id("update_now", menu_text)
-                .enabled(is_source_build(app)) // Enable for source builds to show info dialog
-                .build(app)?,
+            update_menu_item,
             is_checking: AtomicBool::new(false),
         })
     }
@@ -219,9 +226,10 @@ impl UpdatesManager {
             });
             let _ = self.app.emit("update-downloading", download_info);
 
-            self.update_menu_item.set_enabled(false)?;
-            self.update_menu_item
-                .set_text("Downloading latest version of screenpipe")?;
+            if let Some(ref item) = self.update_menu_item {
+                item.set_enabled(false)?;
+                item.set_text("Downloading latest version of screenpipe")?;
+            }
 
             if let Some(tray) = self.app.tray_by_id("screenpipe_main") {
                 let theme = dark_light::detect().unwrap_or(Mode::Dark);
@@ -275,9 +283,9 @@ impl UpdatesManager {
                             let _ = app_handle.emit("update-download-progress", progress);
                             info!("update download: {}%", pct);
                         }
-                        let _ = menu_item.set_text(
-                            &format!("Downloading update... {}%", pct)
-                        );
+                        if let Some(ref m) = menu_item {
+                            let _ = m.set_text(&format!("Downloading update... {}%", pct));
+                        }
                     },
                     || {},
                 ).await;
@@ -285,8 +293,10 @@ impl UpdatesManager {
                 match download_result {
                     Ok(_) => {
                         *self.update_installed.lock().await = true;
-                        self.update_menu_item.set_enabled(true)?;
-                        self.update_menu_item.set_text("Restart to update")?;
+                        if let Some(ref item) = self.update_menu_item {
+                            item.set_enabled(true)?;
+                            item.set_text("Restart to update")?;
+                        }
                     }
                     Err(e) => {
                         let err_str = e.to_string();
@@ -309,8 +319,10 @@ impl UpdatesManager {
                                     .body(format!("v{} is ready — sign in to download", version_str))
                                     .show();
                             });
-                            self.update_menu_item.set_enabled(true)?;
-                            self.update_menu_item.set_text("Sign in to update")?;
+                            if let Some(ref item) = self.update_menu_item {
+                                item.set_enabled(true)?;
+                                item.set_text("Sign in to update")?;
+                            }
                             return Ok(false);
                         }
                         return Err(e.into());
@@ -397,9 +409,10 @@ impl UpdatesManager {
                     #[cfg(target_os = "windows")]
                     {
 
-                        self.update_menu_item.set_enabled(false)?;
-                        self.update_menu_item
-                            .set_text("Downloading latest version of screenpipe")?;
+                        if let Some(ref item) = self.update_menu_item {
+                            item.set_enabled(false)?;
+                            item.set_text("Downloading latest version of screenpipe")?;
+                        }
 
                         if let Err(err) =
                             stop_screenpipe(self.app.state::<RecordingState>(), self.app.clone())
@@ -419,17 +432,19 @@ impl UpdatesManager {
                                     .unwrap_or(0);
                                 if pct >= lp + 5 || pct == 100 {
                                     lp = pct;
-                                    let _ = menu_item_win.set_text(
-                                        &format!("Downloading update... {}%", pct)
-                                    );
+                                    if let Some(ref m) = menu_item_win {
+                                        let _ = m.set_text(&format!("Downloading update... {}%", pct));
+                                    }
                                 }
                             },
                             || {},
                         ).await?;
                         *self.update_installed.lock().await = true;
 
-                        self.update_menu_item.set_enabled(true)?;
-                        self.update_menu_item.set_text("Restart to update")?;
+                        if let Some(ref item) = self.update_menu_item {
+                            item.set_enabled(true)?;
+                            item.set_text("Restart to update")?;
+                        }
                     }
                     // Proceed with the update
 
@@ -465,8 +480,8 @@ impl UpdatesManager {
         Result::Ok(false)
     }
 
-    pub fn update_now_menu_item_ref(&self) -> &MenuItem<Wry> {
-        &self.update_menu_item
+    pub fn update_now_menu_item_ref(&self) -> Option<&MenuItem<Wry>> {
+        self.update_menu_item.as_ref()
     }
 
     pub fn update_screenpipe(&self) -> Option<Error> {

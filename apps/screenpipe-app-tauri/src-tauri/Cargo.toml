@@ -183,6 +183,10 @@ custom-protocol = ["tauri/custom-protocol"]
 # Source builds without this flag will show "auto-updates unavailable"
 official-build = []
 
+# Enterprise build: updates managed by IT (Intune/RoboPack). Set by enterprise release workflow.
+# Do NOT add official-build here — we skip all in-app update logic for enterprise.
+enterprise-build = []
+
 # On-device AI via Apple Foundation Models (macOS 26+ / Xcode 26+ only)
 apple-intelligence = ["screenpipe-server/apple-intelligence"]
 
