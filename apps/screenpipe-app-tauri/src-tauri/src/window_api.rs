@@ -1077,7 +1077,6 @@ impl ShowRewindWindow {
                         .resizable(false)
                         .maximizable(false)
                         .minimizable(false)
-                        .skip_taskbar(true)
                         .focused(true)
                         .transparent(true)
                         .visible(false)
