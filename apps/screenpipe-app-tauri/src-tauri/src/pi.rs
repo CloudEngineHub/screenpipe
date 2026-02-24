@@ -770,17 +770,38 @@ pub async fn pi_start_inner(
                 }
             }
             find_pi_executable()
-                .ok_or_else(|| format!("Pi not found. Install with: bun add -g {}", PI_PACKAGE))?
+                .ok_or_else(|| {
+                    let bun_found = find_bun_executable().is_some();
+                    if bun_found {
+                        format!("Pi not found after install attempt. Install manually with: bun add -g {}", PI_PACKAGE)
+                    } else {
+                        format!("Pi not found: bun is not installed. Screenpipe needs bun to run the AI assistant. Expected bundled bun next to the app executable.")
+                    }
+                })?
         }
     };
 
-    let bun_path = find_bun_executable().unwrap_or_default();
+    let bun_path = find_bun_executable().unwrap_or_else(|| "NOT FOUND".to_string());
     info!("Starting pi from {} in dir: {} with provider: {} model: {} bun: {}", pi_path, project_dir, pi_provider, pi_model, bun_path);
 
     // Build command — use cmd.exe /C wrapper for .cmd files on Windows (Rust 1.77+ CVE fix)
     let mut cmd = build_command_for_path(&pi_path);
     cmd.current_dir(&project_dir)
         .args(["--mode", "rpc", "--provider", &pi_provider, "--model", &pi_model]);
+
+    // Ensure bun is discoverable by pi.exe shim: the bun global-install shim (pi.exe)
+    // needs to find bun.exe to execute the actual JS. If bun isn't in PATH (common on
+    // fresh Windows installs), the shim exits with code 255 and no output.
+    // Inject the bundled bun's directory into PATH so the shim can find it.
+    if bun_path != "NOT FOUND" {
+        if let Some(bun_dir) = std::path::Path::new(&bun_path).parent() {
+            let current_path = std::env::var("PATH").unwrap_or_default();
+            let sep = if cfg!(windows) { ";" } else { ":" };
+            let new_path = format!("{}{}{}", bun_dir.display(), sep, current_path);
+            cmd.env("PATH", new_path);
+            debug!("Injected bun dir into PATH for pi: {}", bun_dir.display());
+        }
+    }
 
     // For local/small models, inject minimal screenpipe API context directly into the system prompt
     // so they don't need to discover and read the skill file (which they often skip)
@@ -933,8 +954,8 @@ pub async fn pi_start_inner(
                                 error!("Failed to emit pi_output from stderr: {}", e);
                             }
                         } else {
-                            // Not JSON — log as plain stderr
-                            debug!("Pi stderr (non-JSON): {}", &line[..line.len().min(200)]);
+                            // Not JSON — log as warn so Pi startup errors are visible
+                            warn!("Pi stderr: {}", &line[..line.len().min(500)]);
                         }
                         let _ = app_handle.emit("pi_log", &line);
                     }
@@ -994,10 +1015,14 @@ pub async fn pi_start_inner(
                 match child.try_wait() {
                     Ok(Some(status)) => {
                         let code = status.code().unwrap_or(-1);
-                        error!("Pi process exited immediately with code {}", code);
+                        error!("Pi process exited immediately with code {} — check 'Pi stderr:' warnings above for details (bun path: {})", code, bun_path);
+                        // Clean up: abort watchdog so it doesn't emit stale pi_terminated events
+                        if let Some(handle) = m.watchdog_handle.take() {
+                            handle.abort();
+                        }
                         m.child = None;
                         m.stdin = None;
-                        return Err(format!("Pi exited immediately with code {}", code));
+                        return Err(format!("Pi exited immediately with code {} (bun: {}). Check app logs for 'Pi stderr:' lines.", code, bun_path));
                     }
                     Ok(None) => {
                         // Still running — good
@@ -1182,6 +1207,16 @@ pub async fn run(
     cmd.arg("--provider").arg("screenpipe");
     cmd.arg("--model").arg("claude-haiku-4-5");
 
+    // Ensure bun is discoverable by pi.exe shim (see pi_start_inner for details)
+    if let Some(bun) = find_bun_executable() {
+        if let Some(bun_dir) = std::path::Path::new(&bun).parent() {
+            let current_path = std::env::var("PATH").unwrap_or_default();
+            let sep = if cfg!(windows) { ";" } else { ":" };
+            let new_path = format!("{}{}{}", bun_dir.display(), sep, current_path);
+            cmd.env("PATH", new_path);
+        }
+    }
+
     if let Some(token) = user_token {
         cmd.env("SCREENPIPE_API_KEY", token);
     }
@@ -1246,10 +1281,14 @@ fn find_bun_executable() -> Option<String> {
     if let Ok(exe_path) = std::env::current_exe() {
         if let Some(exe_folder) = exe_path.parent() {
             let bundled = exe_folder.join(if cfg!(windows) { "bun.exe" } else { "bun" });
+            debug!("Checking bundled bun at: {}", bundled.display());
             if bundled.exists() {
+                info!("Found bundled bun at: {}", bundled.display());
                 return Some(bundled.to_string_lossy().to_string());
             }
         }
+    } else {
+        warn!("Failed to get current exe path for bun lookup");
     }
 
     let home = dirs::home_dir()
@@ -1269,7 +1308,17 @@ fn find_bun_executable() -> Option<String> {
         format!("{}\\AppData\\Local\\bun\\bin\\bun.exe", home),
     ];
 
-    paths.into_iter().find(|p| std::path::Path::new(p).exists())
+    for p in &paths {
+        debug!("Checking bun at: {}", p);
+    }
+
+    let result = paths.into_iter().find(|p| std::path::Path::new(p).exists());
+    if let Some(ref found) = result {
+        info!("Found bun at: {}", found);
+    } else {
+        warn!("Bun not found in any checked path");
+    }
+    result
 }
 
 /// Background Pi installation — call once from app setup.
@@ -1290,7 +1339,7 @@ pub fn ensure_pi_installed_background() {
                 let bun = match find_bun_executable() {
                     Some(b) => b,
                     None => {
-                        info!("Bun not found, skipping Pi background install");
+                        warn!("Bun not found at any known path, cannot install Pi. Checked: bundled exe dir, ~/.bun/bin/bun.exe, ~/AppData/Local/bun/bin/bun.exe");
                         return;
                     }
                 };

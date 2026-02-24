@@ -1800,6 +1800,10 @@ export function StandaloneChat({ className }: { className?: string } = {}) {
                 if (result.data.running) piRestartCountRef.current = 0;
               } else {
                 console.error("[Pi] Auto-restart failed:", result.error);
+                // Show error to user on final attempt so they know what's wrong
+                if (piRestartCountRef.current >= 5) {
+                  toast({ title: "ai assistant failed to start", description: result.error, variant: "destructive" });
+                }
                 setPiInfo(null);
               }
             } catch (e) {
@@ -1807,6 +1811,8 @@ export function StandaloneChat({ className }: { className?: string } = {}) {
               setPiInfo(null);
             }
           } else {
+            // All restart attempts exhausted
+            console.error("[Pi] All restart attempts exhausted");
             setPiInfo(null);
           }
         }, delay);
