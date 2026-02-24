@@ -65,27 +65,32 @@ export function SubtitleBar({ frames, currentIndex, onClick }: SubtitleBarProps)
 
 		if (entries.length === 0) return [];
 
-		// Aggressive dedup: the backend assigns the same audio to many frames
-		// (15s padding), and can produce multiple chunks where the same speech
-		// is transcribed with slightly different endings. We dedup in two passes:
-		// 1. Exact match on first 60 chars of normalized text + device type
-		// 2. Prefix overlap: if one entry's text starts with another's first
-		//    60 chars (or vice-versa), keep only the longer one.
-		const normalize = (t: string) => t.trim().toLowerCase();
-		const prefixKey = (t: string) => normalize(t).slice(0, 60);
-
-		// Pass 1: exact prefix dedup
-		const byPrefix = new Map<string, AudioEntry>();
+		// Two-pass dedup:
+		// Pass 1: by audio_chunk_id — same chunk is on many frames (15s padding).
+		// Keep earliest timestamp per chunk (subtitle appears sooner).
+		const byChunk = new Map<number, AudioEntry>();
 		for (const entry of entries) {
-			const key = `${entry.is_input}-${prefixKey(entry.transcription)}`;
+			const existing = byChunk.get(entry.audio_chunk_id);
+			if (!existing) {
+				byChunk.set(entry.audio_chunk_id, entry);
+			} else if (entry.timestamp < existing.timestamp) {
+				byChunk.set(entry.audio_chunk_id, { ...existing, timestamp: entry.timestamp });
+			}
+		}
+
+		// Pass 2: by text prefix — different chunks can transcribe the same
+		// speech with slightly different endings. Key on first 60 chars.
+		const normalize = (t: string) => t.trim().toLowerCase();
+		const byPrefix = new Map<string, AudioEntry>();
+		for (const entry of byChunk.values()) {
+			const key = `${entry.is_input}-${normalize(entry.transcription).slice(0, 60)}`;
 			const existing = byPrefix.get(key);
-			if (!existing || normalize(entry.transcription).length > normalize(existing.transcription).length) {
-				// Keep the longer transcription (more complete), but preserve earliest timestamp
-				if (existing && existing.timestamp < entry.timestamp) {
-					byPrefix.set(key, { ...entry, timestamp: existing.timestamp });
-				} else {
-					byPrefix.set(key, entry);
-				}
+			if (!existing) {
+				byPrefix.set(key, entry);
+			} else if (normalize(entry.transcription).length > normalize(existing.transcription).length) {
+				// Keep longer text but earliest timestamp
+				const ts = entry.timestamp < existing.timestamp ? entry.timestamp : existing.timestamp;
+				byPrefix.set(key, { ...entry, timestamp: ts });
 			}
 		}
 		const deduped = Array.from(byPrefix.values());
@@ -147,7 +152,7 @@ export function SubtitleBar({ frames, currentIndex, onClick }: SubtitleBarProps)
 
 					return (
 						<div
-							key={`${entry.audio_chunk_id}-${entry.timestamp.getTime()}`}
+							key={`subtitle-${i}`}
 							className="flex items-center gap-2 transition-opacity duration-500"
 							style={{ opacity }}
 						>
