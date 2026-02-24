@@ -6,7 +6,7 @@ use crate::commands::show_main_window;
 use crate::health::{get_recording_info, get_recording_status, DeviceKind, RecordingStatus};
 use crate::recording::RecordingState;
 use crate::store::{get_store, OnboardingStore};
-use crate::updates::is_source_build;
+use crate::updates::{is_enterprise_build, is_source_build};
 use crate::window_api::ShowRewindWindow;
 use anyhow::Result;
 use once_cell::sync::Lazy;
@@ -63,10 +63,10 @@ struct MenuState {
     devices: Vec<(String, bool)>,
 }
 
-pub fn setup_tray(app: &AppHandle, update_item: &tauri::menu::MenuItem<Wry>) -> Result<()> {
-    // Store update_item globally so recreate_tray can use it
+pub fn setup_tray(app: &AppHandle, update_item: Option<&tauri::menu::MenuItem<Wry>>) -> Result<()> {
+    // Store update_item globally so recreate_tray can use it (None for enterprise)
     if let Ok(mut guard) = UPDATE_MENU_ITEM.lock() {
-        *guard = Some(update_item.clone());
+        *guard = update_item.cloned();
     }
 
     if let Some(main_tray) = app.tray_by_id("screenpipe_main") {
@@ -84,8 +84,10 @@ pub fn setup_tray(app: &AppHandle, update_item: &tauri::menu::MenuItem<Wry>) -> 
         // Set autosaveName so macOS remembers position after user Cmd+drags it
         set_autosave_name(&main_tray);
 
-        // Start menu updater
-        setup_tray_menu_updater(app.clone(), update_item);
+        // Start menu updater only when we have an update item (not enterprise)
+        if let Some(item) = update_item {
+            setup_tray_menu_updater(app.clone(), item);
+        }
     }
     Ok(())
 }
@@ -136,14 +138,6 @@ pub fn recreate_tray(app: &AppHandle) {
             }
         };
 
-        let update_item = match update_item {
-            Some(item) => item,
-            None => {
-                debug!("update_item not yet stored, skipping tray recreation");
-                return;
-            }
-        };
-
         // Remove the old tray icon (must be on main thread for NSStatusBar)
         debug!("recreate_tray: removing old tray icon");
         let _old = app.remove_tray_by_id("screenpipe_main");
@@ -176,7 +170,7 @@ pub fn recreate_tray(app: &AppHandle) {
             Ok(new_tray) => {
                 debug!("recreate_tray: build succeeded, setting menu");
                 // Setup menu
-                if let Ok(menu) = create_dynamic_menu(&app, &MenuState::default(), &update_item) {
+                if let Ok(menu) = create_dynamic_menu(&app, &MenuState::default(), update_item.as_ref()) {
                     // Keep a clone alive to prevent use-after-free (see PREVIOUS_TRAY_MENU doc).
                     if let Ok(mut guard) = PREVIOUS_TRAY_MENU.lock() {
                         *guard = Some(menu.clone());
@@ -226,7 +220,7 @@ fn set_autosave_name(_tray: &TrayIcon<Wry>) {}
 fn create_dynamic_menu(
     app: &AppHandle,
     _state: &MenuState,
-    update_item: &tauri::menu::MenuItem<Wry>,
+    update_item: Option<&tauri::menu::MenuItem<Wry>>,
 ) -> Result<tauri::menu::Menu<Wry>> {
     let store = get_store(app, None)?;
     let mut menu_builder = MenuBuilder::new(app);
@@ -364,9 +358,11 @@ fn create_dynamic_menu(
             &MenuItemBuilder::with_id("version", version_text)
                 .enabled(false)
                 .build(app)?,
-        )
-        .item(update_item)
-        .item(&MenuItemBuilder::with_id("releases", "Changelog").build(app)?);
+        );
+    if let Some(update_item) = update_item {
+        menu_builder = menu_builder.item(update_item);
+    }
+    menu_builder = menu_builder.item(&MenuItemBuilder::with_id("releases", "Changelog").build(app)?);
 
     // Only show recording controls if not in dev mode
     let dev_mode = store
@@ -456,6 +452,10 @@ fn handle_menu_event(app_handle: &AppHandle, event: tauri::menu::MenuEvent) {
         "update_now" => {
             let app = app_handle.clone();
             let _ = app_handle.run_on_main_thread(move || {
+                // Enterprise: no in-app updates; do nothing even if handler fires
+                if is_enterprise_build(&app) {
+                    return;
+                }
                 // For source builds, show info dialog about updates
                 if is_source_build(&app) {
                     tauri::async_runtime::spawn(async move {
@@ -601,7 +601,7 @@ async fn update_menu_if_needed(
             if let Err(e) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 if let Some(tray) = app_for_thread.tray_by_id("screenpipe_main") {
                     debug!("tray_menu_update: setting menu");
-                    if let Ok(menu) = create_dynamic_menu(&app_for_thread, &new_state, &update_item) {
+                    if let Ok(menu) = create_dynamic_menu(&app_for_thread, &new_state, Some(&update_item)) {
                         // Keep a clone alive to prevent use-after-free (see PREVIOUS_TRAY_MENU doc).
                         if let Ok(mut guard) = PREVIOUS_TRAY_MENU.lock() {
                             *guard = Some(menu.clone());

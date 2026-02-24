@@ -41,3 +41,7 @@ Use `#` for Python, `//` for Rust/TS/JS/Swift. Keep it as the first comment in t
 ## git usage
 - make sure to understand there is always bunch of other agents working on the same codebase in parallel, never delete local code or use git reset or such
 
+## Enterprise build
+- Enterprise uses the **same deeplink scheme** `screenpipe` as consumer (see `tauri.enterprise.conf.json` → `plugins.deep-link.desktop.schemes`).
+- **Do not** introduce a separate scheme (e.g. `screenpipe-enterprise`): the app and web auth flows (login, Stripe, settings, etc.) all rely on `screenpipe://` redirects. A different scheme would not be registered by the consumer app and would break normal flows (login, OAuth callbacks, invite links, frame/timeline links).
+

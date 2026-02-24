@@ -1140,6 +1140,7 @@ async fn main() {
                 recording::get_monitors,
                 recording::get_audio_devices,
                 // Commands from commands.rs
+                commands::is_enterprise_build_cmd,
                 commands::get_disk_usage,
                 commands::open_pipe_window,
                 commands::update_show_screenpipe_shortcut,
@@ -1327,6 +1328,7 @@ async fn main() {
         .manage(reminders_state)
         .manage(suggestions_state)
         .invoke_handler(tauri::generate_handler![
+            commands::is_enterprise_build_cmd,
             spawn_screenpipe,
             stop_screenpipe,
             recording::get_monitors,
@@ -1448,12 +1450,16 @@ async fn main() {
             {
                 use tauri::menu::{MenuBuilder, SubmenuBuilder, PredefinedMenuItem, MenuItemBuilder};
 
-                let app_submenu = SubmenuBuilder::new(app, "screenpipe")
+                let mut app_submenu_builder = SubmenuBuilder::new(app, "screenpipe")
                     .item(&PredefinedMenuItem::about(app, Some("About screenpipe"), None)?)
-                    .separator()
-                    .item(&MenuItemBuilder::with_id("check_for_updates", "Check for Updates...")
-                        .build(app)?)
-                    .separator()
+                    .separator();
+                if !crate::updates::is_enterprise_build(&app_handle) {
+                    app_submenu_builder = app_submenu_builder
+                        .item(&MenuItemBuilder::with_id("check_for_updates", "Check for Updates...")
+                            .build(app)?)
+                        .separator();
+                }
+                let app_submenu = app_submenu_builder
                     .item(&MenuItemBuilder::with_id("settings", "Settings...")
                         .accelerator("CmdOrCtrl+,")
                         .build(app)?)
@@ -1888,8 +1894,7 @@ async fn main() {
 
             // Setup tray
             if let Some(_) = app_handle.tray_by_id("screenpipe_main") {
-                let update_item = update_manager.update_now_menu_item_ref().clone();
-                if let Err(e) = tray::setup_tray(&app_handle, &update_item) {
+                if let Err(e) = tray::setup_tray(&app_handle, update_manager.update_now_menu_item_ref()) {
                     error!("Failed to setup tray: {}", e);
                 }
             }
