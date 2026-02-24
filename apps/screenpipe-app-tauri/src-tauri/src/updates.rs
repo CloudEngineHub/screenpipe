@@ -146,18 +146,18 @@ impl UpdatesManager {
         }
         let _guard = CheckGuard(&self.is_checking);
 
+        // Enterprise: updates managed by IT (Intune/RoboPack), no in-app check
+        if is_enterprise_build(&self.app) {
+            info!("enterprise build, updates managed by IT");
+            return Result::Ok(false);
+        }
+
         // Handle source/community builds
         if is_source_build(&self.app) {
             info!("source build detected, auto-updates not available");
             if show_dialog {
                 self.show_source_build_dialog().await?;
             }
-            return Result::Ok(false);
-        }
-
-        // Enterprise: updates managed by IT (Intune/RoboPack), no in-app check
-        if is_enterprise_build(&self.app) {
-            info!("enterprise build, updates managed by IT");
             return Result::Ok(false);
         }
 

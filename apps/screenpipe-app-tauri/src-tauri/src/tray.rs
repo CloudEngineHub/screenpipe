@@ -458,6 +458,10 @@ fn handle_menu_event(app_handle: &AppHandle, event: tauri::menu::MenuEvent) {
         "update_now" => {
             let app = app_handle.clone();
             let _ = app_handle.run_on_main_thread(move || {
+                // Enterprise: no in-app updates; do nothing even if handler fires
+                if is_enterprise_build(&app) {
+                    return;
+                }
                 // For source builds, show info dialog about updates
                 if is_source_build(&app) {
                     tauri::async_runtime::spawn(async move {
