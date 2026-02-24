@@ -85,7 +85,12 @@ pub async fn calendar_status() -> Result<CalendarStatus, String> {
         let result = tokio::task::spawn_blocking(|| {
             match ScreenpipeCalendar::new() {
                 Ok(cal) => {
-                    let count = cal.list_calendars().map(|c| c.len() as u32).unwrap_or(0);
+                    let calendars = cal.list_calendars();
+                    let count = calendars.as_ref().map(|c| c.len() as u32).unwrap_or(0);
+                    info!(
+                        "calendar_status: store opened, {} calendars: {:?}",
+                        count, calendars
+                    );
                     CalendarStatus {
                         available: true,
                         authorized: true, // no auth needed on Windows
@@ -93,12 +98,15 @@ pub async fn calendar_status() -> Result<CalendarStatus, String> {
                         calendar_count: count,
                     }
                 }
-                Err(_) => CalendarStatus {
-                    available: false,
-                    authorized: false,
-                    authorization_status: "unavailable".into(),
-                    calendar_count: 0,
-                },
+                Err(e) => {
+                    warn!("calendar_status: failed to open store: {}", e);
+                    CalendarStatus {
+                        available: false,
+                        authorized: false,
+                        authorization_status: "unavailable".into(),
+                        calendar_count: 0,
+                    }
+                }
             }
         })
         .await
@@ -292,19 +300,26 @@ pub async fn start_calendar_events_publisher() {
 
             match tokio::task::spawn_blocking(|| {
                 let cal = ScreenpipeCalendar::new()?;
+                let calendars = cal.list_calendars().unwrap_or_default();
+                info!(
+                    "calendar publisher: found {} calendars: {:?}",
+                    calendars.len(),
+                    calendars
+                );
                 cal.get_events(1, 2)
             })
             .await
             {
                 Ok(Ok(events)) => {
+                    info!("calendar publisher: fetched {} events", events.len());
                     let items: Vec<CalendarEventItem> =
                         events.into_iter().map(calendar_event_to_item_win).collect();
                     if let Err(e) = screenpipe_events::send_event("calendar_events", items) {
-                        debug!("calendar publisher: failed to send event: {}", e);
+                        warn!("calendar publisher: failed to send event: {}", e);
                     }
                 }
                 Ok(Err(e)) => {
-                    debug!("calendar publisher: fetch failed: {}", e);
+                    warn!("calendar publisher: fetch failed: {}", e);
                 }
                 Err(e) => {
                     error!("calendar publisher: task panicked: {}", e);
