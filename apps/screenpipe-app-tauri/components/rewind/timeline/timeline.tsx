@@ -629,29 +629,7 @@ export const TimelineSlider = ({
 				className="absolute top-0 h-1 bg-foreground/30"
 				style={{ width: lineWidth }}
 			/>
-			{/* Monitor filter dots — centered above bars, only with 2+ monitors */}
-			{allDeviceIds.length > 1 && onDeviceChange && (
-				<div className="absolute top-1 left-1/2 -translate-x-1/2 z-30 flex items-center gap-1.5" dir="ltr">
-					{allDeviceIds.map((id) => (
-						<button
-							key={id}
-							onClick={() => onDeviceChange(selectedDeviceId === id ? "all" : id)}
-							className="rounded-full transition-all duration-200"
-							style={{
-								width: selectedDeviceId === id ? 8 : 6,
-								height: selectedDeviceId === id ? 8 : 6,
-								backgroundColor: selectedDeviceId === id
-									? "hsl(var(--foreground))"
-									: selectedDeviceId === "all"
-										? "hsl(var(--foreground) / 0.4)"
-										: "hsl(var(--foreground) / 0.15)",
-							}}
-							title={`${id.replace("monitor_", "monitor ")}${selectedDeviceId === id ? " (click to show all)" : ""}`}
-						/>
-					))}
-				</div>
-			)}
-			{/* Zoom controls - floating on left side */}
+			{/* Zoom controls + monitor dots - floating on left side */}
 			<div className="absolute left-3 top-1/2 -translate-y-1/2 z-30 flex flex-col gap-1 bg-background/80 backdrop-blur-sm border border-border rounded-lg p-1">
 				<button
 					onClick={() => setTargetZoom((prev) => Math.min(MAX_ZOOM, prev * 1.5))}
@@ -670,6 +648,31 @@ export const TimelineSlider = ({
 				>
 					<ZoomOut className="w-4 h-4 text-foreground" />
 				</button>
+				{/* Monitor filter dots — only with 2+ monitors */}
+				{allDeviceIds.length > 1 && onDeviceChange && (
+					<>
+						<div className="h-px bg-border mx-0.5" />
+						<div className="flex flex-col items-center gap-1 py-0.5" dir="ltr">
+							{allDeviceIds.map((id) => (
+								<button
+									key={id}
+									onClick={() => onDeviceChange(selectedDeviceId === id ? "all" : id)}
+									className="rounded-full transition-all duration-200 hover:scale-125"
+									style={{
+										width: selectedDeviceId === id ? 8 : 6,
+										height: selectedDeviceId === id ? 8 : 6,
+										backgroundColor: selectedDeviceId === id
+											? "hsl(var(--primary))"
+											: selectedDeviceId === "all"
+												? "hsl(var(--foreground) / 0.4)"
+												: "hsl(var(--foreground) / 0.15)",
+									}}
+									title={`${id.replace("monitor_", "monitor ")}${selectedDeviceId === id ? " (click to show all)" : ""}`}
+								/>
+							))}
+						</div>
+					</>
+				)}
 			</div>
 
 			<div
