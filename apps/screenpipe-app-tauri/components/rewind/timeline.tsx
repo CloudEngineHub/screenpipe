@@ -1490,7 +1490,7 @@ export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 						currentIndex={currentIndex}
 						isPlaying={isPlaying}
 						onClick={() => setShowAudioTranscript(true)}
-						transcriptionPaused={health?.audio_pipeline?.transcription_paused}
+						transcriptionPaused={health?.audio_pipeline?.transcription_paused && !!health?.audio_pipeline?.meeting_app}
 						meetingApp={health?.audio_pipeline?.meeting_app}
 					/>
 				</div>
