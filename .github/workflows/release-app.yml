@@ -817,6 +817,30 @@ jobs:
           echo "args=$ARGS" >> $GITHUB_OUTPUT
           echo "Final tauri args: $ARGS"
 
+      - name: Keep System.keychain in search list during build (macOS)
+        if: matrix.os_type == 'macos'
+        shell: bash
+        run: |
+          # Tauri CLI creates a temp keychain and sets the search list to [login, temp],
+          # dropping System.keychain. On some self-hosted runners this causes
+          # errSecInternalComponent because codesign can't verify the cert chain
+          # (the Apple root/intermediate CAs live in System.keychain).
+          #
+          # This background loop re-adds System.keychain whenever it's missing.
+          (
+            while true; do
+              current=$(security list-keychains -d user 2>/dev/null | tr -d '"' | tr -d ' ' | tr '\n' ' ')
+              if ! echo "$current" | grep -q "System.keychain"; then
+                # Re-add System.keychain at the end of the existing list
+                security list-keychain -d user -s $current /Library/Keychains/System.keychain 2>/dev/null || true
+              fi
+              sleep 0.5
+            done
+          ) &
+          FIXER_PID=$!
+          echo "KEYCHAIN_FIXER_PID=$FIXER_PID" >> $GITHUB_ENV
+          echo "Started keychain fixer (PID $FIXER_PID)"
+
       - name: Build
         uses: tauri-apps/tauri-action@v0.5.17
         env:
@@ -875,6 +899,17 @@ jobs:
           projectPath: "./apps/screenpipe-app-tauri"
           tauriScript: bunx tauri -vvv
           retryAttempts: 3
+
+      - name: Stop keychain fixer (macOS)
+        if: matrix.os_type == 'macos' && always()
+        shell: bash
+        run: |
+          if [ -n "$KEYCHAIN_FIXER_PID" ]; then
+            kill "$KEYCHAIN_FIXER_PID" 2>/dev/null || true
+            echo "Stopped keychain fixer (PID $KEYCHAIN_FIXER_PID)"
+          fi
+          # Restore keychain list to just login
+          security list-keychain -d user -s ~/Library/Keychains/login.keychain-db 2>/dev/null || true
 
       - name: Notarize and staple DMGs (macOS)
         if: matrix.os_type == 'macos'
