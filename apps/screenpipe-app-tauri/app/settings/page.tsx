@@ -25,6 +25,8 @@ import {
   Monitor,
   Mic,
   Volume2,
+  PanelLeftClose,
+  PanelLeftOpen,
 } from "lucide-react";
 import { useOverlayData } from "@/app/shortcut-reminder/use-overlay-data";
 import { cn } from "@/lib/utils";
@@ -46,6 +48,12 @@ import { listen } from "@tauri-apps/api/event";
 import { useSettings } from "@/lib/hooks/use-settings";
 import { useTeam } from "@/lib/hooks/use-team";
 import { open as openUrl } from "@tauri-apps/plugin-shell";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 
 type MainSection = "home" | "timeline" | "pipes" | "help";
 
@@ -87,6 +95,32 @@ function SettingsPageContent() {
   const { settings } = useSettings();
   const teamState = useTeam();
   const posthog = usePostHog();
+
+  // Sidebar collapse state (persisted in localStorage)
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
+    if (typeof window === "undefined") return false;
+    return localStorage.getItem("sidebar-collapsed") === "true";
+  });
+
+  const toggleSidebar = useCallback(() => {
+    setSidebarCollapsed((prev) => {
+      const next = !prev;
+      localStorage.setItem("sidebar-collapsed", String(next));
+      return next;
+    });
+  }, []);
+
+  // Cmd+B / Ctrl+B to toggle sidebar
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === "b") {
+        e.preventDefault();
+        toggleSidebar();
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [toggleSidebar]);
   const showCloudSync = useMemo(() => posthog?.isFeatureEnabled("cloud-sync") ?? false, [posthog]);
   const overlayData = useOverlayData();
 
@@ -250,11 +284,17 @@ function SettingsPageContent() {
       <div className="max-w-7xl mx-auto px-4">
         <div className="flex h-[calc(100vh-2rem)] min-h-0">
           {/* Sidebar */}
-          <div className="w-56 border-r bg-background flex flex-col min-h-0 rounded-tl-lg">
-            <div className="px-4 py-3 border-b flex items-center justify-between">
-              <h1 className="text-lg font-bold text-foreground">screenpipe</h1>
+          <TooltipProvider delayDuration={0}>
+          <div
+            className={cn(
+              "border-r bg-background flex flex-col min-h-0 rounded-tl-lg transition-all duration-200",
+              sidebarCollapsed ? "w-14" : "w-56",
+            )}
+          >
+            <div className={cn("py-3 border-b flex items-center", sidebarCollapsed ? "px-2 justify-center" : "px-4 justify-between")}>
+              {!sidebarCollapsed && <h1 className="text-lg font-bold text-foreground">screenpipe</h1>}
               <div className="flex items-center gap-2">
-                {(() => {
+                {!sidebarCollapsed && (() => {
                   const monitors = recordingDevices.filter((d) => d.kind === "monitor");
                   const inputs = recordingDevices.filter((d) => d.kind === "input");
                   const outputs = recordingDevices.filter((d) => d.kind === "output");
@@ -278,6 +318,23 @@ function SettingsPageContent() {
                     </span>
                   ));
                 })()}
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      onClick={toggleSidebar}
+                      className="text-muted-foreground hover:text-foreground transition-colors"
+                    >
+                      {sidebarCollapsed ? (
+                        <PanelLeftOpen className="h-4 w-4" />
+                      ) : (
+                        <PanelLeftClose className="h-4 w-4" />
+                      )}
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent side="right" className="text-xs">
+                    {sidebarCollapsed ? "expand sidebar" : "collapse sidebar"} <kbd className="ml-1 px-1 py-0.5 bg-muted rounded text-[10px]">⌘B</kbd>
+                  </TooltipContent>
+                </Tooltip>
               </div>
             </div>
 
@@ -285,38 +342,51 @@ function SettingsPageContent() {
             <div className="p-2 flex-1 overflow-y-auto flex flex-col">
               {/* Main sections */}
               <div className="space-y-0.5">
-                {mainSections.map((section) => (
-                  <button
-                    key={section.id}
-                    onClick={() => {
-                      setActiveSection(section.id);
-                      setSettingsModalOpen(false);
-                    }}
-                    className={cn(
-                      "w-full flex items-center space-x-2.5 px-3 py-2 rounded-lg transition-all duration-150 text-left group",
-                      activeSection === section.id && !settingsModalOpen
-                        ? "bg-card shadow-sm border border-border text-foreground"
-                        : "hover:bg-card/50 text-muted-foreground hover:text-foreground",
-                    )}
-                  >
-                    <div className={cn(
-                      "transition-colors flex-shrink-0",
-                      activeSection === section.id && !settingsModalOpen
-                        ? "text-primary"
-                        : "text-muted-foreground group-hover:text-foreground"
-                    )}>
-                      {section.icon}
-                    </div>
-                    <span className="font-medium text-sm truncate">{section.label}</span>
-                  </button>
-                ))}
+                {mainSections.map((section) => {
+                  const isActive = activeSection === section.id && !settingsModalOpen;
+                  const btn = (
+                    <button
+                      key={section.id}
+                      onClick={() => {
+                        setActiveSection(section.id);
+                        setSettingsModalOpen(false);
+                      }}
+                      className={cn(
+                        "w-full flex items-center px-3 py-2 rounded-lg transition-all duration-150 text-left group",
+                        sidebarCollapsed ? "justify-center" : "space-x-2.5",
+                        isActive
+                          ? "bg-card shadow-sm border border-border text-foreground"
+                          : "hover:bg-card/50 text-muted-foreground hover:text-foreground",
+                      )}
+                    >
+                      <div className={cn(
+                        "transition-colors flex-shrink-0",
+                        isActive
+                          ? "text-primary"
+                          : "text-muted-foreground group-hover:text-foreground"
+                      )}>
+                        {section.icon}
+                      </div>
+                      {!sidebarCollapsed && <span className="font-medium text-sm truncate">{section.label}</span>}
+                    </button>
+                  );
+                  if (sidebarCollapsed) {
+                    return (
+                      <Tooltip key={section.id}>
+                        <TooltipTrigger asChild>{btn}</TooltipTrigger>
+                        <TooltipContent side="right" className="text-xs">{section.label}</TooltipContent>
+                      </Tooltip>
+                    );
+                  }
+                  return btn;
+                })}
               </div>
 
               {/* Spacer */}
               <div className="flex-1" />
 
-              {/* Team promo card — hidden when user already has a team */}
-              {!teamState.team && (
+              {/* Team promo card — hidden when user already has a team or sidebar collapsed */}
+              {!teamState.team && !sidebarCollapsed && (
                 <div className="mx-1 mb-3 p-3 border border-border bg-card">
                   <h3 className="text-sm font-medium text-foreground">
                     Add your team to screenpipe
@@ -336,74 +406,135 @@ function SettingsPageContent() {
               {/* Bottom items */}
               <div className="space-y-0.5 border-t border-border pt-2">
                 {/* Team link */}
-                <button
-                  onClick={() => openModal("team")}
-                  className="w-full flex items-center space-x-2.5 px-3 py-2 rounded-lg transition-all duration-150 text-left group hover:bg-card/50 text-muted-foreground hover:text-foreground"
-                >
-                  <UserPlus className="h-4 w-4 text-muted-foreground group-hover:text-foreground transition-colors flex-shrink-0" />
-                  <span className="font-medium text-sm truncate">
-                    {teamState.team
-                      ? `Your team (${teamState.members.length})`
-                      : "Invite your team"}
-                  </span>
-                </button>
+                {(() => {
+                  const teamLabel = teamState.team
+                    ? `Your team (${teamState.members.length})`
+                    : "Invite your team";
+                  const btn = (
+                    <button
+                      onClick={() => openModal("team")}
+                      className={cn(
+                        "w-full flex items-center px-3 py-2 rounded-lg transition-all duration-150 text-left group hover:bg-card/50 text-muted-foreground hover:text-foreground",
+                        sidebarCollapsed ? "justify-center" : "space-x-2.5",
+                      )}
+                    >
+                      <UserPlus className="h-4 w-4 text-muted-foreground group-hover:text-foreground transition-colors flex-shrink-0" />
+                      {!sidebarCollapsed && <span className="font-medium text-sm truncate">{teamLabel}</span>}
+                    </button>
+                  );
+                  if (sidebarCollapsed) {
+                    return (
+                      <Tooltip>
+                        <TooltipTrigger asChild>{btn}</TooltipTrigger>
+                        <TooltipContent side="right" className="text-xs">{teamLabel}</TooltipContent>
+                      </Tooltip>
+                    );
+                  }
+                  return btn;
+                })()}
 
                 {/* Get free month */}
-                <button
-                  onClick={() => openModal("referral")}
-                  className="w-full flex items-center space-x-2.5 px-3 py-2 rounded-lg transition-all duration-150 text-left group hover:bg-card/50 text-muted-foreground hover:text-foreground"
-                >
-                  <Gift className="h-4 w-4 text-muted-foreground group-hover:text-foreground transition-colors flex-shrink-0" />
-                  <span className="font-medium text-sm truncate">Get free month</span>
-                </button>
+                {(() => {
+                  const btn = (
+                    <button
+                      onClick={() => openModal("referral")}
+                      className={cn(
+                        "w-full flex items-center px-3 py-2 rounded-lg transition-all duration-150 text-left group hover:bg-card/50 text-muted-foreground hover:text-foreground",
+                        sidebarCollapsed ? "justify-center" : "space-x-2.5",
+                      )}
+                    >
+                      <Gift className="h-4 w-4 text-muted-foreground group-hover:text-foreground transition-colors flex-shrink-0" />
+                      {!sidebarCollapsed && <span className="font-medium text-sm truncate">Get free month</span>}
+                    </button>
+                  );
+                  if (sidebarCollapsed) {
+                    return (
+                      <Tooltip>
+                        <TooltipTrigger asChild>{btn}</TooltipTrigger>
+                        <TooltipContent side="right" className="text-xs">Get free month</TooltipContent>
+                      </Tooltip>
+                    );
+                  }
+                  return btn;
+                })()}
 
                 {/* Settings */}
-                <button
-                  onClick={() => openModal("general")}
-                  className={cn(
-                    "w-full flex items-center space-x-2.5 px-3 py-2 rounded-lg transition-all duration-150 text-left group",
-                    settingsModalOpen
-                      ? "bg-card shadow-sm border border-border text-foreground"
-                      : "hover:bg-card/50 text-muted-foreground hover:text-foreground",
-                  )}
-                >
-                  <div className={cn(
-                    "transition-colors flex-shrink-0",
-                    settingsModalOpen
-                      ? "text-primary"
-                      : "text-muted-foreground group-hover:text-foreground"
-                  )}>
-                    <SettingsIcon className="h-4 w-4" />
-                  </div>
-                  <span className="font-medium text-sm truncate">Settings</span>
-                </button>
+                {(() => {
+                  const btn = (
+                    <button
+                      onClick={() => openModal("general")}
+                      className={cn(
+                        "w-full flex items-center px-3 py-2 rounded-lg transition-all duration-150 text-left group",
+                        sidebarCollapsed ? "justify-center" : "space-x-2.5",
+                        settingsModalOpen
+                          ? "bg-card shadow-sm border border-border text-foreground"
+                          : "hover:bg-card/50 text-muted-foreground hover:text-foreground",
+                      )}
+                    >
+                      <div className={cn(
+                        "transition-colors flex-shrink-0",
+                        settingsModalOpen
+                          ? "text-primary"
+                          : "text-muted-foreground group-hover:text-foreground"
+                      )}>
+                        <SettingsIcon className="h-4 w-4" />
+                      </div>
+                      {!sidebarCollapsed && <span className="font-medium text-sm truncate">Settings</span>}
+                    </button>
+                  );
+                  if (sidebarCollapsed) {
+                    return (
+                      <Tooltip>
+                        <TooltipTrigger asChild>{btn}</TooltipTrigger>
+                        <TooltipContent side="right" className="text-xs">Settings</TooltipContent>
+                      </Tooltip>
+                    );
+                  }
+                  return btn;
+                })()}
 
                 {/* Help */}
-                <button
-                  onClick={() => {
-                    setActiveSection("help");
-                    setSettingsModalOpen(false);
-                  }}
-                  className={cn(
-                    "w-full flex items-center space-x-2.5 px-3 py-2 rounded-lg transition-all duration-150 text-left group",
-                    activeSection === "help" && !settingsModalOpen
-                      ? "bg-card shadow-sm border border-border text-foreground"
-                      : "hover:bg-card/50 text-muted-foreground hover:text-foreground",
-                  )}
-                >
-                  <div className={cn(
-                    "transition-colors flex-shrink-0",
-                    activeSection === "help" && !settingsModalOpen
-                      ? "text-primary"
-                      : "text-muted-foreground group-hover:text-foreground"
-                  )}>
-                    <HelpCircle className="h-4 w-4" />
-                  </div>
-                  <span className="font-medium text-sm truncate">Help</span>
-                </button>
+                {(() => {
+                  const isActive = activeSection === "help" && !settingsModalOpen;
+                  const btn = (
+                    <button
+                      onClick={() => {
+                        setActiveSection("help");
+                        setSettingsModalOpen(false);
+                      }}
+                      className={cn(
+                        "w-full flex items-center px-3 py-2 rounded-lg transition-all duration-150 text-left group",
+                        sidebarCollapsed ? "justify-center" : "space-x-2.5",
+                        isActive
+                          ? "bg-card shadow-sm border border-border text-foreground"
+                          : "hover:bg-card/50 text-muted-foreground hover:text-foreground",
+                      )}
+                    >
+                      <div className={cn(
+                        "transition-colors flex-shrink-0",
+                        isActive
+                          ? "text-primary"
+                          : "text-muted-foreground group-hover:text-foreground"
+                      )}>
+                        <HelpCircle className="h-4 w-4" />
+                      </div>
+                      {!sidebarCollapsed && <span className="font-medium text-sm truncate">Help</span>}
+                    </button>
+                  );
+                  if (sidebarCollapsed) {
+                    return (
+                      <Tooltip>
+                        <TooltipTrigger asChild>{btn}</TooltipTrigger>
+                        <TooltipContent side="right" className="text-xs">Help</TooltipContent>
+                      </Tooltip>
+                    );
+                  }
+                  return btn;
+                })()}
               </div>
             </div>
           </div>
+          </TooltipProvider>
 
           {/* Content */}
           <div className="flex-1 flex flex-col h-full bg-background min-h-0 rounded-tr-lg relative">
