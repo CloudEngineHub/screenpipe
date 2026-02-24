@@ -86,11 +86,6 @@ export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 	const [showAudioTranscript, setShowAudioTranscript] = useState(false);
 	const [showSearchModal, setShowSearchModal] = useState(false);
 	const [selectedDeviceId, setSelectedDeviceId] = useState<string>("all");
-	// Reset index when monitor filter changes
-	const handleDeviceChange = useCallback((deviceId: string) => {
-		setSelectedDeviceId(deviceId);
-		setCurrentIndex(0);
-	}, []);
 
 
 	const containerRef = useRef<HTMLDivElement | null>(null);
@@ -183,13 +178,49 @@ export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 		return [...ids].sort();
 	}, [frames]);
 
-	// Filter frames to only include selected monitor's entries
-	const filteredFrames = useMemo(() => {
-		if (selectedDeviceId === "all" || allDeviceIds.length <= 1) return frames;
-		return frames.filter((f) =>
-			f.devices.some((d) => d.device_id === selectedDeviceId)
-		);
-	}, [frames, selectedDeviceId, allDeviceIds.length]);
+	// Navigation helpers for monitor filter — skip non-matching frames
+	const frameMatchesDevice = useCallback((frame: StreamTimeSeriesResponse) => {
+		if (selectedDeviceId === "all" || allDeviceIds.length <= 1) return true;
+		return frame.devices.some((d) => d.device_id === selectedDeviceId);
+	}, [selectedDeviceId, allDeviceIds.length]);
+
+	// Find next frame index matching the device filter in a given direction
+	const findNextDevice = useCallback((fromIndex: number, dir: 1 | -1): number => {
+		if (selectedDeviceId === "all" || allDeviceIds.length <= 1) {
+			return Math.max(0, Math.min(fromIndex + dir, frames.length - 1));
+		}
+		let i = fromIndex + dir;
+		while (i >= 0 && i < frames.length) {
+			if (frames[i]?.devices.some((d) => d.device_id === selectedDeviceId)) return i;
+			i += dir;
+		}
+		return fromIndex; // no match, stay put
+	}, [selectedDeviceId, allDeviceIds.length, frames]);
+
+	// Snap an arbitrary index to the nearest matching frame
+	const snapToDevice = useCallback((idx: number): number => {
+		if (selectedDeviceId === "all" || allDeviceIds.length <= 1) return idx;
+		const clamped = Math.max(0, Math.min(idx, frames.length - 1));
+		if (frames[clamped]?.devices.some((d) => d.device_id === selectedDeviceId)) return clamped;
+		for (let offset = 1; offset < frames.length; offset++) {
+			const lo = clamped - offset;
+			const hi = clamped + offset;
+			if (lo >= 0 && frames[lo]?.devices.some((d) => d.device_id === selectedDeviceId)) return lo;
+			if (hi < frames.length && frames[hi]?.devices.some((d) => d.device_id === selectedDeviceId)) return hi;
+		}
+		return clamped;
+	}, [selectedDeviceId, allDeviceIds.length, frames]);
+
+	// When monitor filter changes, snap to nearest matching frame
+	const handleDeviceChange = useCallback((deviceId: string) => {
+		setSelectedDeviceId(deviceId);
+		if (deviceId === "all") return;
+		const snapped = snapToDevice(currentIndex);
+		if (snapped !== currentIndex) {
+			setCurrentIndex(snapped);
+			setCurrentFrame(frames[snapped]);
+		}
+	}, [currentIndex, frames, snapToDevice, setCurrentFrame]);
 
 	// Audio playback engine
 	const {
@@ -200,7 +231,7 @@ export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 		cycleSpeed,
 		pause: pausePlayback,
 	} = useAudioPlayback({
-		frames: filteredFrames,
+		frames,
 		currentIndex,
 		setCurrentIndex,
 		setCurrentFrame,
@@ -225,6 +256,21 @@ export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 		}
 	}, [lastFlushTimestamp, newFramesCount, isAtLiveEdge, frames.length, clearNewFramesCount]);
 
+	// Auto-snap: when currentIndex lands on a non-matching device frame (e.g. from
+	// audio playback advancing), snap to the nearest matching frame.
+	useEffect(() => {
+		if (selectedDeviceId === "all" || allDeviceIds.length <= 1) return;
+		if (frames.length === 0) return;
+		const frame = frames[currentIndex];
+		if (!frame) return;
+		if (frame.devices.some((d) => d.device_id === selectedDeviceId)) return;
+		const snapped = snapToDevice(currentIndex);
+		if (snapped !== currentIndex) {
+			setCurrentIndex(snapped);
+			setCurrentFrame(frames[snapped]);
+		}
+	}, [currentIndex, selectedDeviceId, allDeviceIds.length, frames, snapToDevice, setCurrentFrame]);
+
 	// Listen for window focus events to refresh timeline data (debounced)
 	useEffect(() => {
 		let debounceTimer: ReturnType<typeof setTimeout> | null = null;
@@ -243,7 +289,7 @@ export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 					// Reset position to latest (index 0 = newest frame)
 					// Window is hidden/shown not destroyed, so old position persists
 					setCurrentIndex(0);
-					setCurrentFrame(filteredFrames.length > 0 ? filteredFrames[0] : null);
+					setCurrentFrame(frames.length > 0 ? frames[0] : null);
 					isNavigatingRef.current = false;
 					setIsNavigating(false);
 					pendingNavigationRef.current = null;
@@ -261,7 +307,7 @@ export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 			if (debounceTimer) clearTimeout(debounceTimer);
 			unlisten.then((fn) => fn());
 		};
-	}, [onWindowFocus, filteredFrames, setCurrentFrame, pausePlayback]);
+	}, [onWindowFocus, frames, setCurrentFrame, pausePlayback]);
 
 	// Pause audio when page becomes hidden (covers embedded mode + browser tab switch)
 	useEffect(() => {
@@ -450,11 +496,11 @@ export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 
 	// Process pending navigation when frames load after date change
 	useEffect(() => {
-		if (pendingNavigationRef.current && filteredFrames.length > 0) {
+		if (pendingNavigationRef.current && frames.length > 0) {
 			const targetDate = pendingNavigationRef.current;
 			// Only jump if we're on the correct date AND frames for that day have loaded
 			// Check that at least one frame is from the target date
-			const hasFramesForTargetDate = filteredFrames.some(frame =>
+			const hasFramesForTargetDate = frames.some(frame =>
 				isSameDay(new Date(frame.timestamp), targetDate)
 			);
 			if (isSameDay(targetDate, currentDate) && hasFramesForTargetDate) {
@@ -465,7 +511,7 @@ export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 				let closestIndex = 0;
 				let closestDiff = Infinity;
 
-				filteredFrames.forEach((frame, index) => {
+				frames.forEach((frame, index) => {
 					const frameTime = new Date(frame.timestamp).getTime();
 					const diff = Math.abs(frameTime - targetTime);
 					if (diff < closestDiff) {
@@ -474,9 +520,10 @@ export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 					}
 				});
 
-				setCurrentIndex(closestIndex);
-				setCurrentFrame(filteredFrames[closestIndex]);
-				console.log("[pendingNavigation] Jumped to frame index:", closestIndex);
+				const snapped = snapToDevice(closestIndex);
+				setCurrentIndex(snapped);
+				setCurrentFrame(frames[snapped]);
+				console.log("[pendingNavigation] Jumped to frame index:", snapped);
 
 				// Clear pending navigation and UI state
 				pendingNavigationRef.current = null;
@@ -487,7 +534,7 @@ export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 			}
 		}
 		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [filteredFrames, currentDate, setPendingNavigation]);
+	}, [frames, currentDate, setPendingNavigation]);
 
 	// Timeout: clear seeking overlay if navigation doesn't resolve within 10s
 	useEffect(() => {
@@ -518,12 +565,13 @@ export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 		if (isNavigatingRef.current || pendingNavigationRef.current || seekingTimestamp) {
 			return;
 		}
-		if (!currentFrame && filteredFrames.length > 0) {
-			setCurrentFrame(filteredFrames[0]);
-			setCurrentIndex(0);
+		if (!currentFrame && frames.length > 0) {
+			const first = snapToDevice(0);
+			setCurrentFrame(frames[first]);
+			setCurrentIndex(first);
 		}
 		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [filteredFrames.length, currentFrame, setCurrentFrame, seekingTimestamp]);
+	}, [frames.length, currentFrame, setCurrentFrame, seekingTimestamp]);
 
 	// Track timeline opened and setup session tracking
 	useEffect(() => {
@@ -796,11 +844,11 @@ export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 				if (isAlt) {
 					// Alt+ArrowLeft = prev app boundary
 					setCurrentIndex((prev) => {
-						const currentApp = getFrameAppName(filteredFrames[prev]);
+						const currentApp = getFrameAppName(frames[prev]);
 						let i = prev + 1;
-						while (i < filteredFrames.length) {
-							if (getFrameAppName(filteredFrames[i]) !== currentApp) {
-								if (filteredFrames[i]) setCurrentFrame(filteredFrames[i]);
+						while (i < frames.length) {
+							if (getFrameAppName(frames[i]) !== currentApp) {
+								if (frames[i]) setCurrentFrame(frames[i]);
 								return i;
 							}
 							i++;
@@ -808,10 +856,10 @@ export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 						return prev;
 					});
 				} else {
-					// ArrowLeft = prev frame
+					// ArrowLeft = prev frame (older = higher index)
 					setCurrentIndex((prev) => {
-						const next = Math.min(prev + 1, filteredFrames.length - 1);
-						if (filteredFrames[next]) setCurrentFrame(filteredFrames[next]);
+						const next = findNextDevice(prev, 1);
+						if (frames[next]) setCurrentFrame(frames[next]);
 						return next;
 					});
 				}
@@ -821,11 +869,11 @@ export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 				if (isAlt) {
 					// Alt+ArrowRight = next app boundary
 					setCurrentIndex((prev) => {
-						const currentApp = getFrameAppName(filteredFrames[prev]);
+						const currentApp = getFrameAppName(frames[prev]);
 						let i = prev - 1;
 						while (i >= 0) {
-							if (getFrameAppName(filteredFrames[i]) !== currentApp) {
-								if (filteredFrames[i]) setCurrentFrame(filteredFrames[i]);
+							if (getFrameAppName(frames[i]) !== currentApp) {
+								if (frames[i]) setCurrentFrame(frames[i]);
 								return i;
 							}
 							i--;
@@ -833,10 +881,10 @@ export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 						return prev;
 					});
 				} else {
-					// ArrowRight = next frame
+					// ArrowRight = next frame (newer = lower index)
 					setCurrentIndex((prev) => {
-						const next = Math.max(prev - 1, 0);
-						if (filteredFrames[next]) setCurrentFrame(filteredFrames[next]);
+						const next = findNextDevice(prev, -1);
+						if (frames[next]) setCurrentFrame(frames[next]);
 						return next;
 					});
 				}
@@ -845,7 +893,7 @@ export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 
 		window.addEventListener("keydown", handleArrowKeys);
 		return () => window.removeEventListener("keydown", handleArrowKeys);
-	}, [filteredFrames, setCurrentFrame, showSearchModal]);
+	}, [frames, setCurrentFrame, showSearchModal]);
 
 	useEffect(() => {
 		const getStartDateAndSet = async () => {
@@ -981,13 +1029,14 @@ export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 
 					requestAnimationFrame(() => {
 						setCurrentIndex((prevIndex) => {
-							const newIndex = Math.min(
+							const raw = Math.min(
 								Math.max(0, Math.floor(prevIndex + indexChange)),
-								filteredFrames.length - 1,
+								frames.length - 1,
 							);
+							const newIndex = snapToDevice(raw);
 
-							if (newIndex !== prevIndex && filteredFrames[newIndex]) {
-								setCurrentFrame(filteredFrames[newIndex]);
+							if (newIndex !== prevIndex && frames[newIndex]) {
+								setCurrentFrame(frames[newIndex]);
 							}
 
 							return newIndex;
@@ -998,7 +1047,7 @@ export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 				{ leading: true, trailing: false },
 			),
 			// eslint-disable-next-line react-hooks/exhaustive-deps
-	[filteredFrames, zoomLevel, pausePlayback], // Re-create when zoom changes
+	[frames, zoomLevel, pausePlayback, snapToDevice], // Re-create when zoom changes
 	);
 
 	// Attach scroll/zoom handler so pinch-to-zoom and scroll-to-navigate work.
@@ -1066,7 +1115,7 @@ export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 
 	const jumpToTime = (targetDate: Date) => {
 		// Find the closest frame to the target date
-		if (filteredFrames.length === 0) {
+		if (frames.length === 0) {
 			console.warn("[jumpToTime] No frames loaded, cannot jump");
 			return;
 		}
@@ -1075,7 +1124,7 @@ export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 		let closestIndex = -1;
 		let closestDiff = Infinity;
 
-		filteredFrames.forEach((frame, index) => {
+		frames.forEach((frame, index) => {
 			const frameTime = new Date(frame.timestamp).getTime();
 			const diff = Math.abs(frameTime - targetTime);
 			if (diff < closestDiff) {
@@ -1091,10 +1140,11 @@ export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 
 		console.log(`[jumpToTime] Jumping to index ${closestIndex}, diff=${Math.round(closestDiff / 1000)}s from target`);
 
-		// Update cursor position
-		setCurrentIndex(closestIndex);
-		if (filteredFrames[closestIndex]) {
-			setCurrentFrame(filteredFrames[closestIndex]);
+		// Update cursor position, snap to matching device
+		const snapped = snapToDevice(closestIndex);
+		setCurrentIndex(snapped);
+		if (frames[snapped]) {
+			setCurrentFrame(frames[snapped]);
 		}
 	};
 
@@ -1180,13 +1230,14 @@ export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 				console.log("[handleDateChange] Same day, jumping to first frame of day");
 				const targetDayStart = startOfDay(targetDate);
 				const targetDayEnd = endOfDay(targetDate);
-				const targetIndex = filteredFrames.findIndex((frame) => {
+				const targetIndex = frames.findIndex((frame) => {
 					const frameDate = new Date(frame.timestamp);
 					return frameDate >= targetDayStart && frameDate <= targetDayEnd;
 				});
 				if (targetIndex !== -1) {
-					setCurrentIndex(targetIndex);
-					setCurrentFrame(filteredFrames[targetIndex]);
+					const snapped = snapToDevice(targetIndex);
+					setCurrentIndex(snapped);
+					setCurrentFrame(frames[snapped]);
 				}
 				isNavigatingRef.current = false;
 				setIsNavigating(false);
@@ -1288,8 +1339,8 @@ export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 
 			// Update the frame
 			setCurrentIndex(newIndex);
-			if (filteredFrames[newIndex]) {
-				setCurrentFrame(filteredFrames[newIndex]);
+			if (frames[newIndex]) {
+				setCurrentFrame(frames[newIndex]);
 			}
 
 			// Continue animation if not complete
@@ -1324,27 +1375,28 @@ export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 							currentFrame={currentFrame}
 							allDeviceIds={allDeviceIds}
 							onNavigate={(direction) => {
+								// newer = lower index (-1), older = higher index (+1)
 								const newIndex = direction === "next"
-									? Math.min(currentIndex + 1, filteredFrames.length - 1)
-									: Math.max(currentIndex - 1, 0);
+									? findNextDevice(currentIndex, 1)
+									: findNextDevice(currentIndex, -1);
 								setCurrentIndex(newIndex);
-								if (filteredFrames[newIndex]) {
-									setCurrentFrame(filteredFrames[newIndex]);
+								if (frames[newIndex]) {
+									setCurrentFrame(frames[newIndex]);
 								}
 							}}
-							canNavigatePrev={currentIndex > 0}
-							canNavigateNext={currentIndex < filteredFrames.length - 1}
+							canNavigatePrev={findNextDevice(currentIndex, 1) !== currentIndex}
+							canNavigateNext={findNextDevice(currentIndex, -1) !== currentIndex}
 							onFrameLoadError={() => {
 								framesFailedRef.current += 1;
 							}}
 							onFrameUnavailable={async () => {
 								// Get the current frame's frame_id
-								const failedFrameId = filteredFrames[currentIndex]?.devices?.[0]?.frame_id;
+								const failedFrameId = frames[currentIndex]?.devices?.[0]?.frame_id;
 								if (!failedFrameId) {
 									// Fallback to old behavior if no frame_id
-									if (currentIndex < filteredFrames.length - 1) {
+									if (currentIndex < frames.length - 1) {
 										setCurrentIndex(currentIndex + 1);
-										setCurrentFrame(filteredFrames[currentIndex + 1]);
+										setCurrentFrame(frames[currentIndex + 1]);
 									}
 									return;
 								}
@@ -1360,14 +1412,14 @@ export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 										const validFrameId = String(data.frame_id);
 
 										// Find this frame in our local frames array
-										const validIndex = filteredFrames.findIndex(
+										const validIndex = frames.findIndex(
 											(f) => f.devices?.[0]?.frame_id === validFrameId
 										);
 
 										if (validIndex !== -1) {
 											// Jump directly to the valid frame
 											setCurrentIndex(validIndex);
-											setCurrentFrame(filteredFrames[validIndex]);
+											setCurrentFrame(frames[validIndex]);
 											return;
 										}
 									}
@@ -1375,13 +1427,17 @@ export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 									console.error("Failed to find next valid frame:", error);
 								}
 
-								// Fallback: try the old sequential approach
-								if (currentIndex < filteredFrames.length - 1) {
-									setCurrentIndex(currentIndex + 1);
-									setCurrentFrame(filteredFrames[currentIndex + 1]);
-								} else if (currentIndex > 0) {
-									setCurrentIndex(currentIndex - 1);
-									setCurrentFrame(filteredFrames[currentIndex - 1]);
+								// Fallback: try sequential approach with device snapping
+								const nextIdx = findNextDevice(currentIndex, 1);
+								if (nextIdx !== currentIndex) {
+									setCurrentIndex(nextIdx);
+									setCurrentFrame(frames[nextIdx]);
+								} else {
+									const prevIdx = findNextDevice(currentIndex, -1);
+									if (prevIdx !== currentIndex) {
+										setCurrentIndex(prevIdx);
+										setCurrentFrame(frames[prevIdx]);
+									}
 								}
 							}}
 						/>
@@ -1486,7 +1542,7 @@ export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 				{/* Subtitle bar — below nav bar, always visible when audio exists nearby */}
 				<div className={`absolute ${embedded ? "top-16" : "top-[calc(env(safe-area-inset-top)+96px)]"} left-4 right-4 z-[35]`}>
 					<SubtitleBar
-						frames={filteredFrames}
+						frames={frames}
 						currentIndex={currentIndex}
 						isPlaying={isPlaying}
 						onClick={() => setShowAudioTranscript(true)}
@@ -1566,7 +1622,7 @@ export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 				{showAudioTranscript && currentFrame && (
 					<div className="absolute bottom-28 left-4 right-4 z-[35]">
 						<AudioTranscript
-							frames={filteredFrames}
+							frames={frames}
 							currentIndex={currentIndex}
 							groupingWindowMs={30000}
 							meetings={meetings}
@@ -1576,17 +1632,18 @@ export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 								const targetTime = timestamp.getTime();
 								let bestIdx = 0;
 								let bestDiff = Infinity;
-								for (let i = 0; i < filteredFrames.length; i++) {
+								for (let i = 0; i < frames.length; i++) {
 									const diff = Math.abs(
-										new Date(filteredFrames[i].timestamp).getTime() - targetTime
+										new Date(frames[i].timestamp).getTime() - targetTime
 									);
 									if (diff < bestDiff) {
 										bestDiff = diff;
 										bestIdx = i;
 									}
 								}
-								setCurrentIndex(bestIdx);
-								setCurrentFrame(filteredFrames[bestIdx]);
+								const snapped = snapToDevice(bestIdx);
+								setCurrentIndex(snapped);
+								setCurrentFrame(frames[snapped]);
 							}}
 						/>
 					</div>
@@ -1596,15 +1653,16 @@ export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 
 				{/* Bottom Timeline - Overlay that doesn't cut off image */}
 				<div className="absolute bottom-0 left-0 right-0 z-40 pointer-events-auto">
-					{filteredFrames.length > 0 ? (
+					{frames.length > 0 ? (
 						<TimelineSlider
-							frames={filteredFrames}
+							frames={frames}
 							currentIndex={currentIndex}
 							onFrameChange={(index) => {
 								pausePlayback();
-								setCurrentIndex(index);
-								if (filteredFrames[index]) {
-									setCurrentFrame(filteredFrames[index]);
+								const snapped = snapToDevice(index);
+								setCurrentIndex(snapped);
+								if (frames[snapped]) {
+									setCurrentFrame(frames[snapped]);
 								}
 							}}
 							fetchNextDayData={fetchNextDayData}
