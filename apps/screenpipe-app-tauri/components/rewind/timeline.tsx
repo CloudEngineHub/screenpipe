@@ -1518,22 +1518,6 @@ export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 					/>
 					{/* Top right buttons */}
 					<div className={`absolute ${embedded ? "top-2" : "top-[calc(env(safe-area-inset-top)+16px)]"} right-4 flex items-center gap-2`}>
-						{/* Monitor filter — only show when multiple monitors */}
-						{allDeviceIds.length > 1 && (
-							<select
-								value={selectedDeviceId}
-								onChange={(e) => handleDeviceChange(e.target.value)}
-								className="h-8 px-2 text-xs bg-background/80 hover:bg-background border border-border rounded-md transition-colors text-foreground appearance-none cursor-pointer"
-								title="Filter by monitor"
-							>
-								<option value="all">all monitors</option>
-								{allDeviceIds.map((id) => (
-									<option key={id} value={id}>
-										{id.replace("monitor_", "monitor ")}
-									</option>
-								))}
-							</select>
-						)}
 						{/* Refresh button */}
 						<button
 							onClick={handleRefresh}
@@ -1661,6 +1645,28 @@ export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 				)}
 
 				{/* Meeting bar removed — meeting detection handled inside transcript panel */}
+
+				{/* Monitor filter dots — above timeline, only when 2+ monitors */}
+				{allDeviceIds.length > 1 && (
+					<div className="absolute bottom-[72px] left-1/2 -translate-x-1/2 z-40 flex items-center gap-1.5 pointer-events-auto">
+						{allDeviceIds.map((id) => (
+							<button
+								key={id}
+								onClick={() => handleDeviceChange(selectedDeviceId === id ? "all" : id)}
+								className="group relative w-2.5 h-2.5 rounded-full transition-all duration-200"
+								style={{
+									backgroundColor: selectedDeviceId === id
+										? "hsl(var(--foreground))"
+										: selectedDeviceId === "all"
+											? "hsl(var(--foreground) / 0.5)"
+											: "hsl(var(--foreground) / 0.2)",
+									transform: selectedDeviceId === id ? "scale(1.3)" : "scale(1)",
+								}}
+								title={`${id.replace("monitor_", "monitor ")}${selectedDeviceId === id ? " (click to show all)" : ""}`}
+							/>
+						))}
+					</div>
+				)}
 
 				{/* Bottom Timeline - Overlay that doesn't cut off image */}
 				<div className="absolute bottom-0 left-0 right-0 z-40 pointer-events-auto">
