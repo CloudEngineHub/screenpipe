@@ -211,6 +211,19 @@ export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 		return clamped;
 	}, [selectedDeviceId, allDeviceIds.length, frames]);
 
+	// Pre-computed sorted list of frame indices matching the selected device.
+	// Used by scroll handler to navigate in "matching frame space".
+	const matchingIndices = useMemo(() => {
+		if (selectedDeviceId === "all" || allDeviceIds.length <= 1) return null;
+		const indices: number[] = [];
+		for (let i = 0; i < frames.length; i++) {
+			if (frames[i].devices.some((d) => d.device_id === selectedDeviceId)) {
+				indices.push(i);
+			}
+		}
+		return indices.length > 0 ? indices : null;
+	}, [frames, selectedDeviceId, allDeviceIds.length]);
+
 	// When monitor filter changes, snap to nearest matching frame
 	const handleDeviceChange = useCallback((deviceId: string) => {
 		setSelectedDeviceId(deviceId);
@@ -1014,10 +1027,24 @@ export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 
 					requestAnimationFrame(() => {
 						setCurrentIndex((prevIndex) => {
-							const newIndex = Math.min(
-								Math.max(0, Math.floor(prevIndex + indexChange)),
-								frames.length - 1,
-							);
+							let newIndex: number;
+							if (matchingIndices) {
+								// Navigate in matching-frame space: find current position
+								// in the matching list, apply delta there, then map back.
+								let pos = 0;
+								let bestDist = Infinity;
+								for (let j = 0; j < matchingIndices.length; j++) {
+									const dist = Math.abs(matchingIndices[j] - prevIndex);
+									if (dist < bestDist) { bestDist = dist; pos = j; }
+								}
+								const newPos = Math.max(0, Math.min(pos + indexChange, matchingIndices.length - 1));
+								newIndex = matchingIndices[newPos];
+							} else {
+								newIndex = Math.min(
+									Math.max(0, Math.floor(prevIndex + indexChange)),
+									frames.length - 1,
+								);
+							}
 
 							if (newIndex !== prevIndex && frames[newIndex]) {
 								setCurrentFrame(frames[newIndex]);
@@ -1031,7 +1058,7 @@ export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 				{ leading: true, trailing: false },
 			),
 			// eslint-disable-next-line react-hooks/exhaustive-deps
-	[frames, zoomLevel, pausePlayback], // Re-create when zoom changes
+	[frames, zoomLevel, pausePlayback, matchingIndices], // Re-create when zoom/filter changes
 	);
 
 	// Attach scroll/zoom handler so pinch-to-zoom and scroll-to-navigate work.
