@@ -132,6 +132,18 @@ pub struct Speaker {
     pub metadata: String,
 }
 
+#[derive(OaSchema, Debug, Serialize, Deserialize, FromRow, Clone)]
+pub struct MeetingRecord {
+    pub id: i64,
+    pub meeting_start: String,
+    pub meeting_end: Option<String>,
+    pub meeting_app: String,
+    pub title: Option<String>,
+    pub attendees: Option<String>,
+    pub detection_source: String,
+    pub created_at: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
 pub struct ActiveSpeaker {
     pub speaker_id: i64,

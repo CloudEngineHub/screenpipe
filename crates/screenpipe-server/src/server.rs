@@ -32,6 +32,7 @@ use crate::{
             api_list_monitors, api_vision_status, audio_metrics_handler, health_check,
             vision_metrics_handler,
         },
+        meetings::{get_meeting_handler, list_meetings_handler},
         search::{keyword_search_handler, search},
         speakers::{
             delete_speaker_handler, get_similar_speakers_handler, get_unnamed_speakers_handler,
@@ -401,6 +402,8 @@ impl SCServer {
             .get("/speakers/similar", get_similar_speakers_handler)
             .post("/speakers/reassign", reassign_speaker_handler)
             .post("/speakers/undo-reassign", undo_speaker_reassign_handler)
+            .get("/meetings", list_meetings_handler)
+            .get("/meetings/:id", get_meeting_handler)
             .post("/experimental/frames/merge", merge_frames_handler)
             .get("/experimental/validate/media", validate_media_handler)
             .post("/audio/start", start_audio)

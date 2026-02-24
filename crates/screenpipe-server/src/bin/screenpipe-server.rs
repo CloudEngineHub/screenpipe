@@ -31,7 +31,8 @@ use screenpipe_server::{
     cli_pipe::handle_pipe_command,
     cli_status::handle_status_command,
     hot_frame_cache::HotFrameCache,
-    start_meeting_watcher, start_sleep_monitor, start_speaker_identification, start_ui_recording,
+    start_meeting_persister, start_meeting_watcher, start_sleep_monitor,
+    start_speaker_identification, start_ui_recording,
     sync_provider::ScreenpipeSyncProvider,
     vision_manager::{start_monitor_watcher, stop_monitor_watcher, VisionManager},
     watch_pid, ResourceMonitor, SCServer,
@@ -1070,6 +1071,11 @@ async fn main() -> anyhow::Result<()> {
     let _meeting_watcher_handle = meeting_detector
         .as_ref()
         .map(|detector| start_meeting_watcher(detector.clone()));
+
+    // Persist meeting state transitions to DB (smart mode only)
+    let _meeting_persister_handle = meeting_detector
+        .as_ref()
+        .map(|detector| start_meeting_persister(detector.clone(), db.clone()));
 
     // Start calendar-assisted speaker identification
     let _speaker_id_handle = start_speaker_identification(db.clone(), config.user_name.clone());

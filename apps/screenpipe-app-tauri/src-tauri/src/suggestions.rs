@@ -523,6 +523,7 @@ async fn check_ai_available() -> bool {
 #[derive(Debug, Deserialize)]
 struct AccessibilitySnippet {
     app_name: String,
+    #[allow(dead_code)]
     window_name: String,
     snippet: String,
 }
@@ -530,6 +531,7 @@ struct AccessibilitySnippet {
 #[derive(Debug, Deserialize)]
 struct AudioSnippet {
     transcription: String,
+    #[allow(dead_code)]
     device: String,
     #[serde(default)]
     speaker_name: Option<String>,

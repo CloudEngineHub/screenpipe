@@ -28,9 +28,10 @@ use futures::future::try_join_all;
 use crate::{
     text_similarity::is_similar_transcription, AudioChunksResponse, AudioDevice, AudioEntry,
     AudioResult, AudioResultRaw, ContentType, DeviceType, FrameData, FrameRow, FrameRowLight,
-    FrameWindowData, InsertUiEvent, OCREntry, OCRResult, OCRResultRaw, OcrEngine, OcrTextBlock,
-    Order, SearchMatch, SearchMatchGroup, SearchResult, Speaker, TagContentType, TextBounds,
-    TextPosition, TimeSeriesChunk, UiContent, UiEventRecord, UiEventRow, VideoMetadata,
+    FrameWindowData, InsertUiEvent, MeetingRecord, OCREntry, OCRResult, OCRResultRaw, OcrEngine,
+    OcrTextBlock, Order, SearchMatch, SearchMatchGroup, SearchResult, Speaker, TagContentType,
+    TextBounds, TextPosition, TimeSeriesChunk, UiContent, UiEventRecord, UiEventRow,
+    VideoMetadata,
 };
 
 /// Time window (in seconds) to check for similar transcriptions across devices.
@@ -4772,6 +4773,109 @@ LIMIT ? OFFSET ?
                 }
             }
         });
+    }
+
+    // ── Meeting persistence ──────────────────────────────────────────
+
+    pub async fn insert_meeting(
+        &self,
+        meeting_app: &str,
+        detection_source: &str,
+    ) -> Result<i64, SqlxError> {
+        let mut tx = self.begin_immediate_with_retry().await?;
+        let now = chrono::Utc::now()
+            .format("%Y-%m-%dT%H:%M:%S%.3fZ")
+            .to_string();
+        let id = sqlx::query(
+            "INSERT INTO meetings (meeting_start, meeting_app, detection_source) VALUES (?1, ?2, ?3)",
+        )
+        .bind(&now)
+        .bind(meeting_app)
+        .bind(detection_source)
+        .execute(&mut **tx.conn())
+        .await?
+        .last_insert_rowid();
+        tx.commit().await?;
+        Ok(id)
+    }
+
+    pub async fn end_meeting(&self, id: i64, meeting_end: &str) -> Result<(), SqlxError> {
+        let mut tx = self.begin_immediate_with_retry().await?;
+        sqlx::query("UPDATE meetings SET meeting_end = ?1 WHERE id = ?2")
+            .bind(meeting_end)
+            .bind(id)
+            .execute(&mut **tx.conn())
+            .await?;
+        tx.commit().await?;
+        Ok(())
+    }
+
+    pub async fn close_orphaned_meetings(&self) -> Result<u64, SqlxError> {
+        let mut tx = self.begin_immediate_with_retry().await?;
+        let now = chrono::Utc::now()
+            .format("%Y-%m-%dT%H:%M:%S%.3fZ")
+            .to_string();
+        let rows = sqlx::query("UPDATE meetings SET meeting_end = ?1 WHERE meeting_end IS NULL")
+            .bind(&now)
+            .execute(&mut **tx.conn())
+            .await?
+            .rows_affected();
+        tx.commit().await?;
+        Ok(rows)
+    }
+
+    pub async fn list_meetings(
+        &self,
+        start_time: Option<&str>,
+        end_time: Option<&str>,
+        limit: u32,
+        offset: u32,
+    ) -> Result<Vec<MeetingRecord>, SqlxError> {
+        let mut sql = String::from(
+            "SELECT id, meeting_start, meeting_end, meeting_app, title, attendees, \
+             detection_source, created_at FROM meetings WHERE 1=1",
+        );
+        if start_time.is_some() {
+            sql.push_str(" AND meeting_start >= ?1");
+        }
+        if end_time.is_some() {
+            sql.push_str(if start_time.is_some() {
+                " AND meeting_start <= ?2"
+            } else {
+                " AND meeting_start <= ?1"
+            });
+        }
+        sql.push_str(" ORDER BY meeting_start DESC");
+        sql.push_str(if start_time.is_some() && end_time.is_some() {
+            " LIMIT ?3 OFFSET ?4"
+        } else if start_time.is_some() || end_time.is_some() {
+            " LIMIT ?2 OFFSET ?3"
+        } else {
+            " LIMIT ?1 OFFSET ?2"
+        });
+
+        let mut query = sqlx::query_as::<_, MeetingRecord>(&sql);
+        if let Some(st) = start_time {
+            query = query.bind(st);
+        }
+        if let Some(et) = end_time {
+            query = query.bind(et);
+        }
+        query = query.bind(limit).bind(offset);
+
+        let meetings = query.fetch_all(&self.pool).await?;
+        Ok(meetings)
+    }
+
+    pub async fn get_meeting_by_id(&self, id: i64) -> Result<MeetingRecord, SqlxError> {
+        let meeting = sqlx::query_as::<_, MeetingRecord>(
+            "SELECT id, meeting_start, meeting_end, meeting_app, title, attendees, \
+             detection_source, created_at FROM meetings WHERE id = ?1",
+        )
+        .bind(id)
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(meeting)
     }
 }
 

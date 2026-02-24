@@ -179,6 +179,42 @@ const BASE_TOOLS: Tool[] = [
       required: ["start_time", "end_time"],
     },
   },
+  {
+    name: "list-meetings",
+    description:
+      "List detected meetings with duration, app, and attendees. " +
+      "Returns meetings detected via app focus (Zoom, Meet, Teams) and audio. " +
+      "Only available when screenpipe runs in smart transcription mode.",
+    annotations: {
+      title: "List Meetings",
+      readOnlyHint: true,
+    },
+    inputSchema: {
+      type: "object",
+      properties: {
+        start_time: {
+          type: "string",
+          format: "date-time",
+          description: "ISO 8601 UTC start filter (e.g., 2024-01-15T10:00:00Z)",
+        },
+        end_time: {
+          type: "string",
+          format: "date-time",
+          description: "ISO 8601 UTC end filter (e.g., 2024-01-15T18:00:00Z)",
+        },
+        limit: {
+          type: "integer",
+          description: "Max results. Default: 20",
+          default: 20,
+        },
+        offset: {
+          type: "integer",
+          description: "Skip N results for pagination. Default: 0",
+          default: 0,
+        },
+      },
+    },
+  },
 ];
 
 // List tools handler
@@ -761,6 +797,51 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             ],
           };
         }
+      }
+
+      case "list-meetings": {
+        const params = new URLSearchParams();
+        for (const [key, value] of Object.entries(args)) {
+          if (value !== null && value !== undefined) {
+            params.append(key, String(value));
+          }
+        }
+
+        const response = await fetchAPI(`/meetings?${params.toString()}`);
+        if (!response.ok) {
+          throw new Error(`HTTP error: ${response.status}`);
+        }
+
+        const meetings = await response.json();
+
+        if (!Array.isArray(meetings) || meetings.length === 0) {
+          return {
+            content: [
+              {
+                type: "text",
+                text: "No meetings found. Make sure screenpipe is running in smart transcription mode.",
+              },
+            ],
+          };
+        }
+
+        const formatted = meetings.map((m: Record<string, unknown>) => {
+          const start = m.meeting_start as string;
+          const end = (m.meeting_end as string) || "ongoing";
+          const app = m.meeting_app as string;
+          const title = m.title ? ` — ${m.title}` : "";
+          const attendees = m.attendees ? `\nAttendees: ${m.attendees}` : "";
+          return `[${m.detection_source}] ${app}${title}\n  ${start} → ${end}${attendees}`;
+        });
+
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Meetings: ${meetings.length}\n\n${formatted.join("\n---\n")}`,
+            },
+          ],
+        };
       }
 
       default:

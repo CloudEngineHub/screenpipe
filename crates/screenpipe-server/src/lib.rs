@@ -20,6 +20,7 @@ pub mod routes;
 
 pub mod event_driven_capture;
 pub mod hot_frame_cache;
+pub mod meeting_persister;
 pub mod meeting_watcher;
 pub mod paired_capture;
 mod resource_monitor;
@@ -39,6 +40,7 @@ pub use recording_config::RecordingConfig;
 
 pub use calendar_speaker_id::start_speaker_identification;
 pub use cloud_search::{CloudSearchClient, CloudSearchMetadata, CloudStatus};
+pub use meeting_persister::start_meeting_persister;
 pub use meeting_watcher::start_meeting_watcher;
 pub use resource_monitor::{ResourceMonitor, RestartSignal};
 pub use screenpipe_core::Language;
