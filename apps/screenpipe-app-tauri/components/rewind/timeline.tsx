@@ -256,21 +256,6 @@ export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 		}
 	}, [lastFlushTimestamp, newFramesCount, isAtLiveEdge, frames.length, clearNewFramesCount]);
 
-	// Auto-snap: when currentIndex lands on a non-matching device frame (e.g. from
-	// audio playback advancing), snap to the nearest matching frame.
-	useEffect(() => {
-		if (selectedDeviceId === "all" || allDeviceIds.length <= 1) return;
-		if (frames.length === 0) return;
-		const frame = frames[currentIndex];
-		if (!frame) return;
-		if (frame.devices.some((d) => d.device_id === selectedDeviceId)) return;
-		const snapped = snapToDevice(currentIndex);
-		if (snapped !== currentIndex) {
-			setCurrentIndex(snapped);
-			setCurrentFrame(frames[snapped]);
-		}
-	}, [currentIndex, selectedDeviceId, allDeviceIds.length, frames, snapToDevice, setCurrentFrame]);
-
 	// Listen for window focus events to refresh timeline data (debounced)
 	useEffect(() => {
 		let debounceTimer: ReturnType<typeof setTimeout> | null = null;
@@ -1029,11 +1014,10 @@ export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 
 					requestAnimationFrame(() => {
 						setCurrentIndex((prevIndex) => {
-							const raw = Math.min(
+							const newIndex = Math.min(
 								Math.max(0, Math.floor(prevIndex + indexChange)),
 								frames.length - 1,
 							);
-							const newIndex = snapToDevice(raw);
 
 							if (newIndex !== prevIndex && frames[newIndex]) {
 								setCurrentFrame(frames[newIndex]);
@@ -1047,7 +1031,7 @@ export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 				{ leading: true, trailing: false },
 			),
 			// eslint-disable-next-line react-hooks/exhaustive-deps
-	[frames, zoomLevel, pausePlayback, snapToDevice], // Re-create when zoom changes
+	[frames, zoomLevel, pausePlayback], // Re-create when zoom changes
 	);
 
 	// Attach scroll/zoom handler so pinch-to-zoom and scroll-to-navigate work.
@@ -1677,6 +1661,7 @@ export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 							onAskAI={sendSelectionToChat}
 							isPlaying={isPlaying}
 							onTogglePlayPause={togglePlayPause}
+							selectedDeviceId={selectedDeviceId}
 						/>
 					) : (
 						<div className="bg-card/80 backdrop-blur-sm p-4 border-t border-border">

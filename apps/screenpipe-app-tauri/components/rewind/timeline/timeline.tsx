@@ -62,6 +62,7 @@ interface TimelineSliderProps {
 	onAskAI?: () => void;
 	isPlaying?: boolean; // Whether audio playback is active
 	onTogglePlayPause?: () => void; // Toggle audio playback (Space key)
+	selectedDeviceId?: string; // "all" or a specific device_id — dims non-matching bars
 }
 
 interface AppGroup {
@@ -177,6 +178,7 @@ export const TimelineSlider = ({
 	onAskAI,
 	isPlaying = false,
 	onTogglePlayPause,
+	selectedDeviceId = "all",
 }: TimelineSliderProps) => {
 	const containerRef = useRef<HTMLDivElement>(null);
 	const observerTargetRef = useRef<HTMLDivElement>(null);
@@ -792,6 +794,7 @@ export const TimelineSlider = ({
 
 									const hasAudio = Boolean(frame?.devices?.[0]?.audio?.length);
 									const isCurrent = frameIndex === currentIndex;
+									const matchesDevice = selectedDeviceId === "all" || frame.devices.some((d) => d.device_id === selectedDeviceId);
 
 									// Show time marker on first frame of each hour
 									const showTimeMarker = timeMarkers.some(
@@ -825,7 +828,8 @@ export const TimelineSlider = ({
 												marginRight: `${frameMargin}px`,
 												backgroundColor: isCurrent ? 'hsl(var(--foreground))' : hasAudio ? 'hsl(var(--foreground))' : group.color,
 												height: isCurrent || isSelected || isInRange ? "75%" : hasAudio ? "60%" : "45%",
-												opacity: isCurrent || isSelected || isInRange ? 1 : hasAudio ? 0.9 : 0.7,
+												opacity: !matchesDevice ? 0.15 : isCurrent || isSelected || isInRange ? 1 : hasAudio ? 0.9 : 0.7,
+												borderBottom: matchesDevice && selectedDeviceId !== "all" ? '2px solid hsl(var(--primary))' : 'none',
 												direction: "ltr",
 												boxShadow: isCurrent
 												? isPlaying
