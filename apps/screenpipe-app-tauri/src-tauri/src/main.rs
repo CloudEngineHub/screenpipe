@@ -1539,11 +1539,20 @@ async fn main() {
                 .with_writer(std::io::stdout)
                 .with_filter(EnvFilter::new("info,hyper=error,tower_http=error"));
 
-            // Initialize the tracing subscriber with both layers
-            tracing_subscriber::registry()
-                .with(file_layer)
-                .with(console_layer)
-                .init();
+            // Initialize the tracing subscriber with both layers + optional Sentry layer
+            // The Sentry layer captures error!() and warn!() events (not just panics)
+            if sentry_guard.is_some() {
+                tracing_subscriber::registry()
+                    .with(file_layer)
+                    .with(console_layer)
+                    .with(sentry::integrations::tracing::layer())
+                    .init();
+            } else {
+                tracing_subscriber::registry()
+                    .with(file_layer)
+                    .with(console_layer)
+                    .init();
+            }
 
             // Windows-specific setup
             if cfg!(windows) {
