@@ -30,6 +30,10 @@ interface CurrentFrameTimelineProps {
 	onUrlsDetected?: (urls: DetectedUrl[]) => void;
 	/** all unique device_ids seen in this session (e.g. ["monitor_1", "monitor_4"]) */
 	allDeviceIds?: string[];
+	/** When true, use HTTP JPEG fallback instead of video seek for instant display after search navigation */
+	searchNavFrame?: boolean;
+	/** Called after the search nav frame has loaded, so subsequent scrolling uses video mode */
+	onSearchNavComplete?: () => void;
 }
 
 
@@ -84,6 +88,8 @@ export const CurrentFrameTimeline: FC<CurrentFrameTimelineProps> = ({
 	onFrameLoadError,
 	onUrlsDetected,
 	allDeviceIds,
+	searchNavFrame,
+	onSearchNavComplete,
 }) => {
 	const { isMac } = usePlatform();
 	const [isLoading, setIsLoading] = useState(true);
@@ -233,7 +239,7 @@ export const CurrentFrameTimeline: FC<CurrentFrameTimelineProps> = ({
 
 	// Main video seeking effect
 	useEffect(() => {
-		if (!debouncedFrame || !useVideoMode || isSnapshotFrame) return;
+		if (!debouncedFrame || !useVideoMode || isSnapshotFrame || searchNavFrame) return;
 		const { filePath: path, offsetIndex: idx, fps: serverFps, frameId: fid } = debouncedFrame;
 
 		// If this chunk previously failed, go straight to fallback
@@ -346,7 +352,7 @@ export const CurrentFrameTimeline: FC<CurrentFrameTimelineProps> = ({
 			loadedChunkRef.current = null;
 			setUseVideoMode(false);
 		});
-	}, [debouncedFrame, useVideoMode, getVideoUrl, resolveEffectiveFps, isSnapshotFrame]);
+	}, [debouncedFrame, useVideoMode, getVideoUrl, resolveEffectiveFps, isSnapshotFrame, searchNavFrame]);
 
 	// Snapshot frames: load directly via Tauri asset protocol (no HTTP/DB needed)
 	useEffect(() => {
@@ -389,11 +395,17 @@ export const CurrentFrameTimeline: FC<CurrentFrameTimelineProps> = ({
 
 	// Fallback: ffmpeg <img> mode (same as old behavior)
 	// Skipped for snapshot frames that loaded successfully via asset protocol
+	// Also used when searchNavFrame is true (instant JPEG for first frame after search nav)
 	const fallbackImageUrl = useMemo(() => {
-		if (useVideoMode || !debouncedFrame) return null;
+		if (!debouncedFrame) return null;
+		// Force HTTP JPEG for search navigation (skip slow video seek)
+		if (searchNavFrame) {
+			return `http://localhost:3030/frames/${debouncedFrame.frameId}`;
+		}
+		if (useVideoMode) return null;
 		if (isSnapshotFrame && !snapshotFailed) return null;
 		return `http://localhost:3030/frames/${debouncedFrame.frameId}`;
-	}, [useVideoMode, debouncedFrame, isSnapshotFrame, snapshotFailed]);
+	}, [useVideoMode, debouncedFrame, isSnapshotFrame, snapshotFailed, searchNavFrame]);
 
 	// Preload fallback image — only swap displayed URL when the new image loads successfully
 	useEffect(() => {
@@ -412,16 +424,24 @@ export const CurrentFrameTimeline: FC<CurrentFrameTimelineProps> = ({
 					duration_ms: Math.round(loadTime),
 					frame_id: debouncedFrame?.frameId,
 					success: true,
-					mode: "ffmpeg_fallback",
+					mode: searchNavFrame ? "search_nav_fallback" : "ffmpeg_fallback",
 					frames_skipped: framesSkippedRef.current,
 				});
 				frameLoadStartTimeRef.current = null;
 				framesSkippedRef.current = 0;
 			}
+			// Clear search nav mode after first frame loads so subsequent scrolling uses video seek
+			if (searchNavFrame) {
+				onSearchNavComplete?.();
+			}
 		};
 		img.onerror = () => {
 			// Preload failed — keep showing previous image
 			setIsLoading(false);
+			// Still clear search nav mode on error to avoid getting stuck
+			if (searchNavFrame) {
+				onSearchNavComplete?.();
+			}
 		};
 		img.src = fallbackImageUrl;
 		return () => {
@@ -746,8 +766,8 @@ export const CurrentFrameTimeline: FC<CurrentFrameTimelineProps> = ({
 				/>
 			)}
 
-			{/* Fallback mode: preloaded <img> via HTTP server */}
-			{displayedFallbackUrl && !useVideoMode && !(snapshotAssetUrl && isSnapshotFrame && !snapshotFailed) && (
+			{/* Fallback mode: preloaded <img> via HTTP server (also used for search nav) */}
+			{displayedFallbackUrl && (!useVideoMode || searchNavFrame) && !(snapshotAssetUrl && isSnapshotFrame && !snapshotFailed) && (
 				// eslint-disable-next-line @next/next/no-img-element
 				<img
 					src={displayedFallbackUrl}

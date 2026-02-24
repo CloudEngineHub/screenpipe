@@ -144,6 +144,10 @@ export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 	// Navigation in progress — disables day arrows to prevent double-clicks
 	const [isNavigating, setIsNavigating] = useState(false);
 
+	// When true, CurrentFrameTimeline uses HTTP JPEG fallback instead of video seek
+	// for the first frame after a cross-date search navigation (avoids ~5s video load)
+	const [searchNavFrame, setSearchNavFrame] = useState(false);
+
 	// Get timeline selection for chat context
 	const { selectionRange, loadTagsForFrames } = useTimelineSelection();
 
@@ -504,12 +508,15 @@ export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 			if (isSameDay(targetDate, currentDate) && hasFramesForTargetDate) {
 				console.log("[pendingNavigation] Frames loaded for target date, jumping to closest frame:", targetDate.toISOString());
 
-				// Find the closest frame to the target timestamp
+				// Find the closest frame to the target timestamp — only consider
+				// frames from the target date (old-date frames may still be in
+				// the array during pendingDateSwap transitions)
 				const targetTime = targetDate.getTime();
 				let closestIndex = 0;
 				let closestDiff = Infinity;
 
 				frames.forEach((frame, index) => {
+					if (!isSameDay(new Date(frame.timestamp), targetDate)) return;
 					const frameTime = new Date(frame.timestamp).getTime();
 					const diff = Math.abs(frameTime - targetTime);
 					if (diff < closestDiff) {
@@ -521,6 +528,8 @@ export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 				const snapped = snapToDevice(closestIndex);
 				setCurrentIndex(snapped);
 				setCurrentFrame(frames[snapped]);
+				// Use HTTP JPEG fallback for this first frame (skip slow video seek)
+				setSearchNavFrame(true);
 				console.log("[pendingNavigation] Jumped to frame index:", snapped);
 
 				// Clear pending navigation and UI state
@@ -943,6 +952,9 @@ export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 
 			if (cancelled) return;
 
+			// Always fetch full day. For search navigation, the narrow ±5min
+			// fetch was already fired synchronously in navigateDirectToDate().
+			// This full-day fetch acts as backfill to populate the timeline.
 			const startTime = startOfDay(dateToCheck);
 			const endTime = endOfDay(dateToCheck);
 			fetchTimeRange(startTime, endTime);
@@ -1179,19 +1191,38 @@ export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 		pendingNavigationRef.current = targetDate;
 		setSeekingTimestamp(targetDate.toISOString());
 
-		setCurrentFrame(null);
+		// Fire narrow ±5min fetch IMMEDIATELY via the store's websocket
+		// (don't wait for React effect cycle — that delays by 100ms+ and
+		// can get cancelled by dependency changes)
+		const targetMs = targetDate.getTime();
+		const narrowStart = new Date(targetMs - 5 * 60 * 1000);
+		const narrowEnd = new Date(targetMs + 5 * 60 * 1000);
+		fetchTimeRange(narrowStart, narrowEnd);
+
+		// Don't clear currentFrame — keep old frame visible while new ones load
 		setCurrentIndex(0);
 		setCurrentDate(targetDate);
 
-		console.log("[navigateDirectToDate] Navigation initiated, waiting for frames...");
+		console.log("[navigateDirectToDate] Navigation initiated, narrow fetch sent");
 
+		// Timeout: if frames haven't arrived after 10s, retry with full-day fetch
+		// instead of giving up entirely
 		setTimeout(() => {
 			if (pendingNavigationRef.current && isSameDay(pendingNavigationRef.current, targetDate)) {
-				console.warn("[navigateDirectToDate] Timeout: frames didn't arrive, clearing navigation state");
-				pendingNavigationRef.current = null;
-				setSeekingTimestamp(null);
-				setIsNavigating(false);
-				isNavigatingRef.current = false;
+				console.warn("[navigateDirectToDate] Timeout: retrying with full-day fetch");
+				clearSentRequestForDate(targetDate);
+				fetchTimeRange(startOfDay(targetDate), endOfDay(targetDate));
+
+				// Final timeout: give up after another 10s
+				setTimeout(() => {
+					if (pendingNavigationRef.current && isSameDay(pendingNavigationRef.current, targetDate)) {
+						console.warn("[navigateDirectToDate] Final timeout: clearing navigation state");
+						pendingNavigationRef.current = null;
+						setSeekingTimestamp(null);
+						setIsNavigating(false);
+						isNavigatingRef.current = false;
+					}
+				}, 10000);
 			}
 		}, 10000);
 	};
@@ -1282,9 +1313,8 @@ export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 			// Store pending navigation - will be processed when frames arrive
 			pendingNavigationRef.current = targetDate;
 
-			// Clear current frame and update date
+			// Keep old frame visible while new date's frames load
 			// This triggers the effect that fetches frames for the new date
-			setCurrentFrame(null);
 			setCurrentIndex(0);
 			setCurrentDate(targetDate);
 
@@ -1385,6 +1415,8 @@ export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 						<CurrentFrameTimeline
 							currentFrame={currentFrame}
 							allDeviceIds={allDeviceIds}
+							searchNavFrame={searchNavFrame}
+							onSearchNavComplete={() => setSearchNavFrame(false)}
 							onNavigate={(direction) => {
 								// newer = lower index (-1), older = higher index (+1)
 								const newIndex = direction === "next"
@@ -1739,9 +1771,18 @@ export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 									if (!isSameDay(targetDate, currentDate)) {
 										navigateDirectToDate(targetDate);
 									} else {
-										pendingNavigationRef.current = null;
-										jumpToTime(targetDate);
-										setSeekingTimestamp(null);
+										// Set pending ref so the effect handles it if jumpToTime
+										// fails (e.g. frames are stale from a previous date swap)
+										pendingNavigationRef.current = targetDate;
+										const hasTargetDayFrames = frames.some(f =>
+											isSameDay(new Date(f.timestamp), targetDate)
+										);
+										if (hasTargetDayFrames) {
+											jumpToTime(targetDate);
+											pendingNavigationRef.current = null;
+											setSeekingTimestamp(null);
+										}
+										// else: pending effect will handle when correct frames arrive
 									}
 								}}
 							/>
@@ -1757,9 +1798,18 @@ export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 							if (!isSameDay(targetDate, currentDate)) {
 								navigateDirectToDate(targetDate);
 							} else {
-								pendingNavigationRef.current = null;
-								jumpToTime(targetDate);
-								setSeekingTimestamp(null);
+								// Set pending ref so the effect handles it if jumpToTime
+								// fails (e.g. frames are stale from a previous date swap)
+								pendingNavigationRef.current = targetDate;
+								const hasTargetDayFrames = frames.some(f =>
+									isSameDay(new Date(f.timestamp), targetDate)
+								);
+								if (hasTargetDayFrames) {
+									jumpToTime(targetDate);
+									pendingNavigationRef.current = null;
+									setSeekingTimestamp(null);
+								}
+								// else: pending effect will handle when correct frames arrive
 							}
 						}}
 					/>

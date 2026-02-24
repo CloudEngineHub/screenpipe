@@ -262,8 +262,13 @@ async fn handle_stream_frames_socket(
                         sent_ids_clone.lock().await.clear();
 
                         // Decide: is this a "today" request (use cache) or past day (use DB)?
-                        let is_today = cache_clone.is_today(start_time).await
-                            || cache_clone.is_today(end_time).await;
+                        // Only use hot_cache if end_time reaches into the present/future.
+                        // If the entire range is in the past (even on today's calendar day),
+                        // use database — hot_cache only has recent in-memory frames.
+                        let now = Utc::now();
+                        let is_today = (cache_clone.is_today(start_time).await
+                            || cache_clone.is_today(end_time).await)
+                            && end_time >= now;
 
                         info!(
                             "WebSocket stream request: {} to {} (source={})",

@@ -49,6 +49,8 @@ interface TimelineState {
 	// Optimistic UI state
 	isConnected: boolean; // WebSocket connection status
 	hasCachedData: boolean; // Whether we loaded from cache
+	// When true, next flushFrameBuffer replaces frames instead of merging (date swap)
+	pendingDateSwap: boolean;
 
 	// Deep link navigation — persists across component mounts
 	pendingNavigation: { timestamp: string; frameId?: string } | null;
@@ -86,6 +88,7 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
 	lastFlushTimestamp: 0,
 	isConnected: false,
 	hasCachedData: false,
+	pendingDateSwap: false,
 	pendingNavigation: null,
 
 	setPendingNavigation: (nav) => set({ pendingNavigation: nav }),
@@ -97,10 +100,17 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
 	clearNewFramesCount: () => set({ newFramesCount: 0 }),
 
 	clearSentRequestForDate: (date: Date) => {
-		const dateKey = `${date.getDate()}-${date.getMonth()}-${date.getFullYear()}`;
+		const targetDay = date.toDateString();
 		set((state) => {
-			const newSentRequests = new Set(state.sentRequests);
-			newSentRequests.delete(dateKey);
+			const newSentRequests = new Set<string>();
+			for (const key of state.sentRequests) {
+				// Key format: "startISO_endISO" — check if start date matches
+				const startIso = key.split('_')[0];
+				try {
+					if (new Date(startIso).toDateString() === targetDay) continue;
+				} catch { /* keep non-matching keys */ }
+				newSentRequests.add(key);
+			}
 			return { sentRequests: newSentRequests };
 		});
 	},
@@ -134,7 +144,8 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
 		}
 	},
 
-	// Clear frames when navigating to a new date to avoid confusion between old/new frames
+	// Prepare for date navigation — keep old frames visible while new ones load.
+	// Sets pendingDateSwap so flushFrameBuffer replaces frames atomically on first batch.
 	clearFramesForNavigation: () => {
 		// Clear the frame buffer too
 		frameBuffer = [];
@@ -148,16 +159,11 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
 			requestTimeoutTimer = null;
 		}
 		requestRetryCount = 0;
-		// Clear frames + timestamps so:
-		// 1) request timeout logic correctly sees "no frames" and retries
-		// 2) pendingNavigation effect triggers on first batch from new date
-		// 3) no stale old-date frames confuse the frame selection
-		// The full-screen "Loading Timeline" blocker is suppressed during
-		// navigation by the isNavigating flag in timeline.tsx.
+		// Keep frames + frameTimestamps so old content stays visible.
+		// pendingDateSwap tells flushFrameBuffer to replace (not merge) on next batch.
 		set(() => ({
-			frames: [],
-			frameTimestamps: new Set<string>(),
 			sentRequests: new Set<string>(),
+			pendingDateSwap: true,
 			isLoading: true,
 			loadingProgress: { loaded: 0, isStreaming: false },
 			error: null,
@@ -167,8 +173,14 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
 
 	hasDateBeenFetched: (date: Date) => {
 		const { sentRequests } = get();
-		const dateKey = `${date.getDate()}-${date.getMonth()}-${date.getFullYear()}`;
-		return sentRequests.has(dateKey);
+		const targetDay = date.toDateString();
+		for (const key of sentRequests) {
+			const startIso = key.split('_')[0];
+			try {
+				if (new Date(startIso).toDateString() === targetDay) return true;
+			} catch { /* skip malformed keys */ }
+		}
+		return false;
 	},
 
 	// Flush accumulated frames to state - called periodically instead of on every message
@@ -179,7 +191,42 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
 		frameBuffer = [];
 
 		set((state) => {
-			// Filter out duplicates using O(1) Set lookup
+			// If pendingDateSwap, replace frames entirely with new batch (date changed)
+			if (state.pendingDateSwap) {
+				// Frames received - clear the request timeout (no need to retry)
+				if (requestTimeoutTimer) {
+					clearTimeout(requestTimeoutTimer);
+					requestTimeoutTimer = null;
+				}
+				requestRetryCount = 0;
+
+				const newTimestamps = new Set<string>();
+				framesToFlush.forEach((frame) => newTimestamps.add(frame.timestamp));
+				const sortedFrames = [...framesToFlush].sort(
+					(a, b) => b.timestamp.localeCompare(a.timestamp)
+				);
+
+				// Debounce cache save
+				if (cacheSaveTimer) clearTimeout(cacheSaveTimer);
+				cacheSaveTimer = setTimeout(() => {
+					cacheSaveTimer = null;
+					saveFramesToCache(sortedFrames, state.currentDate);
+				}, CACHE_SAVE_DEBOUNCE_MS);
+
+				return {
+					frames: sortedFrames,
+					frameTimestamps: newTimestamps,
+					pendingDateSwap: false,
+					isLoading: false,
+					loadingProgress: { loaded: sortedFrames.length, isStreaming: true },
+					message: null,
+					error: null,
+					newFramesCount: 0,
+					lastFlushTimestamp: Date.now(),
+				};
+			}
+
+			// Normal merge path — filter out duplicates using O(1) Set lookup
 			const newUniqueFrames = framesToFlush.filter(
 				(frame) => !state.frameTimestamps.has(frame.timestamp)
 			);
@@ -509,7 +556,8 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
 
 	fetchTimeRange: async (startTime: Date, endTime: Date) => {
 		const { websocket, sentRequests } = get();
-		const requestKey = `${startTime.getDate()}-${startTime.getMonth()}-${startTime.getFullYear()}`;
+		// Use ISO range as key so narrow-window and full-day fetches get distinct keys
+		const requestKey = `${startTime.toISOString()}_${endTime.toISOString()}`;
 
 		if (sentRequests.has(requestKey)) {
 			console.log("Request already sent, skipping...");
@@ -536,10 +584,10 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
 			}
 			requestTimeoutTimer = setTimeout(() => {
 				requestTimeoutTimer = null;
-				const currentFrames = get().frames;
+				const { frames: currentFrames, pendingDateSwap: stillSwapping } = get();
 
-				// If still no frames and we haven't exceeded retries, retry
-				if (currentFrames.length === 0 && requestRetryCount < MAX_REQUEST_RETRIES) {
+				// Retry if no frames arrived (or still waiting for date swap to complete)
+				if ((currentFrames.length === 0 || stillSwapping) && requestRetryCount < MAX_REQUEST_RETRIES) {
 					requestRetryCount++;
 					console.log(`No frames received, retrying (${requestRetryCount}/${MAX_REQUEST_RETRIES})...`);
 
@@ -552,7 +600,7 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
 
 					// Retry the request
 					get().fetchTimeRange(startTime, endTime);
-				} else if (currentFrames.length === 0 && requestRetryCount >= MAX_REQUEST_RETRIES) {
+				} else if ((currentFrames.length === 0 || stillSwapping) && requestRetryCount >= MAX_REQUEST_RETRIES) {
 					console.log("Max retries reached, no frames available");
 					set({
 						isLoading: false,
@@ -578,7 +626,7 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
 		endTime.setHours(23, 59, 59, 999);
 
 		const { websocket, sentRequests } = get();
-		const requestKey = `${nextDay.getDate()}-${nextDay.getMonth()}-${nextDay.getFullYear()}`;
+		const requestKey = `${nextDay.toISOString()}_${endTime.toISOString()}`;
 
 		if (sentRequests.has(requestKey)) {
 			console.log("Request already sent, skipping...");
@@ -605,18 +653,22 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
 		// Always reset to today when the window is focused.
 		// The window is hidden/shown (not destroyed), so stale dates persist.
 		const today = new Date();
+		const todayStr = today.toDateString();
 
-		// Clear sentRequests for today so we re-fetch fresh data
-		const todayKey = `${today.getDate()}-${today.getMonth()}-${today.getFullYear()}`;
-		
 		// Also clear the old date's sentRequests in case it was different
 		const { currentDate: oldDate } = get();
-		const oldDateKey = `${oldDate.getDate()}-${oldDate.getMonth()}-${oldDate.getFullYear()}`;
+		const oldDateStr = oldDate.toDateString();
 
 		set((state) => {
-			const newSentRequests = new Set(state.sentRequests);
-			newSentRequests.delete(todayKey);
-			newSentRequests.delete(oldDateKey);
+			const newSentRequests = new Set<string>();
+			for (const key of state.sentRequests) {
+				const startIso = key.split('_')[0];
+				try {
+					const keyDateStr = new Date(startIso).toDateString();
+					if (keyDateStr === todayStr || keyDateStr === oldDateStr) continue;
+				} catch { /* keep non-matching keys */ }
+				newSentRequests.add(key);
+			}
 			return {
 				sentRequests: newSentRequests,
 				currentDate: today,
@@ -626,7 +678,7 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
 			};
 		});
 
-		console.log("Window focused, cleared sentRequests for:", todayKey);
+		console.log("Window focused, cleared sentRequests for:", todayStr);
 
 		// If WebSocket is open, fetch today's data
 		if (websocket && websocket.readyState === WebSocket.OPEN) {
