@@ -65,18 +65,30 @@ export function SubtitleBar({ frames, currentIndex, onClick }: SubtitleBarProps)
 
 		if (entries.length === 0) return [];
 
-		// Aggressive dedup: key on normalized transcription text + device type.
-		// The backend assigns the same audio to many frames (15s padding), and
-		// can also produce multiple chunks with identical text. We only want
-		// one subtitle line per unique piece of speech.
-		const seen = new Map<string, AudioEntry>();
+		// Aggressive dedup: the backend assigns the same audio to many frames
+		// (15s padding), and can produce multiple chunks where the same speech
+		// is transcribed with slightly different endings. We dedup in two passes:
+		// 1. Exact match on first 60 chars of normalized text + device type
+		// 2. Prefix overlap: if one entry's text starts with another's first
+		//    60 chars (or vice-versa), keep only the longer one.
+		const normalize = (t: string) => t.trim().toLowerCase();
+		const prefixKey = (t: string) => normalize(t).slice(0, 60);
+
+		// Pass 1: exact prefix dedup
+		const byPrefix = new Map<string, AudioEntry>();
 		for (const entry of entries) {
-			const key = `${entry.is_input}-${entry.transcription.trim().toLowerCase()}`;
-			if (!seen.has(key)) {
-				seen.set(key, entry);
+			const key = `${entry.is_input}-${prefixKey(entry.transcription)}`;
+			const existing = byPrefix.get(key);
+			if (!existing || normalize(entry.transcription).length > normalize(existing.transcription).length) {
+				// Keep the longer transcription (more complete), but preserve earliest timestamp
+				if (existing && existing.timestamp < entry.timestamp) {
+					byPrefix.set(key, { ...entry, timestamp: existing.timestamp });
+				} else {
+					byPrefix.set(key, entry);
+				}
 			}
 		}
-		const deduped = Array.from(seen.values());
+		const deduped = Array.from(byPrefix.values());
 
 		// Filter to entries that are "active" — started before now and haven't
 		// lingered past their expiry.
