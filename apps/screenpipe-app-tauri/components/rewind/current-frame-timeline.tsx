@@ -168,10 +168,12 @@ export const CurrentFrameTimeline: FC<CurrentFrameTimelineProps> = ({
 		return lower.endsWith('.jpg') || lower.endsWith('.jpeg') || lower.endsWith('.png');
 	}, [debouncedFrame?.filePath]);
 
-	// Reset snapshot state when frame changes
+	// Reset snapshot failure flag when frame changes.
+	// DON'T clear snapshotAssetUrl here — keep the old image visible until
+	// the new one finishes preloading (the snapshot effect sets the URL only
+	// after img.onload). Clearing it eagerly causes a white flash.
 	useEffect(() => {
 		setSnapshotFailed(false);
-		setSnapshotAssetUrl(null);
 	}, [debouncedFrame?.filePath]);
 
 	// Convert file path to asset URL
@@ -647,7 +649,7 @@ export const CurrentFrameTimeline: FC<CurrentFrameTimelineProps> = ({
 	return (
 		<div
 			ref={containerRef}
-			className="absolute inset-0 w-full h-full"
+			className="absolute inset-0 w-full h-full bg-black"
 			onContextMenu={handleContextMenu}
 		>
 			{/* Context menu - right-click */}
