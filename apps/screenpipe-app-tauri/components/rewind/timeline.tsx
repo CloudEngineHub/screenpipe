@@ -1646,28 +1646,6 @@ export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 
 				{/* Meeting bar removed — meeting detection handled inside transcript panel */}
 
-				{/* Monitor filter dots — above timeline, only when 2+ monitors */}
-				{allDeviceIds.length > 1 && (
-					<div className="absolute bottom-[72px] left-1/2 -translate-x-1/2 z-40 flex items-center gap-1.5 pointer-events-auto">
-						{allDeviceIds.map((id) => (
-							<button
-								key={id}
-								onClick={() => handleDeviceChange(selectedDeviceId === id ? "all" : id)}
-								className="group relative w-2.5 h-2.5 rounded-full transition-all duration-200"
-								style={{
-									backgroundColor: selectedDeviceId === id
-										? "hsl(var(--foreground))"
-										: selectedDeviceId === "all"
-											? "hsl(var(--foreground) / 0.5)"
-											: "hsl(var(--foreground) / 0.2)",
-									transform: selectedDeviceId === id ? "scale(1.3)" : "scale(1)",
-								}}
-								title={`${id.replace("monitor_", "monitor ")}${selectedDeviceId === id ? " (click to show all)" : ""}`}
-							/>
-						))}
-					</div>
-				)}
-
 				{/* Bottom Timeline - Overlay that doesn't cut off image */}
 				<div className="absolute bottom-0 left-0 right-0 z-40 pointer-events-auto">
 					{frames.length > 0 ? (
@@ -1695,6 +1673,8 @@ export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 							isPlaying={isPlaying}
 							onTogglePlayPause={togglePlayPause}
 							selectedDeviceId={selectedDeviceId}
+							allDeviceIds={allDeviceIds}
+							onDeviceChange={handleDeviceChange}
 						/>
 					) : (
 						<div className="bg-card/80 backdrop-blur-sm p-4 border-t border-border">
