@@ -44,6 +44,7 @@ import Timeline from "@/components/rewind/timeline";
 import { useQueryState } from "nuqs";
 import { listen } from "@tauri-apps/api/event";
 import { useSettings } from "@/lib/hooks/use-settings";
+import { useTeam } from "@/lib/hooks/use-team";
 import { open as openUrl } from "@tauri-apps/plugin-shell";
 
 type MainSection = "home" | "timeline" | "pipes" | "help";
@@ -84,6 +85,7 @@ function SettingsPageContent() {
   });
 
   const { settings } = useSettings();
+  const teamState = useTeam();
   const posthog = usePostHog();
   const showCloudSync = useMemo(() => posthog?.isFeatureEnabled("cloud-sync") ?? false, [posthog]);
   const overlayData = useOverlayData();
@@ -313,31 +315,37 @@ function SettingsPageContent() {
               {/* Spacer */}
               <div className="flex-1" />
 
-              {/* Team promo card */}
-              <div className="mx-1 mb-3 p-3 border border-border bg-card">
-                <h3 className="text-sm font-medium text-foreground">
-                  Add your team to screenpipe
-                </h3>
-                <p className="text-xs text-muted-foreground mt-1">
-                  Push pipe configs and content filters to all members.
-                </p>
-                <button
-                  onClick={() => openModal("team")}
-                  className="mt-2.5 px-3 py-1.5 text-xs font-medium border border-border bg-background hover:bg-foreground hover:text-background transition-colors duration-150"
-                >
-                  ADD YOUR TEAM
-                </button>
-              </div>
+              {/* Team promo card — hidden when user already has a team */}
+              {!teamState.team && (
+                <div className="mx-1 mb-3 p-3 border border-border bg-card">
+                  <h3 className="text-sm font-medium text-foreground">
+                    Add your team to screenpipe
+                  </h3>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Push pipe configs and content filters to all members.
+                  </p>
+                  <button
+                    onClick={() => openModal("team")}
+                    className="mt-2.5 px-3 py-1.5 text-xs font-medium border border-border bg-background hover:bg-foreground hover:text-background transition-colors duration-150"
+                  >
+                    ADD YOUR TEAM
+                  </button>
+                </div>
+              )}
 
               {/* Bottom items */}
               <div className="space-y-0.5 border-t border-border pt-2">
-                {/* Invite your team */}
+                {/* Team link */}
                 <button
                   onClick={() => openModal("team")}
                   className="w-full flex items-center space-x-2.5 px-3 py-2 rounded-lg transition-all duration-150 text-left group hover:bg-card/50 text-muted-foreground hover:text-foreground"
                 >
                   <UserPlus className="h-4 w-4 text-muted-foreground group-hover:text-foreground transition-colors flex-shrink-0" />
-                  <span className="font-medium text-sm truncate">Invite your team</span>
+                  <span className="font-medium text-sm truncate">
+                    {teamState.team
+                      ? `Your team (${teamState.members.length})`
+                      : "Invite your team"}
+                  </span>
                 </button>
 
                 {/* Get free month */}

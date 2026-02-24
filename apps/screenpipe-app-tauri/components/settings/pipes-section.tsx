@@ -305,6 +305,7 @@ export function PipesSection() {
         raw_content: pipe.raw_content,
         config: pipe.config,
       });
+      posthog.capture("team_config_pushed", { config_type: "pipe", pipe_name: pipe.config.name });
       toast({
         title: sharedPipeNames.has(pipe.config.name) ? "updated team pipe" : "shared to team",
       });

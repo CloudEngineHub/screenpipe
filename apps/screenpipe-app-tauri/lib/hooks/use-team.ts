@@ -399,6 +399,30 @@ export function useTeam() {
     [token, fetchConfigs]
   );
 
+  // send email invite (calls server API)
+  // TODO: server endpoint POST https://screenpi.pe/api/team/invite must be created in website-screenpipe repo
+  const sendInviteEmail = useCallback(
+    async (email: string) => {
+      if (!token || !state.inviteLink || !state.team)
+        throw new Error("no team");
+      const res = await fetch(`${API}/invite`, {
+        method: "POST",
+        headers: headers(),
+        body: JSON.stringify({
+          email,
+          team_name: state.team.name,
+          invite_link: state.inviteLink,
+        }),
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || "failed to send invite");
+      }
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [token, state.inviteLink, state.team]
+  );
+
   // auto-fetch on mount + when token changes
   useEffect(() => {
     fetchTeam();
@@ -414,5 +438,6 @@ export function useTeam() {
     removeMember,
     pushConfig,
     deleteConfig,
+    sendInviteEmail,
   };
 }

@@ -34,6 +34,7 @@ import { useTeamSync } from "@/lib/hooks/use-team-sync";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { onOpenUrl } from "@tauri-apps/plugin-deep-link";
 import { open as openUrl } from "@tauri-apps/plugin-shell";
+import posthog from "posthog-js";
 
 export function TeamSection() {
   const { settings } = useSettings();
@@ -49,6 +50,20 @@ export function TeamSection() {
   const [joining, setJoining] = useState(false);
   const [showJoinInput, setShowJoinInput] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [inviteEmail, setInviteEmail] = useState("");
+  const [sendingInvite, setSendingInvite] = useState(false);
+
+  // track team section view
+  const hasTeam = !!team.team;
+  useEffect(() => {
+    if (!team.loading) {
+      posthog.capture("team_section_viewed", {
+        has_team: hasTeam,
+        role: team.role,
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [team.loading, hasTeam, team.role]);
 
   // handle deep link join
   useEffect(() => {
@@ -63,6 +78,7 @@ export function TeamSection() {
               if (teamId && key) {
                 setJoining(true);
                 await team.joinTeam(teamId, decodeURIComponent(key));
+                posthog.capture("team_joined", { source: "deep_link" });
                 toast({
                   title: "joined team!",
                   description: "you are now a team member",
@@ -94,6 +110,7 @@ export function TeamSection() {
     setCreating(true);
     try {
       await team.createTeam(teamName.trim());
+      posthog.capture("team_created", { team_name: teamName.trim() });
       setTeamName("");
       toast({ title: "team created!" });
     } catch (err: any) {
@@ -116,6 +133,7 @@ export function TeamSection() {
       const key = parsed.searchParams.get("key");
       if (!teamId || !key) throw new Error("invalid invite link");
       await team.joinTeam(teamId, decodeURIComponent(key));
+      posthog.capture("team_joined", { source: "invite_link" });
       setInviteInput("");
       setShowJoinInput(false);
       toast({ title: "joined team!" });
@@ -133,6 +151,7 @@ export function TeamSection() {
   const handleCopyInvite = async () => {
     if (!team.inviteLink) return;
     await navigator.clipboard.writeText(team.inviteLink);
+    posthog.capture("team_invite_copied");
     setCopied(true);
     toast({ title: "invite link copied" });
     setTimeout(() => setCopied(false), 2000);
@@ -141,6 +160,7 @@ export function TeamSection() {
   const handleRemoveMember = async (userId: string) => {
     try {
       await team.removeMember(userId);
+      posthog.capture("team_member_removed");
       toast({ title: "member removed" });
     } catch (err: any) {
       toast({
@@ -154,6 +174,7 @@ export function TeamSection() {
   const handleDelete = async () => {
     try {
       await team.deleteTeam();
+      posthog.capture("team_deleted");
       setConfirmDelete(false);
       toast({ title: "team deleted" });
     } catch (err: any) {
@@ -165,9 +186,29 @@ export function TeamSection() {
     }
   };
 
+  const handleSendInvite = async () => {
+    if (!inviteEmail.trim()) return;
+    setSendingInvite(true);
+    try {
+      await team.sendInviteEmail(inviteEmail.trim());
+      posthog.capture("team_invite_email_sent");
+      setInviteEmail("");
+      toast({ title: "invite sent", description: `email sent to ${inviteEmail.trim()}` });
+    } catch (err: any) {
+      toast({
+        title: "failed to send invite",
+        description: err.message,
+        variant: "destructive",
+      });
+    } finally {
+      setSendingInvite(false);
+    }
+  };
+
   const handleLeave = async () => {
     try {
       await team.leaveTeam();
+      posthog.capture("team_left");
       toast({ title: "left team" });
     } catch (err: any) {
       toast({
@@ -359,6 +400,10 @@ export function TeamSection() {
               invite link
             </h3>
           </div>
+          <p className="text-xs text-muted-foreground mb-2 flex items-center gap-1">
+            <AlertTriangle className="h-3 w-3" />
+            contains your encryption key — share only via secure channel
+          </p>
           <div className="flex gap-2">
             <Input
               readOnly
@@ -373,10 +418,38 @@ export function TeamSection() {
               )}
             </Button>
           </div>
-          <p className="text-xs text-muted-foreground mt-2 flex items-center gap-1">
-            <AlertTriangle className="h-3 w-3" />
-            contains your encryption key — share only via secure channel
-          </p>
+        </Card>
+      )}
+
+      {/* Email invite (admin only) */}
+      {isAdmin && team.inviteLink && (
+        <Card className="p-4">
+          <h3 className="text-sm font-medium mb-2 flex items-center gap-1.5">
+            <UserPlus className="h-4 w-4" />
+            invite by email
+          </h3>
+          <div className="flex gap-2">
+            <Input
+              type="email"
+              placeholder="colleague@company.com"
+              value={inviteEmail}
+              onChange={(e) => setInviteEmail(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && handleSendInvite()}
+              className="text-xs"
+            />
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleSendInvite}
+              disabled={sendingInvite || !inviteEmail.trim()}
+            >
+              {sendingInvite ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                "send invite"
+              )}
+            </Button>
+          </div>
         </Card>
       )}
 
@@ -393,8 +466,8 @@ export function TeamSection() {
               className="flex items-center justify-between py-1.5 px-2 rounded-md hover:bg-muted/50"
             >
               <div className="flex items-center gap-2">
-                <span className="text-sm font-mono">
-                  {m.user_id === settings.user?.id ? "you" : m.user_id.slice(0, 8)}
+                <span className="text-sm font-mono truncate max-w-[180px]">
+                  {m.user_id === settings.user?.id ? "you" : m.user_id}
                 </span>
                 <Badge variant="outline" className="text-[10px]">
                   {m.role}
