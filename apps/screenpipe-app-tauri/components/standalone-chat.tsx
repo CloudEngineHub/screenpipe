@@ -2260,7 +2260,7 @@ export function StandaloneChat({ className }: { className?: string } = {}) {
 
         {/* Messages */}
         <div
-          className="relative flex-1 overflow-y-auto overflow-x-hidden p-4 space-y-4"
+          className="relative flex-1 overflow-y-auto overflow-x-hidden"
           onContextMenu={(e) => {
             if (messages.length === 0) return;
             e.preventDefault();
@@ -2288,6 +2288,7 @@ export function StandaloneChat({ className }: { className?: string } = {}) {
             setTimeout(() => document.addEventListener("mousedown", remove), 0);
           }}
         >
+        <div className="max-w-4xl mx-auto w-full p-4 space-y-4">
         {messages.length === 0 && disabledReason && (
           <div className="relative flex flex-col items-center justify-center py-12 space-y-4">
             <div className="relative p-6 rounded-2xl border bg-muted/50 border-border/50">
@@ -2453,11 +2454,13 @@ export function StandaloneChat({ className }: { className?: string } = {}) {
           )}
         </AnimatePresence>
         <div ref={messagesEndRef} />
+      </div> {/* End of max-w-4xl wrapper */}
       </div>
       </div> {/* End of main content area with history sidebar */}
 
       {/* Input */}
       <div className="relative border-t border-border/50 bg-gradient-to-t from-muted/20 to-transparent">
+        <div className="max-w-4xl mx-auto w-full">
         <div className="p-2 border-b border-border/30">
           <AIPresetsSelector
             onPresetChange={setActivePreset}
@@ -2765,6 +2768,7 @@ export function StandaloneChat({ className }: { className?: string } = {}) {
             </Button>
           </div>
         </form>
+      </div> {/* End of max-w-4xl input wrapper */}
       </div>
 
       <UpgradeDialog

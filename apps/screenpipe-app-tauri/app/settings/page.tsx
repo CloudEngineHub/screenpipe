@@ -289,13 +289,13 @@ function SettingsPageContent() {
           <TooltipProvider delayDuration={0}>
           <div
             className={cn(
-              "border-r bg-background flex flex-col min-h-0 rounded-tl-lg transition-all duration-200",
+              "border-r bg-background flex flex-col min-h-0 rounded-tl-lg transition-all duration-200 overflow-hidden flex-shrink-0",
               sidebarCollapsed ? "w-14" : "w-56",
             )}
           >
-            <div className={cn("py-3 border-b flex items-center", sidebarCollapsed ? "px-2 justify-center" : "px-4 justify-between")}>
-              {!sidebarCollapsed && <h1 className="text-lg font-bold text-foreground">screenpipe</h1>}
-              <div className="flex items-center gap-2">
+            <div className={cn("py-3 border-b flex items-center overflow-hidden", sidebarCollapsed ? "px-2 justify-center" : "px-4 justify-between gap-2")}>
+              {!sidebarCollapsed && <h1 className="text-lg font-bold text-foreground truncate min-w-0">screenpipe</h1>}
+              <div className="flex items-center gap-2 flex-shrink-0">
                 {!sidebarCollapsed && (() => {
                   const monitors = recordingDevices.filter((d) => d.kind === "monitor");
                   const inputs = recordingDevices.filter((d) => d.kind === "input");
