@@ -417,7 +417,7 @@ impl AudioManager {
                         let sum_sq: f32 = audio.data.iter().map(|&x| x * x).sum();
                         (sum_sq / audio.data.len() as f32).sqrt()
                     };
-                    meeting.on_audio_activity(&audio.device.device_type, rms > 0.01);
+                    meeting.on_audio_activity(&audio.device.device_type, rms > 0.05);
                 }
 
                 // Smart mode: defer Whisper during meetings, then check CPU idle
