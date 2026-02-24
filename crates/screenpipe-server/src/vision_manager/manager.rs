@@ -26,6 +26,7 @@ pub struct VisionManagerConfig {
     pub ignored_windows: Vec<String>,
     pub included_windows: Vec<String>,
     pub vision_metrics: Arc<PipelineMetrics>,
+    pub use_pii_removal: bool,
 }
 
 /// Status of the VisionManager
@@ -176,7 +177,6 @@ impl VisionManager {
     }
 
     /// Start event-driven capture for a specific monitor.
-    #[cfg(feature = "ui-events")]
     async fn start_event_driven_monitor(
         &self,
         monitor_id: u32,
@@ -215,6 +215,7 @@ impl VisionManager {
         let monitor = Arc::new(monitor);
         let vision_metrics = self.config.vision_metrics.clone();
         let hot_frame_cache = self.hot_frame_cache.clone();
+        let use_pii_removal = self.config.use_pii_removal;
 
         info!(
             "Starting event-driven capture for monitor {} (device: {})",
@@ -237,6 +238,7 @@ impl VisionManager {
                 stop_signal,
                 vision_metrics,
                 hot_frame_cache,
+                use_pii_removal,
             )
             .await
             {
@@ -249,19 +251,6 @@ impl VisionManager {
         });
 
         Ok(handle)
-    }
-
-    /// Fallback for when ui-events feature is disabled.
-    #[cfg(not(feature = "ui-events"))]
-    async fn start_event_driven_monitor(
-        &self,
-        monitor_id: u32,
-        _monitor: screenpipe_vision::monitor::SafeMonitor,
-    ) -> Result<JoinHandle<()>> {
-        anyhow::bail!(
-            "Event-driven capture requires the 'ui-events' feature (monitor {})",
-            monitor_id
-        )
     }
 
     /// Stop recording on a specific monitor

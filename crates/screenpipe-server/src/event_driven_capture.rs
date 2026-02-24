@@ -12,6 +12,8 @@ use crate::hot_frame_cache::{HotFrame, HotFrameCache};
 use crate::paired_capture::{paired_capture, CaptureContext, PairedCaptureResult};
 use anyhow::Result;
 use chrono::Utc;
+use screenpipe_accessibility::tree::TreeWalkerConfig;
+use screenpipe_accessibility::ActivityFeed;
 use screenpipe_db::DatabaseManager;
 use screenpipe_vision::frame_comparison::{FrameComparer, FrameComparisonConfig};
 use screenpipe_vision::monitor::SafeMonitor;
@@ -22,11 +24,6 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::broadcast;
 use tracing::{debug, error, info, warn};
-
-#[cfg(feature = "ui-events")]
-use screenpipe_accessibility::tree::TreeWalkerConfig;
-#[cfg(feature = "ui-events")]
-use screenpipe_accessibility::ActivityFeed;
 
 /// Types of events that trigger a capture.
 #[derive(Debug, Clone, PartialEq)]
@@ -152,7 +149,6 @@ impl EventDrivenCapture {
     ///
     /// Call this in a loop at ~50ms intervals. Returns `Some(trigger)` when
     /// a state transition is detected that warrants a capture.
-    #[cfg(feature = "ui-events")]
     pub fn poll_activity(&mut self, feed: &ActivityFeed) -> Option<CaptureTrigger> {
         let idle_ms = feed.idle_ms();
         let is_typing = feed.is_typing();
@@ -202,7 +198,6 @@ pub fn trigger_channel() -> (TriggerSender, TriggerReceiver) {
 /// 2. ActivityFeed state transitions (typing pause, idle) via polling
 ///
 /// Each trigger results in a paired capture (screenshot + accessibility tree walk).
-#[cfg(feature = "ui-events")]
 #[allow(clippy::too_many_arguments)]
 pub async fn event_driven_capture_loop(
     db: Arc<DatabaseManager>,
@@ -217,6 +212,7 @@ pub async fn event_driven_capture_loop(
     stop_signal: Arc<AtomicBool>,
     vision_metrics: Arc<screenpipe_vision::PipelineMetrics>,
     hot_frame_cache: Option<Arc<HotFrameCache>>,
+    use_pii_removal: bool,
 ) -> Result<()> {
     info!(
         "event-driven capture started for monitor {} (device: {})",
@@ -252,6 +248,7 @@ pub async fn event_driven_capture_loop(
             &snapshot_writer,
             &tree_walker_config,
             &CaptureTrigger::Manual,
+            use_pii_removal,
         )
         .await
         {
@@ -353,6 +350,7 @@ pub async fn event_driven_capture_loop(
                         &snapshot_writer,
                         &tree_walker_config,
                         &trigger,
+                        use_pii_removal,
                     ),
                 )
                 .await;
@@ -422,7 +420,6 @@ pub async fn event_driven_capture_loop(
 }
 
 /// Push a capture result into the hot frame cache.
-#[cfg(feature = "ui-events")]
 async fn push_to_hot_cache(
     cache: &HotFrameCache,
     result: &PairedCaptureResult,
@@ -452,7 +449,6 @@ async fn push_to_hot_cache(
 }
 
 /// Result of do_capture: paired capture result + the screenshot image for comparer reuse.
-#[cfg(feature = "ui-events")]
 struct CaptureOutput {
     result: PairedCaptureResult,
     /// The captured image — reused for frame comparer update to avoid taking
@@ -461,7 +457,6 @@ struct CaptureOutput {
 }
 
 /// Perform a single event-driven capture.
-#[cfg(feature = "ui-events")]
 async fn do_capture(
     db: &DatabaseManager,
     monitor: &SafeMonitor,
@@ -470,6 +465,7 @@ async fn do_capture(
     snapshot_writer: &SnapshotWriter,
     tree_walker_config: &TreeWalkerConfig,
     trigger: &CaptureTrigger,
+    use_pii_removal: bool,
 ) -> Result<CaptureOutput> {
     let captured_at = Utc::now();
 
@@ -509,6 +505,7 @@ async fn do_capture(
         browser_url: browser_url_owned.as_deref(),
         focused: true, // event-driven captures are always for the focused window
         capture_trigger: trigger.as_str(),
+        use_pii_removal,
     };
 
     let result = paired_capture(&ctx, tree_snapshot.as_ref()).await?;

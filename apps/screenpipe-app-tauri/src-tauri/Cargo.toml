@@ -108,8 +108,8 @@ md5 = "0.7"
 screenpipe-core = { path = "../../../crates/screenpipe-core", features = ["cloud-sync"] }
 
 # Embedded screenpipe server
-screenpipe-server = { path = "../../../crates/screenpipe-server", default-features = false, features = ["ui-events", "adaptive-fps"] }
-screenpipe-vision = { path = "../../../crates/screenpipe-vision", features = ["adaptive-fps"] }
+screenpipe-server = { path = "../../../crates/screenpipe-server", default-features = false }
+screenpipe-vision = { path = "../../../crates/screenpipe-vision" }
 screenpipe-accessibility = { path = "../../../crates/screenpipe-accessibility" }
 screenpipe-audio = { path = "../../../crates/screenpipe-audio" }
 screenpipe-db = { path = "../../../crates/screenpipe-db" }

@@ -69,7 +69,6 @@ pub struct RecordingConfig {
 
 impl RecordingConfig {
     /// Build a `UiRecorderConfig` from this recording config.
-    #[cfg(feature = "ui-events")]
     pub fn to_ui_recorder_config(&self) -> crate::ui_recorder::UiRecorderConfig {
         crate::ui_recorder::UiRecorderConfig {
             enabled: self.enable_input_capture || self.enable_accessibility,
@@ -80,11 +79,6 @@ impl RecordingConfig {
             included_windows: self.included_windows.clone(),
             ..Default::default()
         }
-    }
-
-    #[cfg(not(feature = "ui-events"))]
-    pub fn to_ui_recorder_config(&self) -> crate::ui_recorder::UiRecorderConfig {
-        crate::ui_recorder::UiRecorderConfig { enabled: false }
     }
 
     /// Build an `AudioManagerBuilder` pre-configured from this config.
@@ -120,6 +114,7 @@ impl RecordingConfig {
             ignored_windows: self.ignored_windows.clone(),
             included_windows: self.included_windows.clone(),
             vision_metrics,
+            use_pii_removal: self.use_pii_removal,
         }
     }
 }

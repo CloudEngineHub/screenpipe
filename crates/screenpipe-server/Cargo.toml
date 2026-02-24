@@ -19,7 +19,7 @@ screenpipe-vision = { path = "../screenpipe-vision" }
 screenpipe-audio = { path = "../screenpipe-audio" }
 screenpipe-core = { path = "../screenpipe-core", features = ["security", "cloud-sync"] }
 screenpipe-db = { path = "../screenpipe-db" }
-screenpipe-accessibility = { path = "../screenpipe-accessibility", features = ["db"], optional = true }
+screenpipe-accessibility = { path = "../screenpipe-accessibility", features = ["db"] }
 screenpipe-apple-intelligence = { path = "../screenpipe-apple-intelligence", optional = true }
 
 
@@ -116,14 +116,12 @@ tokio-tungstenite = "0.24"
 criterion = { workspace = true }
 
 [features]
-default = ["ui-events"]
+default = []
 metal = ["screenpipe-audio/metal"]
 cuda = ["screenpipe-audio/cuda"]
 vulkan = ["screenpipe-audio/vulkan"]
 debug-console = ["console-subscriber"]
-adaptive-fps = ["screenpipe-vision/adaptive-fps"]
 pulseaudio = ["screenpipe-audio/pulseaudio"]
-ui-events = ["screenpipe-accessibility"]
 apple-intelligence = ["dep:screenpipe-apple-intelligence"]
 
 [[bin]]

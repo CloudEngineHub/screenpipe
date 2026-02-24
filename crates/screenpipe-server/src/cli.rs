@@ -242,7 +242,6 @@ impl Cli {
     }
 
     /// Create UI recorder configuration from CLI arguments
-    #[cfg(feature = "ui-events")]
     pub fn to_ui_recorder_config(&self) -> crate::ui_recorder::UiRecorderConfig {
         crate::ui_recorder::UiRecorderConfig {
             enabled: self.enable_input_capture || self.enable_accessibility,
@@ -253,11 +252,6 @@ impl Cli {
             included_windows: self.included_windows.clone(),
             ..Default::default()
         }
-    }
-
-    #[cfg(not(feature = "ui-events"))]
-    pub fn to_ui_recorder_config(&self) -> crate::ui_recorder::UiRecorderConfig {
-        crate::ui_recorder::UiRecorderConfig { enabled: false }
     }
 }
 
@@ -490,7 +484,6 @@ impl RecordArgs {
     }
 
     /// Create UI recorder configuration from record arguments
-    #[cfg(feature = "ui-events")]
     pub fn to_ui_recorder_config(&self) -> crate::ui_recorder::UiRecorderConfig {
         crate::ui_recorder::UiRecorderConfig {
             enabled: self.enable_input_capture || self.enable_accessibility,
@@ -501,11 +494,6 @@ impl RecordArgs {
             included_windows: self.included_windows.clone(),
             ..Default::default()
         }
-    }
-
-    #[cfg(not(feature = "ui-events"))]
-    pub fn to_ui_recorder_config(&self) -> crate::ui_recorder::UiRecorderConfig {
-        crate::ui_recorder::UiRecorderConfig { enabled: false }
     }
 
     /// Convert RecordArgs into a unified RecordingConfig.

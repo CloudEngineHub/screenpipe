@@ -148,12 +148,8 @@ impl std::fmt::Display for ContinuousCaptureError {
     }
 }
 
-/// Activity feed for adaptive FPS (optional, from screenpipe-accessibility)
-#[cfg(feature = "adaptive-fps")]
+/// Activity feed for adaptive FPS (from screenpipe-accessibility)
 pub type ActivityFeedOption = Option<screenpipe_accessibility::ActivityFeed>;
-
-#[cfg(not(feature = "adaptive-fps"))]
-pub type ActivityFeedOption = Option<()>;
 
 pub async fn continuous_capture(
     result_tx: Sender<RawCaptureResult>,
@@ -181,7 +177,6 @@ pub async fn continuous_capture(
     let max_skip_duration = Duration::from_secs(10);
     let mut last_capture_time = Instant::now();
 
-    #[cfg(feature = "adaptive-fps")]
     if activity_feed.is_some() {
         debug!("Adaptive FPS enabled - will adjust capture rate based on input activity");
     }
@@ -201,10 +196,6 @@ pub async fn continuous_capture(
     let mut consecutive_capture_failures: u32 = 0;
     const MAX_CAPTURE_RETRIES: u32 = 3;
     const MAX_CONSECUTIVE_FAILURES: u32 = 30;
-
-    // Suppress unused variable warning when feature is disabled
-    #[cfg(not(feature = "adaptive-fps"))]
-    let _ = activity_feed;
 
     loop {
         // 3. Capture monitor screenshot and wall-clock time atomically.
@@ -282,13 +273,10 @@ pub async fn continuous_capture(
         let current_diff = frame_comparer.compare(&image);
 
         // Get skip threshold from adaptive FPS or use default
-        #[cfg(feature = "adaptive-fps")]
         let skip_threshold = activity_feed
             .as_ref()
             .map(|f| f.get_capture_params().skip_threshold)
             .unwrap_or(0.02);
-        #[cfg(not(feature = "adaptive-fps"))]
-        let skip_threshold = 0.02;
 
         let time_since_last = last_capture_time.elapsed();
         let force_capture = time_since_last >= max_skip_duration;
@@ -311,13 +299,10 @@ pub async fn continuous_capture(
             );
             frame_counter += 1;
             // Use adaptive interval if enabled, otherwise use base interval
-            #[cfg(feature = "adaptive-fps")]
             let sleep_interval = activity_feed
                 .as_ref()
                 .map(|f| f.get_capture_params().interval)
                 .unwrap_or(interval);
-            #[cfg(not(feature = "adaptive-fps"))]
-            let sleep_interval = interval;
             tokio::time::sleep(sleep_interval).await;
             continue;
         }
@@ -361,13 +346,10 @@ pub async fn continuous_capture(
 
         frame_counter += 1;
         // Use adaptive interval if enabled, otherwise use base interval
-        #[cfg(feature = "adaptive-fps")]
         let sleep_interval = activity_feed
             .as_ref()
             .map(|f| f.get_capture_params().interval)
             .unwrap_or(interval);
-        #[cfg(not(feature = "adaptive-fps"))]
-        let sleep_interval = interval;
         tokio::time::sleep(sleep_interval).await;
     }
 }

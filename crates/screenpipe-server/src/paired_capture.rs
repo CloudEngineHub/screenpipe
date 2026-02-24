@@ -14,14 +14,13 @@
 use anyhow::Result;
 use chrono::{DateTime, Utc};
 use image::DynamicImage;
+use screenpipe_accessibility::tree::{create_tree_walker, TreeSnapshot, TreeWalkerConfig};
+use screenpipe_core::pii_removal::remove_pii;
 use screenpipe_db::DatabaseManager;
 use screenpipe_vision::snapshot_writer::SnapshotWriter;
 use std::sync::Arc;
 use std::time::Instant;
 use tracing::{debug, warn};
-
-#[cfg(feature = "ui-events")]
-use screenpipe_accessibility::tree::{create_tree_walker, TreeSnapshot, TreeWalkerConfig};
 
 /// Context for a paired capture operation — replaces positional arguments.
 pub struct CaptureContext<'a> {
@@ -36,6 +35,7 @@ pub struct CaptureContext<'a> {
     pub browser_url: Option<&'a str>,
     pub focused: bool,
     pub capture_trigger: &'a str,
+    pub use_pii_removal: bool,
 }
 
 /// Result of a paired capture operation.
@@ -69,8 +69,7 @@ pub struct PairedCaptureResult {
 /// Accepts an optional `TreeSnapshot` with structured node data.
 pub async fn paired_capture(
     ctx: &CaptureContext<'_>,
-    #[cfg(feature = "ui-events")] tree_snapshot: Option<&TreeSnapshot>,
-    #[cfg(not(feature = "ui-events"))] _tree_snapshot: Option<&()>,
+    tree_snapshot: Option<&TreeSnapshot>,
 ) -> Result<PairedCaptureResult> {
     let start = Instant::now();
 
@@ -91,12 +90,9 @@ pub async fn paired_capture(
     // ~50-200ms of Apple Vision CPU work per capture AND prevents cloning
     // the Arc<DynamicImage> into the spawn_blocking closure (which would
     // make Arc::try_unwrap fail later, forcing a full image copy).
-    #[cfg(feature = "ui-events")]
     let has_accessibility_text = tree_snapshot
         .map(|s| !s.text_content.is_empty())
         .unwrap_or(false);
-    #[cfg(not(feature = "ui-events"))]
-    let has_accessibility_text = false;
 
     // Only run OCR when accessibility tree returned no text (games, terminals, etc.)
     let (ocr_text, ocr_text_json) = if !has_accessibility_text {
@@ -122,7 +118,6 @@ pub async fn paired_capture(
     };
 
     // --- Extract data from tree snapshot, fall back to OCR text ---
-    #[cfg(feature = "ui-events")]
     let (accessibility_text, tree_json, content_hash, simhash) = match tree_snapshot {
         Some(snap) if !snap.text_content.is_empty() => {
             let json = serde_json::to_string(&snap.nodes).ok();
@@ -143,18 +138,6 @@ pub async fn paired_capture(
         }
     };
 
-    #[cfg(not(feature = "ui-events"))]
-    let (accessibility_text, tree_json, content_hash, simhash): (
-        Option<String>,
-        Option<String>,
-        Option<i64>,
-        Option<i64>,
-    ) = if ocr_text.is_empty() {
-        (None, None, None, None)
-    } else {
-        (Some(ocr_text.clone()), None, None, None)
-    };
-
     // Determine text source: "accessibility" when tree nodes were available, "ocr" for fallback
     let (final_text, text_source) = if let Some(ref text) = accessibility_text {
         if text.is_empty() {
@@ -169,9 +152,32 @@ pub async fn paired_capture(
         (None, None)
     };
 
+    // Apply PII removal to text before DB insertion (if enabled).
+    // This sanitizes emails, API keys, credit cards, SSNs, etc. from OCR/accessibility text
+    // so pipes (like obsidian-sync) never see raw PII in search results.
+    let sanitized_text = if ctx.use_pii_removal {
+        final_text.map(|t| remove_pii(t))
+    } else {
+        final_text.map(|t| t.to_string())
+    };
+    let sanitized_ocr_text = if ctx.use_pii_removal && !ocr_text.is_empty() {
+        remove_pii(&ocr_text)
+    } else {
+        ocr_text.clone()
+    };
+    let sanitized_ocr_json = if ctx.use_pii_removal && !ocr_text.is_empty() {
+        sanitize_ocr_text_json(&ocr_text_json)
+    } else {
+        ocr_text_json.clone()
+    };
+
     // Insert snapshot frame + OCR text positions in a single transaction.
-    let ocr_data = if !ocr_text.is_empty() {
-        Some((ocr_text.as_str(), ocr_text_json.as_str(), "AppleNative"))
+    let ocr_data = if !sanitized_ocr_text.is_empty() {
+        Some((
+            sanitized_ocr_text.as_str(),
+            sanitized_ocr_json.as_str(),
+            "AppleNative",
+        ))
     } else {
         None
     };
@@ -187,7 +193,7 @@ pub async fn paired_capture(
             ctx.browser_url,
             ctx.focused,
             Some(ctx.capture_trigger),
-            final_text,
+            sanitized_text.as_deref(),
             text_source,
             tree_json.as_deref(),
             content_hash,
@@ -220,7 +226,6 @@ pub async fn paired_capture(
 /// Returns the text content and app/window metadata.
 ///
 /// This is a blocking operation that should be spawned on a blocking thread.
-#[cfg(feature = "ui-events")]
 pub fn walk_accessibility_tree(config: &TreeWalkerConfig) -> Option<TreeSnapshot> {
     let walker = create_tree_walker(config.clone());
     match walker.walk_focused_window() {
@@ -247,10 +252,22 @@ pub fn walk_accessibility_tree(config: &TreeWalkerConfig) -> Option<TreeSnapshot
     }
 }
 
+/// Sanitize PII from OCR text_json (a JSON string of bounding-box entries).
+/// Parses the JSON array, applies `remove_pii` to each "text" field,
+/// and serializes back. Returns the original string on parse failure.
+fn sanitize_ocr_text_json(text_json: &str) -> String {
+    let Ok(entries) = serde_json::from_str::<Vec<std::collections::HashMap<String, String>>>(text_json) else {
+        return text_json.to_string();
+    };
+    let sanitized = screenpipe_core::pii_removal::remove_pii_from_text_json(&entries);
+    serde_json::to_string(&sanitized).unwrap_or_else(|_| text_json.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use image::{DynamicImage, RgbImage};
+    use screenpipe_accessibility::tree::AccessibilityTreeNode;
     use tempfile::TempDir;
 
     fn test_image() -> Arc<DynamicImage> {
@@ -278,11 +295,9 @@ mod tests {
             browser_url: None,
             focused: true,
             capture_trigger: "click",
+            use_pii_removal: false,
         };
 
-        #[cfg(feature = "ui-events")]
-        let result = paired_capture(&ctx, None).await.unwrap();
-        #[cfg(not(feature = "ui-events"))]
         let result = paired_capture(&ctx, None).await.unwrap();
 
         assert!(result.frame_id > 0);
@@ -313,44 +328,36 @@ mod tests {
             browser_url: Some("https://example.com"),
             focused: true,
             capture_trigger: "app_switch",
+            use_pii_removal: false,
         };
 
-        #[cfg(feature = "ui-events")]
-        let result = {
-            use screenpipe_accessibility::tree::AccessibilityTreeNode;
-            let snap = TreeSnapshot {
-                app_name: "Safari".to_string(),
-                window_name: "Example Page".to_string(),
-                text_content: "Hello World - Example Page".to_string(),
-                nodes: vec![AccessibilityTreeNode {
-                    role: "AXStaticText".to_string(),
-                    text: "Hello World - Example Page".to_string(),
-                    depth: 0,
-                }],
-                browser_url: Some("https://example.com".to_string()),
-                timestamp: now,
-                node_count: 1,
-                walk_duration: std::time::Duration::from_millis(5),
-                content_hash: 12345,
-                simhash: 67890,
-                truncated: false,
-                truncation_reason: screenpipe_accessibility::tree::TruncationReason::None,
-                max_depth_reached: 0,
-            };
-            paired_capture(&ctx, Some(&snap)).await.unwrap()
+        let snap = TreeSnapshot {
+            app_name: "Safari".to_string(),
+            window_name: "Example Page".to_string(),
+            text_content: "Hello World - Example Page".to_string(),
+            nodes: vec![AccessibilityTreeNode {
+                role: "AXStaticText".to_string(),
+                text: "Hello World - Example Page".to_string(),
+                depth: 0,
+            }],
+            browser_url: Some("https://example.com".to_string()),
+            timestamp: now,
+            node_count: 1,
+            walk_duration: std::time::Duration::from_millis(5),
+            content_hash: 12345,
+            simhash: 67890,
+            truncated: false,
+            truncation_reason: screenpipe_accessibility::tree::TruncationReason::None,
+            max_depth_reached: 0,
         };
-        #[cfg(not(feature = "ui-events"))]
-        let result = paired_capture(&ctx, None).await.unwrap();
+        let result = paired_capture(&ctx, Some(&snap)).await.unwrap();
 
         assert!(result.frame_id > 0);
-        #[cfg(feature = "ui-events")]
-        {
-            assert_eq!(result.text_source.as_deref(), Some("accessibility"));
-            assert_eq!(
-                result.accessibility_text.as_deref(),
-                Some("Hello World - Example Page")
-            );
-        }
+        assert_eq!(result.text_source.as_deref(), Some("accessibility"));
+        assert_eq!(
+            result.accessibility_text.as_deref(),
+            Some("Hello World - Example Page")
+        );
         assert_eq!(result.capture_trigger, "app_switch");
     }
 
@@ -375,33 +382,84 @@ mod tests {
             browser_url: None,
             focused: true,
             capture_trigger: "idle",
+            use_pii_removal: false,
         };
 
         // Empty accessibility text should be treated as no text
-        #[cfg(feature = "ui-events")]
-        let result = {
-            let snap = TreeSnapshot {
-                app_name: "TestApp".to_string(),
-                window_name: String::new(),
-                text_content: String::new(),
-                nodes: vec![],
-                browser_url: None,
-                timestamp: now,
-                node_count: 0,
-                walk_duration: std::time::Duration::from_millis(1),
-                content_hash: 0,
-                simhash: 0,
-                truncated: false,
-                truncation_reason: screenpipe_accessibility::tree::TruncationReason::None,
-                max_depth_reached: 0,
-            };
-            paired_capture(&ctx, Some(&snap)).await.unwrap()
+        let snap = TreeSnapshot {
+            app_name: "TestApp".to_string(),
+            window_name: String::new(),
+            text_content: String::new(),
+            nodes: vec![],
+            browser_url: None,
+            timestamp: now,
+            node_count: 0,
+            walk_duration: std::time::Duration::from_millis(1),
+            content_hash: 0,
+            simhash: 0,
+            truncated: false,
+            truncation_reason: screenpipe_accessibility::tree::TruncationReason::None,
+            max_depth_reached: 0,
         };
-        #[cfg(not(feature = "ui-events"))]
-        let result = paired_capture(&ctx, None).await.unwrap();
+        let result = paired_capture(&ctx, Some(&snap)).await.unwrap();
 
         assert!(result.frame_id > 0);
         // Empty string → treated as no text source
         assert!(result.text_source.is_none());
+    }
+
+    #[test]
+    fn test_sanitize_ocr_text_json_removes_emails() {
+        let json = r#"[{"text":"contact louis@screenpi.pe for info","x":"10","y":"20"}]"#;
+        let result = sanitize_ocr_text_json(json);
+        assert!(!result.contains("louis@screenpi.pe"), "email should be redacted");
+        assert!(result.contains("[EMAIL]"), "email should be replaced with [EMAIL]");
+    }
+
+    #[test]
+    fn test_sanitize_ocr_text_json_preserves_non_pii() {
+        let json = r#"[{"text":"hello world","x":"10","y":"20"}]"#;
+        let result = sanitize_ocr_text_json(json);
+        assert!(result.contains("hello world"));
+    }
+
+    #[test]
+    fn test_sanitize_ocr_text_json_invalid_json_passthrough() {
+        let bad_json = "not json at all";
+        let result = sanitize_ocr_text_json(bad_json);
+        assert_eq!(result, bad_json, "invalid JSON should pass through unchanged");
+    }
+
+    #[test]
+    fn test_sanitize_ocr_text_json_multiple_entries() {
+        let json = r#"[{"text":"user@example.com","x":"0","y":"0"},{"text":"safe text","x":"1","y":"1"},{"text":"key: sk-1234567890abcdef1234567890abcdef","x":"2","y":"2"}]"#;
+        let result = sanitize_ocr_text_json(json);
+        assert!(!result.contains("user@example.com"), "email should be redacted");
+        assert!(result.contains("safe text"), "non-PII text should be preserved");
+    }
+
+    #[test]
+    fn test_pii_removal_on_text() {
+        // Verify remove_pii works on plain text with emails
+        let text = "Contact louis@screenpi.pe or louis.beaumont@gmail.com for support";
+        let sanitized = remove_pii(text);
+        assert!(!sanitized.contains("louis@screenpi.pe"), "email 1 should be redacted");
+        assert!(!sanitized.contains("louis.beaumont@gmail.com"), "email 2 should be redacted");
+        assert!(sanitized.contains("[EMAIL]"), "emails should be replaced with [EMAIL]");
+    }
+
+    #[test]
+    fn test_pii_removal_credit_card() {
+        let text = "Card: 4111-1111-1111-1111 expires 12/25";
+        let sanitized = remove_pii(text);
+        assert!(!sanitized.contains("4111-1111-1111-1111"), "credit card should be redacted");
+    }
+
+    #[test]
+    fn test_pii_removal_disabled() {
+        // When use_pii_removal is false, text should pass through unchanged
+        let text = "louis@screenpi.pe";
+        let sanitized_text: Option<String> = Some(text).map(|t| t.to_string());
+        assert_eq!(sanitized_text.as_deref(), Some("louis@screenpi.pe"));
     }
 }

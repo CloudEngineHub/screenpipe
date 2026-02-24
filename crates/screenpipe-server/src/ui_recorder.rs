@@ -6,33 +6,22 @@
 //!
 //! Integrates screenpipe-accessibility capture with the server's recording loop.
 
-#[cfg(feature = "ui-events")]
 use anyhow::Result;
-#[cfg(feature = "ui-events")]
 use screenpipe_accessibility::tree::{
     cache::TreeCache, create_tree_walker, TreeWalkerConfig, TruncationReason,
 };
-#[cfg(feature = "ui-events")]
 use screenpipe_accessibility::{UiCaptureConfig, UiRecorder};
-#[cfg(feature = "ui-events")]
 use screenpipe_db::{DatabaseManager, InsertUiEvent};
-#[cfg(feature = "ui-events")]
 use std::sync::atomic::{AtomicBool, Ordering};
-#[cfg(feature = "ui-events")]
 use std::sync::{Arc, Condvar, Mutex};
-#[cfg(feature = "ui-events")]
 use std::time::Duration;
-#[cfg(feature = "ui-events")]
 use tracing::{debug, error, info, warn};
-#[cfg(feature = "ui-events")]
 use uuid::Uuid;
 
 /// Shared signal to wake the tree walker thread immediately on app/window switch.
-#[cfg(feature = "ui-events")]
 type WakeSignal = Arc<(Mutex<bool>, Condvar)>;
 
 /// Configuration for UI event capture
-#[cfg(feature = "ui-events")]
 #[derive(Debug, Clone)]
 pub struct UiRecorderConfig {
     /// Enable UI event capture
@@ -77,7 +66,6 @@ pub struct UiRecorderConfig {
     pub record_input_events: bool,
 }
 
-#[cfg(feature = "ui-events")]
 impl Default for UiRecorderConfig {
     fn default() -> Self {
         Self {
@@ -105,7 +93,6 @@ impl Default for UiRecorderConfig {
     }
 }
 
-#[cfg(feature = "ui-events")]
 impl UiRecorderConfig {
     /// Convert to screenpipe-ui config
     pub fn to_ui_config(&self) -> UiCaptureConfig {
@@ -172,14 +159,12 @@ pub fn tree_walker_snapshot() -> TreeWalkerSnapshot {
 }
 
 /// Handle for managing the UI recorder
-#[cfg(feature = "ui-events")]
 pub struct UiRecorderHandle {
     stop_flag: Arc<AtomicBool>,
     task_handle: Option<tokio::task::JoinHandle<()>>,
     tree_walker_handle: Option<tokio::task::JoinHandle<()>>,
 }
 
-#[cfg(feature = "ui-events")]
 impl UiRecorderHandle {
     /// Stop the UI recorder
     pub fn stop(&self) {
@@ -206,7 +191,6 @@ impl UiRecorderHandle {
 ///
 /// If `capture_trigger_tx` is provided, relevant UI events (app switch, window focus,
 /// click, clipboard) will also be sent as capture triggers for event-driven capture.
-#[cfg(feature = "ui-events")]
 pub async fn start_ui_recording(
     db: Arc<DatabaseManager>,
     config: UiRecorderConfig,
@@ -452,7 +436,6 @@ pub async fn start_ui_recording(
 }
 
 /// Metrics for the tree walker — logged periodically for quantified measurement.
-#[cfg(feature = "ui-events")]
 struct TreeWalkerMetrics {
     walks_total: u64,
     walks_stored: u64,
@@ -471,7 +454,6 @@ struct TreeWalkerMetrics {
     last_report: std::time::Instant,
 }
 
-#[cfg(feature = "ui-events")]
 impl TreeWalkerMetrics {
     fn new() -> Self {
         Self {
@@ -534,17 +516,14 @@ impl TreeWalkerMetrics {
 }
 
 /// Minimum interval between walks to prevent storms during rapid app switching.
-#[cfg(feature = "ui-events")]
 const MIN_WALK_COOLDOWN: Duration = Duration::from_millis(500);
 
 /// Delay after wake signal to let the new window settle before walking.
-#[cfg(feature = "ui-events")]
 const WAKE_SETTLE_DELAY: Duration = Duration::from_millis(300);
 
 /// Run the accessibility tree walker loop (blocking — runs in a dedicated thread).
 /// Walks the focused window's AX tree periodically and stores text in the accessibility table.
 /// Wakes immediately on app/window switch via the condvar signal, with a 500ms cooldown.
-#[cfg(feature = "ui-events")]
 fn run_tree_walker(
     db: Arc<DatabaseManager>,
     stop: Arc<AtomicBool>,
@@ -667,7 +646,6 @@ fn run_tree_walker(
     info!("AX tree walker stopped");
 }
 
-#[cfg(feature = "ui-events")]
 async fn flush_batch(
     db: &Arc<DatabaseManager>,
     batch: &mut Vec<InsertUiEvent>,
@@ -696,40 +674,4 @@ async fn flush_batch(
         }
     }
     batch.clear();
-}
-
-// Stub implementations when ui-events feature is disabled
-#[cfg(not(feature = "ui-events"))]
-pub struct UiRecorderConfig {
-    pub enabled: bool,
-}
-
-#[cfg(not(feature = "ui-events"))]
-impl Default for UiRecorderConfig {
-    fn default() -> Self {
-        Self { enabled: false }
-    }
-}
-
-#[cfg(not(feature = "ui-events"))]
-pub struct UiRecorderHandle;
-
-#[cfg(not(feature = "ui-events"))]
-impl UiRecorderHandle {
-    pub fn stop(&self) {}
-    pub fn is_running(&self) -> bool {
-        false
-    }
-    pub async fn join(self) {}
-}
-
-#[cfg(not(feature = "ui-events"))]
-pub async fn start_ui_recording(
-    _db: std::sync::Arc<screenpipe_db::DatabaseManager>,
-    _config: UiRecorderConfig,
-    _capture_trigger_tx: Option<
-        tokio::sync::broadcast::Sender<crate::event_driven_capture::CaptureTrigger>,
-    >,
-) -> anyhow::Result<UiRecorderHandle> {
-    Ok(UiRecorderHandle)
 }

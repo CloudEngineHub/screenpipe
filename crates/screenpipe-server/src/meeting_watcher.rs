@@ -8,22 +8,16 @@
 //! Meeting detection only needs app-switch/window-focus events from the accessibility API
 //! and does NOT depend on the `enable_input_capture`/`enable_accessibility` user toggles.
 
-#[cfg(feature = "ui-events")]
 use screenpipe_accessibility::{UiCaptureConfig, UiRecorder};
-#[cfg(feature = "ui-events")]
 use screenpipe_audio::meeting_detector::MeetingDetector;
-#[cfg(feature = "ui-events")]
 use std::sync::Arc;
-#[cfg(feature = "ui-events")]
 use std::time::Duration;
-#[cfg(feature = "ui-events")]
 use tracing::{debug, error, info, warn};
 
 /// Start a lightweight accessibility listener that only watches for app switches
 /// and feeds them into the `MeetingDetector`. Does not touch the database.
 ///
 /// Returns a `JoinHandle` that runs until the task is aborted.
-#[cfg(feature = "ui-events")]
 pub fn start_meeting_watcher(detector: Arc<MeetingDetector>) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         // Minimal config: only app_switch and window_focus, everything else off
@@ -102,14 +96,4 @@ pub fn start_meeting_watcher(detector: Arc<MeetingDetector>) -> tokio::task::Joi
             }
         }
     })
-}
-
-/// Stub when ui-events feature is disabled — meeting detection won't work
-/// but compilation succeeds.
-#[cfg(not(feature = "ui-events"))]
-pub fn start_meeting_watcher(
-    _detector: std::sync::Arc<screenpipe_audio::meeting_detector::MeetingDetector>,
-) -> tokio::task::JoinHandle<()> {
-    tracing::warn!("meeting watcher: ui-events feature disabled, meeting detection unavailable");
-    tokio::spawn(async {})
 }
