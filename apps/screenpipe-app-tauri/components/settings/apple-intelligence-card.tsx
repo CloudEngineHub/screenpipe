@@ -16,7 +16,7 @@ import {
 } from "lucide-react";
 import { platform } from "@tauri-apps/plugin-os";
 import { invoke } from "@tauri-apps/api/core";
-import { openUrl } from "@tauri-apps/plugin-opener";
+import { Command } from "@tauri-apps/plugin-shell";
 import posthog from "posthog-js";
 
 const API = "http://localhost:3030";
@@ -444,7 +444,7 @@ export function AppleIntelligenceCard() {
                   <Button
                     variant="outline"
                     size="sm"
-                    onClick={() => openUrl("x-apple-reminderkit://")}
+                    onClick={() => Command.create("open", ["-a", "Reminders"]).execute()}
                     className="text-xs"
                   >
                     <ExternalLink className="h-3 w-3 mr-1.5" />
