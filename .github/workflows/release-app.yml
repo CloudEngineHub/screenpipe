@@ -738,39 +738,55 @@ jobs:
           echo "MACOSX_DEPLOYMENT_TARGET=10.15" >> $GITHUB_ENV
           echo "Setting MACOSX_DEPLOYMENT_TARGET=10.15 for std::filesystem support"
 
-      - name: Ensure Developer ID CA cert in login keychain (macOS)
+      - name: Import signing cert into login keychain (macOS)
         if: matrix.os_type == 'macos'
         shell: bash
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
         run: |
-          # Codesign needs the Developer ID Certification Authority (G2) intermediate
-          # cert to verify the signing chain. Import ONLY into login.keychain — do NOT
-          # import into System.keychain or add trust overrides, as that creates
-          # conflicting trust settings that cause errSecInternalComponent.
+          # Import the signing cert directly into the login keychain instead of letting
+          # Tauri create a temp keychain. On self-hosted runners, Tauri's temp keychain
+          # approach fails with errSecInternalComponent because the runner's security
+          # session (created by SessionCreate=true in the LaunchAgent) can't verify
+          # cert chains through the temp keychain.
           #
-          # The chain: Developer ID Application → Developer ID CA (G2) → Apple Root CA
-          # Apple Root CA is in SystemRootCertificates (immutable, always available).
-          # Developer ID CA (G2) needs to be in login.keychain (or temp keychain).
+          # By importing into login.keychain and NOT passing APPLE_CERTIFICATE to Tauri,
+          # Tauri will find the identity in the existing keychain and skip temp keychain
+          # creation entirely.
 
+          # Decode and import the p12
+          CERT_PATH=$(mktemp /tmp/cert.XXXXXX.p12)
+          echo "$APPLE_CERTIFICATE" | base64 --decode > "$CERT_PATH"
+
+          # Import into login keychain
+          security import "$CERT_PATH" \
+            -P "$APPLE_CERTIFICATE_PASSWORD" \
+            -T /usr/bin/codesign \
+            -T /usr/bin/pkgbuild \
+            -T /usr/bin/productbuild \
+            -k ~/Library/Keychains/login.keychain-db 2>&1 || true
+
+          # Set partition list to allow codesign access without UI prompt
+          security set-key-partition-list \
+            -S apple-tool:,apple:,codesign: \
+            -s -k "" \
+            ~/Library/Keychains/login.keychain-db 2>/dev/null || true
+
+          rm -f "$CERT_PATH"
+
+          # Import Developer ID G2 intermediate cert if needed
           mkdir -p ~/apple-certs
-          CERT_URL="https://www.apple.com/certificateauthority/DeveloperIDG2CA.cer"
-          CERT_FILE=~/apple-certs/DeveloperIDG2CA.cer
-          if [ ! -f "$CERT_FILE" ]; then
-            curl -sL -o "$CERT_FILE" "$CERT_URL"
-            echo "Downloaded DeveloperIDG2CA.cer"
+          if [ ! -f ~/apple-certs/DeveloperIDG2CA.cer ]; then
+            curl -sL -o ~/apple-certs/DeveloperIDG2CA.cer \
+              "https://www.apple.com/certificateauthority/DeveloperIDG2CA.cer"
           fi
+          security import ~/apple-certs/DeveloperIDG2CA.cer \
+            -t cert -k ~/Library/Keychains/login.keychain-db 2>/dev/null || true
 
-          # Import only into login keychain (if not already there)
-          if ! security find-certificate -c "Developer ID Certification Authority" ~/Library/Keychains/login.keychain-db > /dev/null 2>&1; then
-            security import "$CERT_FILE" -t cert -k ~/Library/Keychains/login.keychain-db 2>/dev/null || true
-            echo "Imported Developer ID CA (G2) into login.keychain"
-          else
-            echo "✅ Developer ID CA already in login.keychain"
-          fi
-
-          # Verify
-          security find-certificate -c "Developer ID Certification Authority" ~/Library/Keychains/login.keychain-db > /dev/null 2>&1 \
-            && echo "✅ Developer ID CA (G2) found in login.keychain" \
-            || echo "⚠️ Developer ID CA NOT found — codesign may fail"
+          # Verify signing identity is available
+          IDENTITY_COUNT=$(security find-identity -v -p codesigning ~/Library/Keychains/login.keychain-db 2>/dev/null | grep -c "valid identities" || echo "0")
+          security find-identity -v -p codesigning ~/Library/Keychains/login.keychain-db 2>&1 | tail -3
 
       - name: Compute Tauri build args
         id: tauri-args
@@ -785,30 +801,6 @@ jobs:
           echo "args=$ARGS" >> $GITHUB_OUTPUT
           echo "Final tauri args: $ARGS"
 
-      - name: Keep System.keychain in search list during build (macOS)
-        if: matrix.os_type == 'macos'
-        shell: bash
-        run: |
-          # Tauri CLI creates a temp keychain and sets the search list to [login, temp],
-          # dropping System.keychain. On some self-hosted runners this causes
-          # errSecInternalComponent because codesign can't verify the cert chain
-          # (the Apple root/intermediate CAs live in System.keychain).
-          #
-          # This background loop re-adds System.keychain whenever it's missing.
-          (
-            while true; do
-              current=$(security list-keychains -d user 2>/dev/null | tr -d '"' | tr -d ' ' | tr '\n' ' ')
-              if ! echo "$current" | grep -q "System.keychain"; then
-                # Re-add System.keychain at the end of the existing list
-                security list-keychain -d user -s $current /Library/Keychains/System.keychain 2>/dev/null || true
-              fi
-              sleep 0.5
-            done
-          ) &
-          FIXER_PID=$!
-          echo "KEYCHAIN_FIXER_PID=$FIXER_PID" >> $GITHUB_ENV
-          echo "Started keychain fixer (PID $FIXER_PID)"
-
       - name: Build
         uses: tauri-apps/tauri-action@v0.5.17
         env:
@@ -817,9 +809,9 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
           # for release
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # for macos signing
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          # for macos signing — cert is pre-imported into login keychain above,
+          # so we do NOT pass APPLE_CERTIFICATE (which would create a temp keychain
+          # that fails with errSecInternalComponent on some self-hosted runners)
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
@@ -868,15 +860,12 @@ jobs:
           tauriScript: bunx tauri -vvv
           retryAttempts: 3
 
-      - name: Stop keychain fixer (macOS)
+      - name: Clean up signing cert from login keychain (macOS)
         if: matrix.os_type == 'macos' && always()
         shell: bash
         run: |
-          if [ -n "$KEYCHAIN_FIXER_PID" ]; then
-            kill "$KEYCHAIN_FIXER_PID" 2>/dev/null || true
-            echo "Stopped keychain fixer (PID $KEYCHAIN_FIXER_PID)"
-          fi
-          # Restore keychain list to just login
+          # Remove the imported signing identity to avoid accumulating certs across builds
+          security delete-identity -c "Developer ID Application" ~/Library/Keychains/login.keychain-db 2>/dev/null || true
           security list-keychain -d user -s ~/Library/Keychains/login.keychain-db 2>/dev/null || true
 
       - name: Notarize and staple DMGs (macOS)
@@ -1085,8 +1074,7 @@ jobs:
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          # Cert already in login keychain from earlier import step
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
