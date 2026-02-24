@@ -404,13 +404,13 @@ export function TeamSection() {
             <AlertTriangle className="h-3 w-3" />
             contains your encryption key — share only via secure channel
           </p>
-          <div className="flex gap-2">
+          <div className="flex gap-2 items-stretch">
             <Input
               readOnly
               value={team.inviteLink}
               className="font-mono text-xs"
             />
-            <Button variant="outline" size="sm" onClick={handleCopyInvite}>
+            <Button variant="outline" className="h-auto px-3" onClick={handleCopyInvite}>
               {copied ? (
                 <Check className="h-4 w-4" />
               ) : (
@@ -428,7 +428,7 @@ export function TeamSection() {
             <UserPlus className="h-4 w-4" />
             invite by email
           </h3>
-          <div className="flex gap-2">
+          <div className="flex gap-2 items-stretch">
             <Input
               type="email"
               placeholder="colleague@company.com"
@@ -439,12 +439,15 @@ export function TeamSection() {
             />
             <Button
               variant="outline"
-              size="sm"
+              className="h-auto px-4 whitespace-nowrap"
               onClick={handleSendInvite}
               disabled={sendingInvite || !inviteEmail.trim()}
             >
               {sendingInvite ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin mr-1.5" />
+                  sending...
+                </>
               ) : (
                 "send invite"
               )}
