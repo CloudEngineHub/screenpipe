@@ -431,10 +431,17 @@ impl AudioManager {
 
                     let mut was_paused = false;
                     while meeting.is_in_meeting() {
+                        // Only defer if we can identify the meeting app.
+                        // Audio-based detection can fire with no app name
+                        // (e.g. YouTube + ambient mic noise) — skip those.
+                        let meeting_app = meeting.current_meeting_app().await;
+                        if meeting_app.is_none() {
+                            break;
+                        }
                         if !was_paused {
                             warn!(
                                 "smart mode: meeting detected ({}), deferring transcription",
-                                meeting.current_meeting_app().await.unwrap_or_default()
+                                meeting_app.unwrap_or_default()
                             );
                             metrics.record_batch_pause();
                             was_paused = true;

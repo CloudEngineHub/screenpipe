@@ -116,13 +116,12 @@ pub async fn process_transcription_result(
             }
         }
     }
-    // Use current time for DB insertion instead of capture_timestamp.
-    // The capture_timestamp is set when audio enters the processing channel,
-    // but smart mode meeting deferral creates a growing backlog — by the time
-    // audio is processed, the capture_timestamp can be 20+ minutes stale.
-    // Using None here makes the DB fall back to Utc::now(), which is close
-    // to when the audio was actually processed and the MP4 file was written.
-    let capture_ts: Option<DateTime<Utc>> = None;
+    // Use the original capture timestamp so audio appears at the correct
+    // position on the timeline. Previously this was None (falling back to
+    // Utc::now() at processing time), which placed deferred audio at the
+    // wrong time — e.g. a meeting recorded at 5:15 PM would show at 5:35 PM
+    // if smart mode deferred transcription by 20 minutes.
+    let capture_ts: Option<DateTime<Utc>> = DateTime::from_timestamp(result.timestamp as i64, 0);
 
     match db
         .insert_audio_chunk_and_transcription(
