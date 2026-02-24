@@ -242,10 +242,10 @@ function ToolCallBlock({ toolCall }: { toolCall: ToolCall }) {
           : JSON.stringify(toolCall.args).slice(0, 100);
 
   return (
-    <div className="rounded-lg border border-border/50 bg-background/50 text-xs font-mono overflow-hidden max-w-full">
+    <div className="rounded-lg border border-border/50 bg-background/50 text-xs font-mono overflow-hidden w-full min-w-0">
       <button
         onClick={() => setExpanded(!expanded)}
-        className="w-full flex items-center gap-2 px-3 py-1.5 hover:bg-muted/50 transition-colors text-left"
+        className="w-full flex items-center gap-2 px-3 py-1.5 hover:bg-muted/50 transition-colors text-left min-w-0"
       >
         {toolCall.isRunning ? (
           <Loader2 className="h-3 w-3 animate-spin text-muted-foreground flex-shrink-0" />
@@ -441,7 +441,7 @@ function MessageContent({ message }: { message: Message }) {
   // If we have content blocks (Pi messages with tool calls), render them in order
   if (message.contentBlocks && message.contentBlocks.length > 0) {
     return (
-      <>
+      <div className="space-y-2 min-w-0 w-full overflow-hidden">
         {message.contentBlocks.map((block, i) => {
           if (block.type === "text" && block.text.trim()) {
             return <MarkdownBlock key={`text-${i}`} text={block.text} isUser={isUser} />;
@@ -454,7 +454,7 @@ function MessageContent({ message }: { message: Message }) {
           }
           return null;
         })}
-      </>
+      </div>
     );
   }
 
