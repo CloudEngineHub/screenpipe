@@ -283,7 +283,7 @@ function SettingsPageContent() {
       {/* Transparent titlebar area */}
       <div className="h-8 bg-transparent" data-tauri-drag-region></div>
 
-      <div className="max-w-7xl mx-auto px-4">
+      <div className="px-4">
         <div className="flex h-[calc(100vh-2rem)] min-h-0">
           {/* Sidebar */}
           <TooltipProvider delayDuration={0}>

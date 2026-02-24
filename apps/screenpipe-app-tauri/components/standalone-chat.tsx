@@ -2101,14 +2101,16 @@ export function StandaloneChat({ className }: { className?: string } = {}) {
 
   return (
     <div className={cn("flex flex-col bg-background", className ?? "h-screen")}>
-      {/* Header - draggable */}
-      {/* Add left padding on macOS to avoid traffic light overlap */}
+      {/* Header - draggable only in standalone mode */}
+      {/* Add left padding on macOS to avoid traffic light overlap (standalone only) */}
       <div
         className={cn(
-          "relative flex items-center gap-3 px-4 py-3 border-b border-border/50 bg-gradient-to-r from-background to-muted/30 cursor-grab active:cursor-grabbing",
-          isMac && "pl-[72px]"
+          "relative flex items-center gap-3 px-4 py-3 border-b border-border/50 bg-gradient-to-r from-background to-muted/30",
+          !className && "cursor-grab active:cursor-grabbing",
+          isMac && !className && "pl-[72px]"
         )}
         onMouseDown={async (e) => {
+          if (className) return; // embedded — don't drag
           if (e.button === 0) {
             try {
               await getCurrentWindow().startDragging();
@@ -2118,8 +2120,8 @@ export function StandaloneChat({ className }: { className?: string } = {}) {
           }
         }}
       >
-        {/* Geometric corner accent - hidden on macOS where traffic lights are */}
-        {!isMac && (
+        {/* Geometric corner accent - hidden on macOS (traffic lights) and when embedded */}
+        {!isMac && !className && (
           <div className="absolute top-0 left-0 w-8 h-8 border-l-2 border-t-2 border-foreground/10 rounded-tl-lg" />
         )}
         <div className="relative z-10 p-1.5 rounded-lg bg-foreground/5 border border-border/50">
