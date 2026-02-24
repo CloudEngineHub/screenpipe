@@ -236,6 +236,9 @@ pub async fn event_driven_capture_loop(
 
     // Track content hash for dedup across captures
     let mut last_content_hash: Option<i64> = None;
+    // Track last successful DB write time — dedup is bypassed after 30s
+    // to guarantee the timeline always has periodic entries
+    let mut last_db_write = Instant::now();
 
     // Capture immediately on startup so the timeline has a frame right away.
     // Also seeds the frame comparer so subsequent visual-change checks work.
@@ -253,6 +256,7 @@ pub async fn event_driven_capture_loop(
             &CaptureTrigger::Manual,
             use_pii_removal,
             None, // first capture — no previous hash
+            last_db_write,
         )
         .await
         {
@@ -263,6 +267,7 @@ pub async fn event_driven_capture_loop(
                 }
                 if let Some(ref result) = output.result {
                     last_content_hash = result.content_hash;
+                    last_db_write = Instant::now();
                     vision_metrics.record_capture();
                     vision_metrics.record_db_write(Duration::from_millis(result.duration_ms as u64));
                     if let Some(ref cache) = hot_frame_cache {
@@ -337,6 +342,15 @@ pub async fn event_driven_capture_loop(
         }
 
         if let Some(trigger) = trigger {
+            // Reset content hash on app/window change so the first frame
+            // of a new context is never deduped by a stale hash
+            if matches!(
+                trigger,
+                CaptureTrigger::AppSwitch { .. } | CaptureTrigger::WindowFocus { .. }
+            ) {
+                last_content_hash = None;
+            }
+
             if state.can_capture() {
                 // Heartbeat: record that the loop is alive and attempting a capture.
                 // This keeps health "ok" even if the DB write below times out.
@@ -358,6 +372,7 @@ pub async fn event_driven_capture_loop(
                         &trigger,
                         use_pii_removal,
                         last_content_hash,
+                        last_db_write,
                     ),
                 )
                 .await;
@@ -376,6 +391,7 @@ pub async fn event_driven_capture_loop(
                         if let Some(ref result) = output.result {
                             // Full capture — update hash, metrics, cache
                             last_content_hash = result.content_hash;
+                            last_db_write = Instant::now();
                             vision_metrics.record_capture();
                             vision_metrics
                                 .record_db_write(Duration::from_millis(result.duration_ms as u64));
@@ -489,6 +505,7 @@ async fn do_capture(
     trigger: &CaptureTrigger,
     use_pii_removal: bool,
     previous_content_hash: Option<i64>,
+    last_db_write: Instant,
 ) -> Result<CaptureOutput> {
     let captured_at = Utc::now();
 
@@ -506,20 +523,27 @@ async fn do_capture(
     })
     .await?;
 
-    // Content dedup: skip capture if accessibility text hasn't changed
-    if let Some(ref snap) = tree_snapshot {
-        if !snap.text_content.is_empty() {
-            let new_hash = snap.content_hash as i64;
-            if let Some(prev) = previous_content_hash {
-                if prev == new_hash && new_hash != 0 {
-                    debug!(
-                        "content dedup: skipping capture for monitor {} (hash={}, trigger={})",
-                        monitor_id, new_hash, trigger.as_str()
-                    );
-                    return Ok(CaptureOutput {
-                        result: None,
-                        image,
-                    });
+    // Content dedup: skip capture if accessibility text hasn't changed.
+    // Never dedup Idle/Manual triggers — these are fallback captures that must
+    // always write so the timeline is never completely empty.
+    // Also force a write every 30s even if hash matches (time-based floor).
+    let dedup_eligible = !matches!(trigger, CaptureTrigger::Idle | CaptureTrigger::Manual)
+        && last_db_write.elapsed() < Duration::from_secs(30);
+    if dedup_eligible {
+        if let Some(ref snap) = tree_snapshot {
+            if !snap.text_content.is_empty() {
+                let new_hash = snap.content_hash as i64;
+                if let Some(prev) = previous_content_hash {
+                    if prev == new_hash && new_hash != 0 {
+                        debug!(
+                            "content dedup: skipping capture for monitor {} (hash={}, trigger={})",
+                            monitor_id, new_hash, trigger.as_str()
+                        );
+                        return Ok(CaptureOutput {
+                            result: None,
+                            image,
+                        });
+                    }
                 }
             }
         }
