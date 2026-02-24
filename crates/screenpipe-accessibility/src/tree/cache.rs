@@ -9,7 +9,7 @@
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
-use super::{hamming_distance, TreeSnapshot};
+use super::{hamming_distance, TreeSnapshot, TruncationReason};
 
 const MAX_ENTRIES: usize = 100;
 const DEFAULT_TTL: Duration = Duration::from_secs(60);
@@ -106,6 +106,9 @@ mod tests {
             walk_duration: Duration::from_millis(10),
             content_hash: TreeSnapshot::compute_hash(text),
             simhash: TreeSnapshot::compute_simhash(text),
+            truncated: false,
+            truncation_reason: TruncationReason::None,
+            max_depth_reached: 0,
         }
     }
 

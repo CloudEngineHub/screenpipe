@@ -8097,7 +8097,7 @@ dependencies = [
 
 [[package]]
 name = "screenpipe-app"
-version = "2.0.534"
+version = "2.0.537"
 dependencies = [
  "anyhow",
  "arboard",
@@ -8192,7 +8192,7 @@ dependencies = [
 
 [[package]]
 name = "screenpipe-audio"
-version = "0.3.153"
+version = "0.3.154"
 dependencies = [
  "anyhow",
  "bytemuck",
@@ -8243,7 +8243,7 @@ dependencies = [
 
 [[package]]
 name = "screenpipe-core"
-version = "0.3.153"
+version = "0.3.154"
 dependencies = [
  "accessibility",
  "accessibility-sys",
@@ -8284,7 +8284,7 @@ dependencies = [
 
 [[package]]
 name = "screenpipe-db"
-version = "0.3.153"
+version = "0.3.154"
 dependencies = [
  "anyhow",
  "chrono",
@@ -8309,7 +8309,7 @@ dependencies = [
 
 [[package]]
 name = "screenpipe-events"
-version = "0.3.153"
+version = "0.3.154"
 dependencies = [
  "anyhow",
  "chrono",
@@ -8325,7 +8325,7 @@ dependencies = [
 
 [[package]]
 name = "screenpipe-integrations"
-version = "0.3.153"
+version = "0.3.154"
 dependencies = [
  "anyhow",
  "chrono",
@@ -8345,7 +8345,7 @@ dependencies = [
 
 [[package]]
 name = "screenpipe-server"
-version = "0.3.153"
+version = "0.3.154"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -8400,7 +8400,7 @@ dependencies = [
 
 [[package]]
 name = "screenpipe-vision"
-version = "0.3.153"
+version = "0.3.154"
 dependencies = [
  "accessibility-sys",
  "anyhow",
@@ -8410,7 +8410,6 @@ dependencies = [
  "base64 0.22.1",
  "chrono",
  "cidre 0.14.1",
- "clap",
  "core-foundation 0.10.1",
  "core-graphics 0.24.0",
  "image 0.25.9",
@@ -8428,7 +8427,6 @@ dependencies = [
  "serde_json",
  "tokio",
  "tracing",
- "tracing-subscriber",
  "uiautomation",
  "url",
  "windows 0.58.0",

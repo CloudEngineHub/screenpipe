@@ -137,6 +137,7 @@ export default function ShortcutReminderPage() {
           style={{
             background: "rgba(0, 0, 0, 0.75)",
             gridTemplateColumns: "1fr 1fr auto",
+            maxWidth: 160,
           }}
         >
           {/* Row 1, Col 1: Overlay shortcut (clickable) */}

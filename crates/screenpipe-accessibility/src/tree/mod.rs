@@ -27,6 +27,17 @@ pub struct AccessibilityTreeNode {
     pub depth: u8,
 }
 
+/// Why the tree walk stopped early (if it did).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TruncationReason {
+    /// Walk completed naturally — visited all reachable nodes.
+    None,
+    /// Hit the wall-clock timeout (`walk_timeout`).
+    Timeout,
+    /// Hit the maximum node count (`max_nodes`).
+    MaxNodes,
+}
+
 /// A snapshot of all visible text from the focused window's accessibility tree.
 #[derive(Debug, Clone)]
 pub struct TreeSnapshot {
@@ -42,6 +53,12 @@ pub struct TreeSnapshot {
     pub content_hash: u64,
     /// Locality-sensitive hash for fuzzy dedup (similar text → small hamming distance).
     pub simhash: u64,
+    /// Whether the walk was truncated before visiting all nodes.
+    pub truncated: bool,
+    /// Why the walk stopped (timeout, max_nodes, or completed naturally).
+    pub truncation_reason: TruncationReason,
+    /// Deepest depth reached during the walk.
+    pub max_depth_reached: usize,
 }
 
 impl TreeSnapshot {
@@ -106,7 +123,7 @@ pub struct TreeWalkerConfig {
     pub max_depth: usize,
     /// Maximum number of AX elements to visit per walk (default: 5000).
     pub max_nodes: usize,
-    /// Maximum wall-clock time for a single walk (default: 100ms).
+    /// Maximum wall-clock time for a single walk (default: 250ms).
     pub walk_timeout: Duration,
     /// Maximum text length to accumulate (default: 50_000 chars).
     pub max_text_length: usize,
@@ -124,7 +141,7 @@ impl Default for TreeWalkerConfig {
             walk_interval: Duration::from_secs(3),
             max_depth: 30,
             max_nodes: 5000,
-            walk_timeout: Duration::from_millis(100),
+            walk_timeout: Duration::from_millis(250),
             max_text_length: 50_000,
             element_timeout_secs: 0.2,
             ignored_windows: Vec::new(),
@@ -191,7 +208,7 @@ mod tests {
         assert_eq!(config.walk_interval, Duration::from_secs(3));
         assert_eq!(config.max_depth, 30);
         assert_eq!(config.max_nodes, 5000);
-        assert_eq!(config.walk_timeout, Duration::from_millis(100));
+        assert_eq!(config.walk_timeout, Duration::from_millis(250));
         assert_eq!(config.max_text_length, 50_000);
     }
 

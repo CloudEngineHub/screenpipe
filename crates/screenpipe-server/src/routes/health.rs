@@ -14,6 +14,7 @@ use std::time::Duration;
 use tracing::{debug, warn};
 
 use crate::server::AppState;
+use crate::ui_recorder::{tree_walker_snapshot, TreeWalkerSnapshot};
 
 use screenpipe_vision::monitor::{
     get_cached_monitor_descriptions, get_monitor_by_id, list_monitors, list_monitors_detailed,
@@ -47,6 +48,8 @@ pub struct HealthCheckResponse {
     pub pipeline: Option<PipelineHealthInfo>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub audio_pipeline: Option<AudioPipelineHealthInfo>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub accessibility: Option<TreeWalkerSnapshot>,
 }
 
 #[derive(Serialize, OaSchema, Deserialize)]
@@ -380,6 +383,14 @@ pub async fn health_check(State(state): State<Arc<AppState>>) -> JsonResponse<He
         device_status_details,
         monitors,
         pipeline,
+        accessibility: {
+            let snap = tree_walker_snapshot();
+            if snap.walks_total > 0 {
+                Some(snap)
+            } else {
+                None
+            }
+        },
         audio_pipeline: if !state.audio_disabled {
             let is_paused = state
                 .audio_manager

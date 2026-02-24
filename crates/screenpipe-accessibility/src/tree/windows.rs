@@ -241,6 +241,7 @@ impl TreeWalkerPlatform for WindowsTreeWalker {
             walk_duration
         );
 
+        // Windows walker doesn't have timeout-based truncation yet — report as complete
         Ok(Some(TreeSnapshot {
             app_name,
             window_name,
@@ -252,6 +253,9 @@ impl TreeWalkerPlatform for WindowsTreeWalker {
             walk_duration,
             content_hash,
             simhash,
+            truncated: false,
+            truncation_reason: super::TruncationReason::None,
+            max_depth_reached: 0,
         }))
     }
 }

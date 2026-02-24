@@ -327,11 +327,45 @@ impl AnalyticsManager {
             && (audio_status == "ok" || audio_status == "disabled")
             && (ui_status == "ok" || ui_status == "disabled");
 
+        // Extract pipeline quality metrics (no private data — only counts/rates/latencies)
+        let pipeline = &health["pipeline"];
+        let audio_pipeline = &health["audio_pipeline"];
+
         Ok(json!({
             "is_healthy": is_healthy,
             "frame_status": frame_status,
             "audio_status": audio_status,
-            "ui_status": ui_status
+            "ui_status": ui_status,
+            // Vision pipeline quality
+            "pipeline_uptime_secs": pipeline["uptime_secs"].as_f64(),
+            "pipeline_frames_captured": pipeline["frames_captured"].as_u64(),
+            "pipeline_frames_dropped": pipeline["frames_dropped"].as_u64(),
+            "pipeline_frame_drop_rate": pipeline["frame_drop_rate"].as_f64(),
+            "pipeline_capture_fps": pipeline["capture_fps_actual"].as_f64(),
+            "pipeline_avg_ocr_latency_ms": pipeline["avg_ocr_latency_ms"].as_f64(),
+            "pipeline_avg_db_latency_ms": pipeline["avg_db_latency_ms"].as_f64(),
+            "pipeline_stall_count": pipeline["pipeline_stall_count"].as_u64(),
+            "pipeline_ocr_cache_hit_rate": pipeline["ocr_cache_hit_rate"].as_f64(),
+            // Audio pipeline quality
+            "audio_chunks_sent": audio_pipeline["chunks_sent"].as_u64(),
+            "audio_vad_passed": audio_pipeline["vad_passed"].as_u64(),
+            "audio_vad_rejected": audio_pipeline["vad_rejected"].as_u64(),
+            "audio_vad_passthrough_rate": audio_pipeline["vad_passthrough_rate"].as_f64(),
+            "audio_transcriptions_completed": audio_pipeline["transcriptions_completed"].as_u64(),
+            "audio_transcription_errors": audio_pipeline["transcription_errors"].as_u64(),
+            "audio_total_words": audio_pipeline["total_words"].as_u64(),
+            "audio_words_per_minute": audio_pipeline["words_per_minute"].as_f64(),
+            // Accessibility tree walker quality
+            "ax_walks_total": health["accessibility"]["walks_total"].as_u64(),
+            "ax_walks_stored": health["accessibility"]["walks_stored"].as_u64(),
+            "ax_walks_deduped": health["accessibility"]["walks_deduped"].as_u64(),
+            "ax_walks_truncated": health["accessibility"]["walks_truncated"].as_u64(),
+            "ax_truncation_rate": health["accessibility"]["truncation_rate"].as_f64(),
+            "ax_truncated_timeout": health["accessibility"]["walks_truncated_timeout"].as_u64(),
+            "ax_truncated_max_nodes": health["accessibility"]["walks_truncated_max_nodes"].as_u64(),
+            "ax_avg_walk_duration_ms": health["accessibility"]["avg_walk_duration_ms"].as_u64(),
+            "ax_avg_nodes_per_walk": health["accessibility"]["avg_nodes_per_walk"].as_u64(),
+            "ax_max_depth_reached": health["accessibility"]["max_depth_reached"].as_u64(),
         }))
     }
 

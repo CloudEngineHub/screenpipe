@@ -584,7 +584,8 @@ pub async fn show_shortcut_reminder(
     info!("show_shortcut_reminder called");
 
     // Window dimensions: 2-row layout (shortcuts + activity visualization)
-    let window_width = 220.0;
+    // Keep tight — content is ~150px wide; extra space causes visible gap on some displays.
+    let window_width = 170.0;
     let window_height = 40.0;
 
     // Position at top center of the screen where the cursor is
@@ -684,14 +685,6 @@ pub async fn show_shortcut_reminder(
     .visible(false)
     .shadow(false)
     .resizable(false);
-
-    // Hide title bar on macOS
-    #[cfg(target_os = "macos")]
-    {
-        builder = builder
-            .hidden_title(true)
-            .title_bar_style(tauri::TitleBarStyle::Overlay);
-    }
 
     let window = builder
         .build()

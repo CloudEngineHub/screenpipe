@@ -299,6 +299,9 @@ impl TreeWalkerPlatform for MacosTreeWalker {
             walk_duration,
             content_hash,
             simhash,
+            truncated: state.truncated,
+            truncation_reason: state.truncation_reason,
+            max_depth_reached: state.max_depth_reached,
         }))
     }
 }
@@ -313,6 +316,9 @@ struct WalkState {
     walk_timeout: std::time::Duration,
     element_timeout_secs: f32,
     start: Instant,
+    truncated: bool,
+    truncation_reason: super::TruncationReason,
+    max_depth_reached: usize,
 }
 
 impl WalkState {
@@ -326,11 +332,28 @@ impl WalkState {
             walk_timeout: config.walk_timeout,
             element_timeout_secs: config.element_timeout_secs,
             start,
+            truncated: false,
+            truncation_reason: super::TruncationReason::None,
+            max_depth_reached: 0,
         }
     }
 
-    fn should_stop(&self) -> bool {
-        self.node_count >= self.max_nodes || self.start.elapsed() >= self.walk_timeout
+    fn should_stop(&mut self) -> bool {
+        if self.node_count >= self.max_nodes {
+            if !self.truncated {
+                self.truncated = true;
+                self.truncation_reason = super::TruncationReason::MaxNodes;
+            }
+            return true;
+        }
+        if self.start.elapsed() >= self.walk_timeout {
+            if !self.truncated {
+                self.truncated = true;
+                self.truncation_reason = super::TruncationReason::Timeout;
+            }
+            return true;
+        }
+        false
     }
 }
 
@@ -383,6 +406,9 @@ fn walk_element(elem: &ax::UiElement, depth: usize, state: &mut WalkState) {
     }
 
     state.node_count += 1;
+    if depth > state.max_depth_reached {
+        state.max_depth_reached = depth;
+    }
 
     // Set a per-element timeout to prevent IPC hangs
     let _ = elem.set_messaging_timeout_secs(state.element_timeout_secs);

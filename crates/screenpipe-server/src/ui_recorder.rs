@@ -9,7 +9,9 @@
 #[cfg(feature = "ui-events")]
 use anyhow::Result;
 #[cfg(feature = "ui-events")]
-use screenpipe_accessibility::tree::{cache::TreeCache, create_tree_walker, TreeWalkerConfig};
+use screenpipe_accessibility::tree::{
+    cache::TreeCache, create_tree_walker, TreeWalkerConfig, TruncationReason,
+};
 #[cfg(feature = "ui-events")]
 use screenpipe_accessibility::{UiCaptureConfig, UiRecorder};
 #[cfg(feature = "ui-events")]
@@ -134,6 +136,39 @@ impl UiRecorderConfig {
 
         config
     }
+}
+
+/// Point-in-time snapshot of tree walker health metrics (no private data).
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize, oasgen::OaSchema)]
+pub struct TreeWalkerSnapshot {
+    pub walks_total: u64,
+    pub walks_stored: u64,
+    pub walks_deduped: u64,
+    pub walks_empty: u64,
+    pub walks_error: u64,
+    pub walks_truncated: u64,
+    pub walks_truncated_timeout: u64,
+    pub walks_truncated_max_nodes: u64,
+    pub truncation_rate: f64,
+    pub avg_walk_duration_ms: u64,
+    pub max_walk_duration_ms: u64,
+    pub avg_nodes_per_walk: u64,
+    pub max_depth_reached: u64,
+    pub total_text_chars: u64,
+}
+
+/// Global shared tree walker metrics — updated every 60s by the walker thread,
+/// readable from the health endpoint. Uses the same global-static pattern as
+/// `LAST_AUDIO_CAPTURE` in screenpipe-audio.
+static TREE_WALKER_METRICS: std::sync::LazyLock<std::sync::Mutex<TreeWalkerSnapshot>> =
+    std::sync::LazyLock::new(|| std::sync::Mutex::new(TreeWalkerSnapshot::default()));
+
+/// Read the latest tree walker metrics snapshot.
+pub fn tree_walker_snapshot() -> TreeWalkerSnapshot {
+    TREE_WALKER_METRICS
+        .lock()
+        .map(|g| g.clone())
+        .unwrap_or_default()
 }
 
 /// Handle for managing the UI recorder
@@ -425,9 +460,14 @@ struct TreeWalkerMetrics {
     walks_empty: u64,
     walks_error: u64,
     walks_immediate: u64,
+    walks_truncated: u64,
+    walks_truncated_timeout: u64,
+    walks_truncated_max_nodes: u64,
     total_walk_duration_ms: u64,
     max_walk_duration_ms: u64,
     total_text_chars: u64,
+    total_nodes: u64,
+    max_depth_reached: u64,
     last_report: std::time::Instant,
 }
 
@@ -441,9 +481,14 @@ impl TreeWalkerMetrics {
             walks_empty: 0,
             walks_error: 0,
             walks_immediate: 0,
+            walks_truncated: 0,
+            walks_truncated_timeout: 0,
+            walks_truncated_max_nodes: 0,
             total_walk_duration_ms: 0,
             max_walk_duration_ms: 0,
             total_text_chars: 0,
+            total_nodes: 0,
+            max_depth_reached: 0,
             last_report: std::time::Instant::now(),
         }
     }
@@ -451,12 +496,38 @@ impl TreeWalkerMetrics {
     fn report_if_due(&mut self) {
         if self.last_report.elapsed() >= Duration::from_secs(60) && self.walks_total > 0 {
             let avg_ms = self.total_walk_duration_ms / self.walks_total.max(1);
+            let avg_nodes = self.total_nodes / self.walks_total.max(1);
+            let truncation_rate = self.walks_truncated as f64 / self.walks_total as f64;
+            let truncation_pct = (truncation_rate * 100.0) as u64;
             info!(
-                "tree walker stats (last 60s): walks={}, stored={}, deduped={}, empty={}, errors={}, immediate={}, avg_walk={}ms, max_walk={}ms, total_chars={}",
+                "tree walker stats (last 60s): walks={}, stored={}, deduped={}, empty={}, errors={}, immediate={}, avg_walk={}ms, max_walk={}ms, total_chars={}, avg_nodes={}, max_depth={}, truncated={}% ({} timeout, {} max_nodes)",
                 self.walks_total, self.walks_stored, self.walks_deduped,
                 self.walks_empty, self.walks_error, self.walks_immediate,
-                avg_ms, self.max_walk_duration_ms, self.total_text_chars
+                avg_ms, self.max_walk_duration_ms, self.total_text_chars,
+                avg_nodes, self.max_depth_reached, truncation_pct,
+                self.walks_truncated_timeout, self.walks_truncated_max_nodes
             );
+
+            // Publish snapshot to global for health endpoint / PostHog
+            if let Ok(mut snap) = TREE_WALKER_METRICS.lock() {
+                *snap = TreeWalkerSnapshot {
+                    walks_total: self.walks_total,
+                    walks_stored: self.walks_stored,
+                    walks_deduped: self.walks_deduped,
+                    walks_empty: self.walks_empty,
+                    walks_error: self.walks_error,
+                    walks_truncated: self.walks_truncated,
+                    walks_truncated_timeout: self.walks_truncated_timeout,
+                    walks_truncated_max_nodes: self.walks_truncated_max_nodes,
+                    truncation_rate,
+                    avg_walk_duration_ms: avg_ms,
+                    max_walk_duration_ms: self.max_walk_duration_ms,
+                    avg_nodes_per_walk: avg_nodes,
+                    max_depth_reached: self.max_depth_reached,
+                    total_text_chars: self.total_text_chars,
+                };
+            }
+
             *self = Self::new();
         }
     }
@@ -511,6 +582,18 @@ fn run_tree_walker(
                 let walk_ms = snap.walk_duration.as_millis() as u64;
                 metrics.total_walk_duration_ms += walk_ms;
                 metrics.max_walk_duration_ms = metrics.max_walk_duration_ms.max(walk_ms);
+                metrics.total_nodes += snap.node_count as u64;
+                if snap.max_depth_reached as u64 > metrics.max_depth_reached {
+                    metrics.max_depth_reached = snap.max_depth_reached as u64;
+                }
+                if snap.truncated {
+                    metrics.walks_truncated += 1;
+                    match snap.truncation_reason {
+                        TruncationReason::Timeout => metrics.walks_truncated_timeout += 1,
+                        TruncationReason::MaxNodes => metrics.walks_truncated_max_nodes += 1,
+                        TruncationReason::None => {}
+                    }
+                }
 
                 if cache.should_store(&snap) {
                     metrics.total_text_chars += snap.text_content.len() as u64;
