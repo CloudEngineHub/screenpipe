@@ -4,10 +4,18 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 
+export interface AccessibilityNodeBounds {
+	left: number;
+	top: number;
+	width: number;
+	height: number;
+}
+
 export interface AccessibilityNode {
 	role: string;
 	text: string;
 	depth: number;
+	bounds?: AccessibilityNodeBounds;
 }
 
 export interface FrameContext {

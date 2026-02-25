@@ -853,7 +853,9 @@ async fn cleanup_old_frames(frames_dir: &PathBuf) -> Result<()> {
             if let Ok(modified) = metadata.modified() {
                 if modified < one_hour_ago {
                     if let Err(e) = tokio::fs::remove_file(entry.path()).await {
-                        error!("Failed to remove old frame: {}", e);
+                        if e.kind() != std::io::ErrorKind::NotFound {
+                            error!("Failed to remove old frame: {}", e);
+                        }
                     }
                 }
             }

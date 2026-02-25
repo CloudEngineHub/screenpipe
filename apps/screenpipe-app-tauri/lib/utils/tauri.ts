@@ -337,6 +337,18 @@ async copyDeeplinkToClipboard(frameId: bigint) : Promise<Result<null, string>> {
 }
 },
 /**
+ * Copy arbitrary text to the system clipboard (native API, works in Tauri webview).
+ * Use this instead of navigator.clipboard.writeText() which fails after async operations.
+ */
+async copyTextToClipboard(text: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("copy_text_to_clipboard", { text }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Install a specific older version from R2. Downloads and installs via Tauri updater,
  * then restarts the app.
  */

@@ -1032,3 +1032,15 @@ pub async fn copy_deeplink_to_clipboard(frame_id: i64) -> Result<(), String> {
         .map_err(|e| format!("failed to set clipboard: {}", e))?;
     Ok(())
 }
+
+/// Copy arbitrary text to the system clipboard (native API, works in Tauri webview).
+/// Use this instead of navigator.clipboard.writeText() which fails after async operations.
+#[tauri::command]
+#[specta::specta]
+pub async fn copy_text_to_clipboard(text: String) -> Result<(), String> {
+    let mut clipboard = arboard::Clipboard::new().map_err(|e| format!("clipboard error: {}", e))?;
+    clipboard
+        .set_text(text)
+        .map_err(|e| format!("failed to set clipboard: {}", e))?;
+    Ok(())
+}

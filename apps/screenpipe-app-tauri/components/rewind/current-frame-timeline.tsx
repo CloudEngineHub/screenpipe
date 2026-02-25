@@ -9,7 +9,9 @@ import { usePlatform } from "@/lib/hooks/use-platform";
 import { formatShortcutDisplay } from "@/lib/chat-utils";
 import { TextOverlay, extractUrlsFromText, isUrl, normalizeUrl } from "@/components/text-overlay";
 import { SelectableTextLayer } from "@/components/selectable-text-layer";
+import { RegionOcrOverlay } from "@/components/rewind/region-ocr-overlay";
 import { useSearchHighlight } from "@/lib/hooks/use-search-highlight";
+import { useSettings } from "@/lib/hooks/use-settings";
 import { ImageOff, ChevronLeft, ChevronRight, Copy, ImageIcon, Link2, MessageCircle, ExternalLink, Type, Lock, Globe } from "lucide-react";
 import posthog from "posthog-js";
 import { toast } from "@/components/ui/use-toast";
@@ -94,6 +96,7 @@ export const CurrentFrameTimeline: FC<CurrentFrameTimelineProps> = ({
 	onSearchNavComplete,
 }) => {
 	const { isMac } = usePlatform();
+	const { settings } = useSettings();
 	const { highlightTerms, dismissed: highlightDismissed, clear: clearHighlight } = useSearchHighlight();
 	const [isLoading, setIsLoading] = useState(true);
 	const [contextMenuOpen, setContextMenuOpen] = useState(false);
@@ -473,9 +476,24 @@ export const CurrentFrameTimeline: FC<CurrentFrameTimelineProps> = ({
 	);
 
 	// OCR data for TextOverlay — always fetch so clickable text works on all frames
-	const { textPositions, isLoading: ocrLoading } = useFrameOcrData(
+	const { textPositions: ocrTextPositions, isLoading: ocrLoading } = useFrameOcrData(
 		debouncedFrame ? parseInt(debouncedFrame.frameId, 10) : null
 	);
+
+	// Use OCR positions when available, fall back to accessibility tree node bounds.
+	// Accessibility data is available immediately (no delayed OCR needed), so text
+	// selection works on all frames including recent ones without OCR processing.
+	const textPositions = useMemo(() => {
+		if (ocrTextPositions.length > 0) return ocrTextPositions;
+		if (!frameContext || contextLoading) return [];
+		return frameContext.nodes
+			.filter((n) => n.text.trim().length > 0 && n.bounds && n.bounds.width > 0 && n.bounds.height > 0)
+			.map((n) => ({
+				text: n.text,
+				confidence: 1.0,
+				bounds: n.bounds!,
+			}));
+	}, [ocrTextPositions, frameContext, contextLoading]);
 
 	// URL detection: prefer context URLs, fall back to OCR-extracted URLs
 	const detectedUrls = useMemo(() => {
@@ -924,6 +942,16 @@ export const CurrentFrameTimeline: FC<CurrentFrameTimelineProps> = ({
 						/>
 					</div>
 				</div>
+			)}
+
+			{/* Shift+drag region OCR */}
+			{!isLoading && !hasError && renderedImageInfo && naturalDimensions && debouncedFrame?.frameId && (
+				<RegionOcrOverlay
+					frameId={debouncedFrame.frameId}
+					renderedImageInfo={renderedImageInfo}
+					naturalDimensions={naturalDimensions}
+					userToken={settings.user?.token ?? null}
+				/>
 			)}
 
 			{/* URL chips — bottom of frame, when no OCR TextOverlay is showing */}

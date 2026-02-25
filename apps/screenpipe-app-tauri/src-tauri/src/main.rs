@@ -1168,9 +1168,10 @@ async fn main() {
                 // Window-specific shortcut commands (dynamic registration)
                 commands::register_window_shortcuts,
                 commands::unregister_window_shortcuts,
-                // Frame quick actions: copy frame image, copy deeplink
+                // Frame quick actions: copy frame image, copy deeplink, copy text
                 commands::copy_frame_to_clipboard,
                 commands::copy_deeplink_to_clipboard,
+                commands::copy_text_to_clipboard,
                 // Rollback commands
                 commands::rollback_to_version,
                 // Commands from tray.rs
@@ -1380,6 +1381,7 @@ async fn main() {
             // Frame quick actions: copy frame image to clipboard
             commands::copy_frame_to_clipboard,
             commands::copy_deeplink_to_clipboard,
+            commands::copy_text_to_clipboard,
             // Overlay commands (Windows)
             commands::enable_overlay_click_through,
             commands::disable_overlay_click_through,

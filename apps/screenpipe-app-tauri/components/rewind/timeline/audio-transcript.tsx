@@ -128,8 +128,13 @@ export function AudioTranscript({
 
 	const [copied, setCopied] = useState(false);
 
-	// Track speaker assignments
+	// Track speaker assignments (per-chunk for individual bubbles)
 	const [speakerOverrides, setSpeakerOverrides] = useState<
+		Map<number, { speakerId: number; speakerName: string }>
+	>(new Map());
+
+	// Track speaker-level overrides (bulk: header assignment updates all bubbles for that speaker)
+	const [speakerIdOverrides, setSpeakerIdOverrides] = useState<
 		Map<number, { speakerId: number; speakerName: string }>
 	>(new Map());
 
@@ -144,16 +149,35 @@ export function AudioTranscript({
 		[]
 	);
 
-	// Get speaker info with overrides
+	// Bulk assign: updates all bubbles sharing the original speaker ID
+	const handleBulkSpeakerAssigned = useCallback(
+		(originalSpeakerId: number, newSpeakerId: number, newSpeakerName: string) => {
+			setSpeakerIdOverrides((prev) => {
+				const next = new Map(prev);
+				next.set(originalSpeakerId, { speakerId: newSpeakerId, speakerName: newSpeakerName });
+				return next;
+			});
+		},
+		[]
+	);
+
+	// Get speaker info with overrides (chunk-level first, then speaker-level)
 	const getSpeakerInfo = useCallback(
 		(audio: AudioData) => {
-			const override = speakerOverrides.get(audio.audio_chunk_id);
+			const chunkOverride = speakerOverrides.get(audio.audio_chunk_id);
+			if (chunkOverride) {
+				return { speakerId: chunkOverride.speakerId, speakerName: chunkOverride.speakerName };
+			}
+			const speakerOverride = speakerIdOverrides.get(audio.speaker_id ?? -1);
+			if (speakerOverride) {
+				return { speakerId: speakerOverride.speakerId, speakerName: speakerOverride.speakerName };
+			}
 			return {
-				speakerId: override?.speakerId ?? audio.speaker_id,
-				speakerName: override?.speakerName ?? audio.speaker_name,
+				speakerId: audio.speaker_id,
+				speakerName: audio.speaker_name,
 			};
 		},
-		[speakerOverrides]
+		[speakerOverrides, speakerIdOverrides]
 	);
 
 	// Compute audio groups (device view)
@@ -630,6 +654,7 @@ export function AudioTranscript({
 						timeRange={activeData.timeRange}
 						firstChunkBySpeaker={activeData.firstChunkBySpeaker}
 						onSpeakerAssigned={handleSpeakerAssigned}
+						onBulkSpeakerAssigned={handleBulkSpeakerAssigned}
 					/>
 				) : null;
 			})()}
@@ -645,7 +670,10 @@ export function AudioTranscript({
 							const hasSummary = tabMode === "meeting"
 								? activeData.participants.length > 0
 								: viewMode === "thread" && activeData.participants.length > 0;
-							return hasSummary ? "90px" : "45px";
+							if (!hasSummary) return "45px";
+							// Extra space when unnamed speakers exist (hint banner)
+							const hasUnnamed = activeData.participants.some((p) => !p.name);
+							return hasUnnamed ? "110px" : "90px";
 						})()
 					})`,
 					overscrollBehavior: "contain",

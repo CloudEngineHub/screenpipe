@@ -120,6 +120,7 @@ pub async fn process_audio_input(
     whisper_state: &mut WhisperState,
     metrics: Arc<AudioPipelineMetrics>,
     vocabulary: &[VocabularyEntry],
+    pre_written_path: Option<String>,
 ) -> Result<()> {
     // NOTE: capture_timestamp is set when audio enters the channel, but smart mode
     // deferral can delay processing by 20+ minutes. The DB now uses Utc::now() at
@@ -154,22 +155,29 @@ pub async fn process_audio_input(
     metrics.record_vad_result(speech_ratio_ok, speech_ratio);
 
     if !speech_ratio_ok {
+        // Audio is already persisted to disk by the caller — just skip transcription
         return Ok(());
     }
 
-    let new_file_path = get_new_file_path(&audio.device.to_string(), output_path);
-
-    if let Err(e) = write_audio_to_file(
-        &audio.data.to_vec(),
-        audio.sample_rate,
-        &PathBuf::from(&new_file_path),
-        false,
-    ) {
-        error!("Error writing audio to file: {:?}", e);
-    }
+    // Use the pre-written path if audio was already persisted before deferral,
+    // otherwise write now (fallback for callers that don't pre-persist)
+    let file_path = if let Some(path) = pre_written_path {
+        path
+    } else {
+        let new_file_path = get_new_file_path(&audio.device.to_string(), output_path);
+        if let Err(e) = write_audio_to_file(
+            &audio.data.to_vec(),
+            audio.sample_rate,
+            &PathBuf::from(&new_file_path),
+            false,
+        ) {
+            error!("Error writing audio to file: {:?}", e);
+        }
+        new_file_path
+    };
 
     while let Some(segment) = segments.recv().await {
-        let path = new_file_path.clone();
+        let path = file_path.clone();
         let transcription_result = run_stt(
             segment,
             audio.device.clone(),
