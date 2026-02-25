@@ -291,6 +291,12 @@ pub async fn event_driven_capture_loop(
             break;
         }
 
+        // Skip capture while the screen is locked / screensaver active
+        if crate::sleep_monitor::screen_is_locked() {
+            tokio::time::sleep(poll_interval).await;
+            continue;
+        }
+
         // Check for external triggers (non-blocking)
         let mut trigger = match trigger_rx.try_recv() {
             Ok(trigger) => Some(trigger),
