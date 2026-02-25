@@ -102,8 +102,9 @@ export default function PermissionRecoveryPage() {
     const screenOk = permissions.screenRecording === "granted" || permissions.screenRecording === "notNeeded";
     const micOk = permissions.microphone === "granted" || permissions.microphone === "notNeeded";
 
-    // Close window and restart screenpipe if all critical permissions are granted
-    if (screenOk && micOk) {
+    // Close window and restart screenpipe if all permissions are granted (including Arc)
+    const arcOk = !arcInstalled || arcAutomationOk;
+    if (screenOk && micOk && arcOk) {
       restartTriggeredRef.current = true;
 
       // Wait a moment to show success state, then restart screenpipe
@@ -160,6 +161,8 @@ export default function PermissionRecoveryPage() {
     : permissions === null ? "checking" : "denied";
 
   const allCriticalOk = screenStatus === "granted" && micStatus === "granted";
+  const arcNeedsFix = isMacOS && arcInstalled && !arcAutomationOk;
+  const allOk = allCriticalOk && !arcNeedsFix;
 
   return (
     <div className="flex flex-col w-full h-screen overflow-hidden bg-background">
@@ -181,7 +184,7 @@ export default function PermissionRecoveryPage() {
       {/* Main content */}
       <div className="flex-1 flex flex-col items-center justify-center p-6 space-y-6">
         <AnimatePresence mode="wait">
-          {allCriticalOk ? (
+          {allOk ? (
             <motion.div
               key="success"
               initial={{ opacity: 0, scale: 0.95 }}
@@ -208,9 +211,11 @@ export default function PermissionRecoveryPage() {
               className="w-full max-w-md space-y-6"
             >
               <div className="text-center space-y-2">
-                <h2 className="font-mono text-lg">recording paused</h2>
+                <h2 className="font-mono text-lg">{allCriticalOk ? "permissions" : "recording paused"}</h2>
                 <p className="font-mono text-xs text-muted-foreground">
-                  some permissions were revoked. this can happen after macos updates.
+                  {allCriticalOk
+                    ? "some optional permissions need attention."
+                    : "some permissions were revoked. this can happen after macos updates."}
                 </p>
               </div>
 
