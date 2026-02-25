@@ -1189,21 +1189,27 @@ export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 		const target = embedded ? containerRef.current : document;
 		if (!target) return;
 
+		let lastScale = 1;
 		const onGestureStart = (e: Event) => {
 			e.preventDefault();
+			lastScale = 1;
 			isZoomingRef.current = true;
 		};
 		const onGestureChange = (e: Event) => {
 			e.preventDefault();
 			const ge = e as GestureEvent;
 			if (typeof ge.scale === "number") {
+				// ge.scale is cumulative from gesture start, so compute incremental delta
+				const delta = ge.scale / lastScale;
+				lastScale = ge.scale;
 				setTargetZoom((prev) =>
-					Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, prev * ge.scale)),
+					Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, prev * delta)),
 				);
 			}
 		};
 		const onGestureEnd = (e: Event) => {
 			e.preventDefault();
+			lastScale = 1;
 			if (zoomTimeoutRef.current) clearTimeout(zoomTimeoutRef.current);
 			zoomTimeoutRef.current = setTimeout(() => {
 				isZoomingRef.current = false;
@@ -1219,6 +1225,29 @@ export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 			target.removeEventListener("gestureend", onGestureEnd);
 		};
 	}, [embedded, setTargetZoom]);
+
+	// Debug: log all input events to see what trackpad pinch actually fires
+	useEffect(() => {
+		const logEvent = (e: Event) => {
+			const we = e as WheelEvent;
+			if (e.type === "wheel") {
+				console.log(`[timeline] wheel: ctrlKey=${we.ctrlKey} metaKey=${we.metaKey} deltaY=${we.deltaY}`);
+			} else {
+				const ge = e as GestureEvent;
+				console.log(`[timeline] ${e.type}: scale=${ge.scale}`);
+			}
+		};
+		document.addEventListener("wheel", logEvent, true);
+		document.addEventListener("gesturestart", logEvent, true);
+		document.addEventListener("gesturechange", logEvent, true);
+		document.addEventListener("gestureend", logEvent, true);
+		return () => {
+			document.removeEventListener("wheel", logEvent, true);
+			document.removeEventListener("gesturestart", logEvent, true);
+			document.removeEventListener("gesturechange", logEvent, true);
+			document.removeEventListener("gestureend", logEvent, true);
+		};
+	}, []);
 
 	// Ensure WKWebView is first responder so pinch-to-zoom works.
 	// On macOS, magnifyWithEvent: only reaches the WKWebView if it's first responder.
