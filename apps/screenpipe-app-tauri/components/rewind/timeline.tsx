@@ -120,17 +120,21 @@ export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 	const isZoomingRef = useRef(false);
 	const zoomTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-	// Smooth zoom animation
+	// Smooth zoom animation — zoomLevel is read only via the setter callback
+	// to avoid re-running the effect on every intermediate frame.
 	useEffect(() => {
-		if (Math.abs(zoomLevel - targetZoom) < 0.01) {
-			if (zoomLevel !== targetZoom) setZoomLevel(targetZoom);
-			return;
-		}
-		const id = requestAnimationFrame(() => {
-			setZoomLevel(prev => prev + (targetZoom - prev) * 0.15);
-		});
-		return () => cancelAnimationFrame(id);
-	}, [zoomLevel, targetZoom]);
+		let rafId: number | null = null;
+		const animate = () => {
+			setZoomLevel(prev => {
+				const diff = targetZoom - prev;
+				if (Math.abs(diff) < 0.01) return targetZoom; // snap
+				rafId = requestAnimationFrame(animate);
+				return prev + diff * 0.15;
+			});
+		};
+		rafId = requestAnimationFrame(animate);
+		return () => { if (rafId !== null) cancelAnimationFrame(rafId); };
+	}, [targetZoom]);
 
 	// Flag to prevent frame-date sync from fighting with intentional navigation
 	const isNavigatingRef = useRef(false);

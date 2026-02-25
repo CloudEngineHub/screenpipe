@@ -1077,6 +1077,11 @@ async fn main() -> anyhow::Result<()> {
         .as_ref()
         .map(|detector| start_meeting_persister(detector.clone(), db.clone()));
 
+    // Bridge calendar events from event bus into meeting detector
+    let _calendar_bridge_handle = meeting_detector
+        .as_ref()
+        .map(|detector| screenpipe_server::start_calendar_bridge(detector.clone()));
+
     // Start calendar-assisted speaker identification
     let _speaker_id_handle = start_speaker_identification(db.clone(), config.user_name.clone());
 

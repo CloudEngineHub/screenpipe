@@ -28,6 +28,25 @@ const AUDIO_MEETING_COOLDOWN: Duration = Duration::from_secs(120);
 /// from Google Meet but is still on the call), not a standalone detector.
 const APP_CONFIRMATION_WINDOW: Duration = Duration::from_secs(300); // 5 minutes
 
+/// A calendar event signal fed into the meeting detector.
+/// Contains only the fields needed for meeting detection — no serde/chrono deps.
+#[derive(Debug, Clone)]
+pub struct CalendarSignal {
+    pub event_id: String,
+    pub title: String,
+    pub start_epoch_ms: i64,
+    pub end_epoch_ms: i64,
+    pub attendees: Vec<String>,
+}
+
+/// Calendar context for the currently active calendar-based meeting.
+/// Returned by [`MeetingDetector::calendar_context()`] for the persister to use.
+#[derive(Debug, Clone)]
+pub struct CalendarContext {
+    pub title: String,
+    pub attendees: Vec<String>,
+}
+
 /// Detects when the user is in a meeting by matching focused app names
 /// and browser window titles against known meeting apps/URLs.
 ///
@@ -38,6 +57,11 @@ const APP_CONFIRMATION_WINDOW: Duration = Duration::from_secs(300); // 5 minutes
 /// Audio-based detection (bidirectional speech on mic + speakers) only activates
 /// when app-based detection has been active recently — it extends a meeting,
 /// not starts one. This prevents false positives from YouTube + background noise.
+///
+/// Calendar-based detection: when a calendar event with 2+ attendees overlaps
+/// the current time AND there is audio activity on at least one channel
+/// (input OR output), the meeting is active. This is more lenient than
+/// audio-only extension because the calendar provides strong intent signal.
 pub struct MeetingDetector {
     /// Lowercase app names that are always considered meetings
     meeting_apps: HashSet<String>,
@@ -61,6 +85,8 @@ pub struct MeetingDetector {
     /// Epoch millis when an app-based meeting was last detected (lock-free mirror
     /// of MeetingState::last_app_meeting_ts for use in is_in_meeting)
     last_app_meeting_epoch_ms: AtomicI64,
+    /// Whether a calendar-based meeting is currently active (lock-free cache)
+    in_calendar_meeting: AtomicBool,
 }
 
 struct MeetingState {
@@ -73,6 +99,8 @@ struct MeetingState {
     /// When an app-based meeting was last active (even after grace period expired).
     /// Used by audio-based detection to decide if it should activate.
     last_app_meeting_ts: Option<Instant>,
+    /// Calendar events fed from the calendar bridge
+    calendar_events: Vec<CalendarSignal>,
 }
 
 impl Default for MeetingDetector {
@@ -137,12 +165,14 @@ impl MeetingDetector {
                 last_meeting_focus: None,
                 directly_focused: false,
                 last_app_meeting_ts: None,
+                calendar_events: Vec::new(),
             }),
             last_input_speech_ts: AtomicI64::new(0),
             last_output_speech_ts: AtomicI64::new(0),
             last_audio_meeting_ended_ts: AtomicI64::new(0),
             was_audio_meeting: AtomicBool::new(false),
             last_app_meeting_epoch_ms: AtomicI64::new(0),
+            in_calendar_meeting: AtomicBool::new(false),
         }
     }
 
@@ -204,6 +234,9 @@ impl MeetingDetector {
     pub async fn check_grace_period(&self) {
         let mut state = self.state.write().await;
         if state.directly_focused {
+            // Refresh calendar state even when app is focused
+            let active = self.is_calendar_meeting_active(&state);
+            self.in_calendar_meeting.store(active, Ordering::Relaxed);
             return; // Still focused on meeting app
         }
         if let Some(last_focus) = state.last_meeting_focus {
@@ -219,6 +252,10 @@ impl MeetingDetector {
                 state.last_meeting_focus = None;
             }
         }
+
+        // Refresh calendar meeting state
+        let active = self.is_calendar_meeting_active(&state);
+        self.in_calendar_meeting.store(active, Ordering::Relaxed);
     }
 
     /// Called from the audio pipeline when a chunk is processed.
@@ -232,21 +269,89 @@ impl MeetingDetector {
             DeviceType::Input => self.last_input_speech_ts.store(now, Ordering::Relaxed),
             DeviceType::Output => self.last_output_speech_ts.store(now, Ordering::Relaxed),
         }
+
+        // Best-effort refresh of calendar meeting state after audio timestamp update
+        if let Ok(state) = self.state.try_read() {
+            let active = self.is_calendar_meeting_active(&state);
+            self.in_calendar_meeting.store(active, Ordering::Relaxed);
+        }
+    }
+
+    /// Replace stored calendar events and refresh the calendar meeting atomic.
+    pub async fn on_calendar_events(&self, events: Vec<CalendarSignal>) {
+        let mut state = self.state.write().await;
+        state.calendar_events = events;
+        let active = self.is_calendar_meeting_active(&state);
+        self.in_calendar_meeting.store(active, Ordering::Relaxed);
+    }
+
+    /// Check if a calendar-based meeting is active.
+    ///
+    /// Initial activation requires audio on any channel (confirms user is present).
+    /// Once active ("latched"), stays active for the duration of the calendar event
+    /// even without continuous audio — smart mode defers transcription during
+    /// meetings, so audio timestamps go stale, but the calendar event itself is
+    /// sufficient signal that the meeting is ongoing.
+    fn is_calendar_meeting_active(&self, state: &MeetingState) -> bool {
+        let now = now_millis();
+        let has_active_event = self.active_calendar_event(state, now).is_some();
+
+        if !has_active_event {
+            return false;
+        }
+
+        // Already latched — stay active for the duration of the calendar event
+        if self.in_calendar_meeting.load(Ordering::Relaxed) {
+            return true;
+        }
+
+        // Initial confirmation: require any recent audio activity
+        let window = AUDIO_CALL_DETECTION_WINDOW.as_millis() as i64;
+        let last_input = self.last_input_speech_ts.load(Ordering::Relaxed);
+        let last_output = self.last_output_speech_ts.load(Ordering::Relaxed);
+        (last_input > 0 && (now - last_input) < window)
+            || (last_output > 0 && (now - last_output) < window)
+    }
+
+    /// Returns the first active calendar event (2+ attendees, overlapping now).
+    fn active_calendar_event<'a>(&self, state: &'a MeetingState, now: i64) -> Option<&'a CalendarSignal> {
+        state.calendar_events.iter().find(|e| {
+            e.attendees.len() >= 2
+                && e.start_epoch_ms <= now
+                && e.end_epoch_ms > now
+        })
+    }
+
+    /// Returns calendar context (title + attendees) for the active calendar meeting, if any.
+    /// Called by the meeting persister on false→true transitions.
+    pub async fn calendar_context(&self) -> Option<CalendarContext> {
+        let state = self.state.read().await;
+        let now = now_millis();
+        self.active_calendar_event(&state, now).map(|e| CalendarContext {
+            title: e.title.clone(),
+            attendees: e.attendees.clone(),
+        })
     }
 
     /// Returns whether a meeting is currently detected (atomic, lock-free for app path).
     ///
-    /// App-based detection always works standalone. Audio-based detection only
-    /// activates when app-based detection was active within the last 5 minutes
-    /// (it *extends* a meeting, e.g. user tabbed away from Google Meet).
-    /// Audio-based detection also has a cooldown to prevent oscillation.
+    /// Detection priority:
+    /// 1. App-based detection (always standalone)
+    /// 2. Calendar-based detection (calendar event with 2+ attendees + any audio)
+    /// 3. Audio-based extension (bidirectional speech + recent app confirmation)
     pub fn is_in_meeting(&self) -> bool {
+        // 1. App-based detection
         let app_meeting = self.in_meeting.load(Ordering::Relaxed);
         if app_meeting {
             return true;
         }
 
-        // Fix 3: audio-based detection requires recent app-based meeting
+        // 2. Calendar-based detection (lock-free atomic)
+        if self.in_calendar_meeting.load(Ordering::Relaxed) {
+            return true;
+        }
+
+        // 3. Audio-based extension: requires recent app-based meeting
         let has_recent_app = self.had_recent_app_meeting_atomic();
         let audio_active = has_recent_app && self.is_bidirectional_audio_active();
 
@@ -302,12 +407,18 @@ impl MeetingDetector {
     }
 
     /// Returns the current meeting app name, if any.
-    /// For audio-based detection (when user tabbed away from meeting app),
-    /// returns the last known meeting app.
+    /// Priority: app-based > calendar-based > audio-based extension.
     pub async fn current_meeting_app(&self) -> Option<String> {
         let state = self.state.read().await;
         if state.current_app.is_some() {
             return state.current_app.clone();
+        }
+        // Calendar-based detection
+        if self.in_calendar_meeting.load(Ordering::Relaxed) {
+            let now = now_millis();
+            if let Some(cal) = self.active_calendar_event(&state, now) {
+                return Some(format!("calendar: {}", cal.title));
+            }
         }
         // If audio-based detection is active, report what meeting app was last used
         if self.is_bidirectional_audio_active() {
@@ -888,6 +999,226 @@ mod tests {
         assert!(
             app.is_some(),
             "should report meeting app during audio extension, got None (would show '()' in logs)"
+        );
+    }
+
+    // ──────────────────────────────────────────────────────────
+    // Calendar-based detection
+    // ──────────────────────────────────────────────────────────
+
+    /// Helper: create a CalendarSignal overlapping "now" with the given attendees.
+    fn calendar_now(title: &str, attendees: &[&str]) -> CalendarSignal {
+        let now = now_millis();
+        CalendarSignal {
+            event_id: "test-event".to_string(),
+            title: title.to_string(),
+            start_epoch_ms: now - 60_000,  // started 1 min ago
+            end_epoch_ms: now + 3_600_000, // ends in 1 hour
+            attendees: attendees.iter().map(|s| s.to_string()).collect(),
+        }
+    }
+
+    /// Helper: create a CalendarSignal in the future.
+    fn calendar_future(title: &str, attendees: &[&str]) -> CalendarSignal {
+        let now = now_millis();
+        CalendarSignal {
+            event_id: "future-event".to_string(),
+            title: title.to_string(),
+            start_epoch_ms: now + 3_600_000,  // starts in 1 hour
+            end_epoch_ms: now + 7_200_000,     // ends in 2 hours
+            attendees: attendees.iter().map(|s| s.to_string()).collect(),
+        }
+    }
+
+    /// Helper: create a CalendarSignal that already ended.
+    fn calendar_past(title: &str, attendees: &[&str]) -> CalendarSignal {
+        let now = now_millis();
+        CalendarSignal {
+            event_id: "past-event".to_string(),
+            title: title.to_string(),
+            start_epoch_ms: now - 7_200_000,  // started 2 hours ago
+            end_epoch_ms: now - 3_600_000,     // ended 1 hour ago
+            attendees: attendees.iter().map(|s| s.to_string()).collect(),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_calendar_event_with_audio_triggers_meeting() {
+        let detector = MeetingDetector::new();
+
+        // Calendar event with 2+ attendees overlapping now
+        let events = vec![calendar_now("Team Standup", &["Alice", "Bob"])];
+        detector.on_calendar_events(events).await;
+
+        // Output audio (e.g. hearing others on the call)
+        detector.on_audio_activity(&DeviceType::Output, true);
+
+        assert!(
+            detector.is_in_meeting(),
+            "calendar event + any audio should trigger meeting"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_calendar_event_without_audio_no_meeting() {
+        let detector = MeetingDetector::new();
+
+        // Calendar event but no audio at all
+        let events = vec![calendar_now("Team Standup", &["Alice", "Bob"])];
+        detector.on_calendar_events(events).await;
+
+        assert!(
+            !detector.is_in_meeting(),
+            "calendar event without audio should NOT trigger meeting"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_calendar_event_single_attendee_no_meeting() {
+        let detector = MeetingDetector::new();
+
+        // Only 1 attendee — not a real meeting
+        let events = vec![calendar_now("Focus Time", &["Alice"])];
+        detector.on_calendar_events(events).await;
+
+        detector.on_audio_activity(&DeviceType::Output, true);
+
+        assert!(
+            !detector.is_in_meeting(),
+            "single-attendee calendar event should NOT trigger meeting"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_calendar_event_not_yet_started_no_meeting() {
+        let detector = MeetingDetector::new();
+
+        // Future event
+        let events = vec![calendar_future("Tomorrow's Meeting", &["Alice", "Bob"])];
+        detector.on_calendar_events(events).await;
+
+        detector.on_audio_activity(&DeviceType::Output, true);
+
+        assert!(
+            !detector.is_in_meeting(),
+            "future calendar event should NOT trigger meeting"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_calendar_event_already_ended_no_meeting() {
+        let detector = MeetingDetector::new();
+
+        // Past event
+        let events = vec![calendar_past("Yesterday's Standup", &["Alice", "Bob"])];
+        detector.on_calendar_events(events).await;
+
+        detector.on_audio_activity(&DeviceType::Output, true);
+
+        assert!(
+            !detector.is_in_meeting(),
+            "past calendar event should NOT trigger meeting"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_calendar_provides_context() {
+        let detector = MeetingDetector::new();
+
+        let events = vec![calendar_now("Sprint Planning", &["Alice", "Bob", "Charlie"])];
+        detector.on_calendar_events(events).await;
+        detector.on_audio_activity(&DeviceType::Input, true);
+
+        let ctx = detector.calendar_context().await;
+        assert!(ctx.is_some(), "should have calendar context");
+        let ctx = ctx.unwrap();
+        assert_eq!(ctx.title, "Sprint Planning");
+        assert_eq!(ctx.attendees, vec!["Alice", "Bob", "Charlie"]);
+    }
+
+    #[tokio::test]
+    async fn test_calendar_does_not_need_app_confirmation() {
+        let detector = MeetingDetector::new();
+
+        // No app meeting was ever detected — last_app_meeting_epoch_ms is 0
+        assert_eq!(detector.last_app_meeting_epoch_ms.load(Ordering::Relaxed), 0);
+
+        // Calendar + audio should still trigger (unlike audio-only which needs recent app)
+        let events = vec![calendar_now("1:1 with Bob", &["Alice", "Bob"])];
+        detector.on_calendar_events(events).await;
+        detector.on_audio_activity(&DeviceType::Output, true);
+
+        assert!(
+            detector.is_in_meeting(),
+            "calendar-based detection should NOT require prior app confirmation"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_app_detection_takes_priority_over_calendar() {
+        let detector = MeetingDetector::new();
+
+        // Both app-based and calendar-based are active
+        let events = vec![calendar_now("Sprint Planning", &["Alice", "Bob"])];
+        detector.on_calendar_events(events).await;
+        detector.on_audio_activity(&DeviceType::Output, true);
+        detector.on_app_switch("zoom.us", None).await;
+
+        assert!(detector.is_in_meeting());
+        let app = detector.current_meeting_app().await.unwrap();
+        assert_eq!(
+            app, "zoom.us",
+            "app-based detection should take priority: got '{}'",
+            app
+        );
+    }
+
+    #[tokio::test]
+    async fn test_calendar_latches_through_audio_silence() {
+        // Once a calendar meeting is confirmed (initial audio), it stays active
+        // even when audio goes silent — smart mode defers transcription during
+        // meetings, so audio timestamps naturally go stale. The calendar event
+        // itself is strong enough signal.
+        let detector = MeetingDetector::new();
+
+        // Calendar event + audio → meeting active
+        let events = vec![calendar_now("Standup", &["Alice", "Bob"])];
+        detector.on_calendar_events(events).await;
+        detector.on_audio_activity(&DeviceType::Output, true);
+        assert!(detector.is_in_meeting());
+
+        // Audio goes silent (expired timestamp)
+        let expired = now_millis() - AUDIO_CALL_DETECTION_WINDOW.as_millis() as i64 - 1000;
+        detector.last_output_speech_ts.store(expired, Ordering::Relaxed);
+
+        // Refresh the calendar meeting state
+        detector.check_grace_period().await;
+
+        assert!(
+            detector.is_in_meeting(),
+            "calendar meeting should stay active (latched) even when audio goes silent"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_calendar_meeting_ends_when_event_ends() {
+        // The calendar meeting should end when the calendar event itself ends,
+        // even if it was previously latched.
+        let detector = MeetingDetector::new();
+
+        // Calendar event + audio → meeting active (latched)
+        let events = vec![calendar_now("Standup", &["Alice", "Bob"])];
+        detector.on_calendar_events(events).await;
+        detector.on_audio_activity(&DeviceType::Output, true);
+        assert!(detector.is_in_meeting());
+
+        // Calendar event ends — replace with a past event
+        let events = vec![calendar_past("Standup", &["Alice", "Bob"])];
+        detector.on_calendar_events(events).await;
+
+        assert!(
+            !detector.is_in_meeting(),
+            "calendar meeting should end when the calendar event ends"
         );
     }
 }

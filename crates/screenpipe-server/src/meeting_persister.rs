@@ -41,11 +41,32 @@ pub fn start_meeting_persister(
                         .current_meeting_app()
                         .await
                         .unwrap_or_else(|| "unknown".to_string());
-                    match db.insert_meeting(&app, "app").await {
+
+                    // Check if calendar context is available
+                    let cal_ctx = detector.calendar_context().await;
+                    let (source, title, attendees_str) = if let Some(ref ctx) = cal_ctx {
+                        (
+                            "calendar",
+                            Some(ctx.title.clone()),
+                            Some(ctx.attendees.join(", ")),
+                        )
+                    } else {
+                        ("app", None, None)
+                    };
+
+                    match db
+                        .insert_meeting(
+                            &app,
+                            source,
+                            title.as_deref(),
+                            attendees_str.as_deref(),
+                        )
+                        .await
+                    {
                         Ok(id) => {
                             info!(
-                                "meeting persister: meeting started (id={}, app={})",
-                                id, app
+                                "meeting persister: meeting started (id={}, app={}, source={})",
+                                id, app, source
                             );
                             current_meeting_id = Some(id);
                         }

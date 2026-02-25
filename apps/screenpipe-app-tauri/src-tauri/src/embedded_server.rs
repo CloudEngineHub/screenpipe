@@ -274,6 +274,16 @@ pub async fn start_embedded_server(
         let _meeting_watcher = start_meeting_watcher(detector_clone);
         // Handle kept alive by the spawned task — no need to store it
         info!("meeting watcher started for smart transcription mode");
+
+        // Persist meeting state transitions to DB (was missing — meetings were never saved in desktop app)
+        let _meeting_persister =
+            screenpipe_server::start_meeting_persister(detector.clone(), db.clone());
+        info!("meeting persister started");
+
+        // Bridge calendar events from event bus into meeting detector
+        let _calendar_bridge =
+            screenpipe_server::start_calendar_bridge(detector.clone());
+        info!("calendar bridge started for meeting detection");
     }
 
     // Start calendar-assisted speaker identification

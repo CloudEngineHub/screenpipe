@@ -6,6 +6,7 @@ pub mod analytics;
 #[cfg(feature = "apple-intelligence")]
 mod apple_intelligence_api;
 mod auto_destruct;
+pub mod calendar_bridge;
 pub mod calendar_speaker_id;
 pub mod cli;
 pub mod cli_pipe;
@@ -38,6 +39,7 @@ pub use axum::Json as JsonResponse;
 pub use cli::Cli;
 pub use recording_config::RecordingConfig;
 
+pub use calendar_bridge::start_calendar_bridge;
 pub use calendar_speaker_id::start_speaker_identification;
 pub use cloud_search::{CloudSearchClient, CloudSearchMetadata, CloudStatus};
 pub use meeting_persister::start_meeting_persister;

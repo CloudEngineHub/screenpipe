@@ -4781,17 +4781,21 @@ LIMIT ? OFFSET ?
         &self,
         meeting_app: &str,
         detection_source: &str,
+        title: Option<&str>,
+        attendees: Option<&str>,
     ) -> Result<i64, SqlxError> {
         let mut tx = self.begin_immediate_with_retry().await?;
         let now = chrono::Utc::now()
             .format("%Y-%m-%dT%H:%M:%S%.3fZ")
             .to_string();
         let id = sqlx::query(
-            "INSERT INTO meetings (meeting_start, meeting_app, detection_source) VALUES (?1, ?2, ?3)",
+            "INSERT INTO meetings (meeting_start, meeting_app, detection_source, title, attendees) VALUES (?1, ?2, ?3, ?4, ?5)",
         )
         .bind(&now)
         .bind(meeting_app)
         .bind(detection_source)
+        .bind(title)
+        .bind(attendees)
         .execute(&mut **tx.conn())
         .await?
         .last_insert_rowid();
