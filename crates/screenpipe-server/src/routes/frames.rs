@@ -428,12 +428,23 @@ pub async fn get_frame_metadata(
     }
 }
 
+/// Bounding box for an accessibility node (0-1 normalized to window)
+#[derive(OaSchema, Serialize, Clone)]
+pub struct AccessibilityNodeBounds {
+    pub left: f32,
+    pub top: f32,
+    pub width: f32,
+    pub height: f32,
+}
+
 /// A node from the accessibility tree
 #[derive(OaSchema, Serialize, Clone)]
 pub struct AccessibilityNode {
     pub role: String,
     pub text: String,
     pub depth: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bounds: Option<AccessibilityNodeBounds>,
 }
 
 /// Response type for frame context endpoint (accessibility-first, OCR fallback)
@@ -491,10 +502,20 @@ pub async fn get_frame_context(
                     let depth = node_val.get("depth").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
 
                     if !text.is_empty() {
+                        let bounds = node_val.get("bounds").and_then(|b| {
+                            Some(AccessibilityNodeBounds {
+                                left: b.get("left")?.as_f64()? as f32,
+                                top: b.get("top")?.as_f64()? as f32,
+                                width: b.get("width")?.as_f64()? as f32,
+                                height: b.get("height")?.as_f64()? as f32,
+                            })
+                        });
+
                         nodes.push(AccessibilityNode {
                             role: role.clone(),
                             text: text.clone(),
                             depth,
+                            bounds,
                         });
 
                         // Extract URLs from link roles
@@ -603,28 +624,209 @@ pub struct FrameOcrResponse {
 }
 
 /// Get OCR text positions with bounding boxes for a specific frame.
+/// Falls back to accessibility tree node bounds when no OCR data exists.
 /// This enables text selection overlay on screenshots.
 #[oasgen]
 pub async fn get_frame_ocr_data(
     State(state): State<Arc<AppState>>,
     Path(frame_id): Path<i64>,
 ) -> Result<JsonResponse<FrameOcrResponse>, (StatusCode, JsonResponse<Value>)> {
+    // Try OCR data first (has bounding boxes from Apple Vision)
     match state.db.get_frame_text_positions(frame_id).await {
-        Ok(text_positions) => Ok(JsonResponse(FrameOcrResponse {
-            frame_id,
-            text_positions,
-        })),
+        Ok(text_positions) if !text_positions.is_empty() => {
+            return Ok(JsonResponse(FrameOcrResponse {
+                frame_id,
+                text_positions,
+            }));
+        }
         Err(e) => {
             error!("Failed to get OCR data for frame {}: {}", frame_id, e);
-            Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                JsonResponse(json!({
-                    "error": format!("Failed to get OCR data: {}", e),
-                    "frame_id": frame_id
-                })),
-            ))
+        }
+        _ => {}
+    }
+
+    // Fallback: extract text positions from accessibility tree node bounds
+    if let Ok((_, Some(tree_json))) = state.db.get_frame_accessibility_data(frame_id).await {
+        if let Ok(nodes) =
+            serde_json::from_str::<Vec<serde_json::Value>>(&tree_json)
+        {
+            let text_positions: Vec<TextPosition> = nodes
+                .iter()
+                .filter_map(|n| {
+                    let text = n.get("text")?.as_str()?;
+                    if text.trim().is_empty() {
+                        return None;
+                    }
+                    let b = n.get("bounds")?;
+                    let left = b.get("left")?.as_f64()? as f32;
+                    let top = b.get("top")?.as_f64()? as f32;
+                    let width = b.get("width")?.as_f64()? as f32;
+                    let height = b.get("height")?.as_f64()? as f32;
+                    if width <= 0.0 || height <= 0.0 {
+                        return None;
+                    }
+                    Some(TextPosition {
+                        text: text.to_string(),
+                        confidence: 1.0,
+                        bounds: screenpipe_db::TextBounds {
+                            left,
+                            top,
+                            width,
+                            height,
+                        },
+                    })
+                })
+                .collect();
+
+            if !text_positions.is_empty() {
+                return Ok(JsonResponse(FrameOcrResponse {
+                    frame_id,
+                    text_positions,
+                }));
+            }
         }
     }
+
+    // No data from either source
+    Ok(JsonResponse(FrameOcrResponse {
+        frame_id,
+        text_positions: Vec::new(),
+    }))
+}
+
+/// Run on-demand OCR on a frame that has no stored bounding boxes.
+/// Loads the snapshot JPEG, runs Apple Vision OCR, stores the result,
+/// and returns the text positions. Subsequent GET requests will hit the
+/// cached DB row. If OCR data already exists, returns it without re-running.
+#[oasgen]
+pub async fn run_frame_ocr(
+    State(state): State<Arc<AppState>>,
+    Path(frame_id): Path<i64>,
+) -> Result<JsonResponse<FrameOcrResponse>, (StatusCode, JsonResponse<Value>)> {
+    // Check if OCR data already exists — avoid redundant work
+    match state.db.get_frame_text_positions(frame_id).await {
+        Ok(existing) if !existing.is_empty() => {
+            return Ok(JsonResponse(FrameOcrResponse {
+                frame_id,
+                text_positions: existing,
+            }));
+        }
+        _ => {}
+    }
+
+    // Resolve image path from DB
+    let (file_path, offset_index, is_snapshot) = match state.db.get_frame(frame_id).await {
+        Ok(Some(frame)) => frame,
+        Ok(None) => {
+            return Err((
+                StatusCode::NOT_FOUND,
+                JsonResponse(json!({ "error": "Frame not found", "frame_id": frame_id })),
+            ));
+        }
+        Err(e) => {
+            error!("Failed to get frame {}: {}", frame_id, e);
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                JsonResponse(json!({ "error": format!("DB error: {}", e) })),
+            ));
+        }
+    };
+
+    // Load image
+    let image = if is_snapshot {
+        match tokio::task::spawn_blocking({
+            let path = file_path.clone();
+            move || image::open(&path)
+        })
+        .await
+        {
+            Ok(Ok(img)) => img,
+            Ok(Err(e)) => {
+                error!("Failed to open snapshot {}: {}", file_path, e);
+                return Err((
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    JsonResponse(json!({ "error": format!("Failed to load image: {}", e) })),
+                ));
+            }
+            Err(e) => {
+                error!("Spawn blocking failed: {}", e);
+                return Err((
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    JsonResponse(json!({ "error": format!("Task failed: {}", e) })),
+                ));
+            }
+        }
+    } else {
+        // Legacy video-chunk frame — extract via ffmpeg
+        match extract_frame_from_video(&file_path, offset_index, "95").await {
+            Ok(temp_path) => match tokio::task::spawn_blocking({
+                let p = temp_path.clone();
+                move || image::open(&p)
+            })
+            .await
+            {
+                Ok(Ok(img)) => img,
+                _ => {
+                    return Err((
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        JsonResponse(
+                            json!({ "error": "Failed to load extracted frame from video" }),
+                        ),
+                    ));
+                }
+            },
+            Err(e) => {
+                error!("Failed to extract frame from video: {}", e);
+                return Err((
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    JsonResponse(json!({ "error": format!("Video extraction failed: {}", e) })),
+                ));
+            }
+        }
+    };
+
+    // Run OCR on the image
+    let ocr_result = tokio::task::spawn_blocking(move || {
+        #[cfg(target_os = "macos")]
+        {
+            let (text, json, _confidence) =
+                screenpipe_vision::perform_ocr_apple(&image, &[]);
+            (text, json)
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            let _ = image;
+            (String::new(), "[]".to_string())
+        }
+    })
+    .await
+    .unwrap_or_else(|_| (String::new(), "[]".to_string()));
+
+    let (ocr_text, ocr_text_json) = ocr_result;
+
+    // Store in DB for future reads (ignore errors — the result is still returned)
+    if !ocr_text.is_empty() {
+        let engine = Arc::new(screenpipe_db::OcrEngine::AppleNative);
+        if let Err(e) = state
+            .db
+            .insert_ocr_text(frame_id, &ocr_text, &ocr_text_json, engine)
+            .await
+        {
+            debug!("Failed to cache on-demand OCR for frame {}: {}", frame_id, e);
+        }
+    }
+
+    // Parse and return
+    let text_positions = state
+        .db
+        .get_frame_text_positions(frame_id)
+        .await
+        .unwrap_or_default();
+
+    Ok(JsonResponse(FrameOcrResponse {
+        frame_id,
+        text_positions,
+    }))
 }
 
 /// Apply PII redaction to a frame image

@@ -263,8 +263,18 @@ impl MacosTreeWalker {
             }
         }
 
-        // 3. Walk the accessibility tree
+        // 3. Read window frame for normalizing element bounds to 0-1 coords
         let mut state = WalkState::new(&self.config, start);
+        if let Some((wx, wy, ww, wh)) = get_element_frame(window) {
+            if ww > 0.0 && wh > 0.0 {
+                state.window_x = wx;
+                state.window_y = wy;
+                state.window_w = ww;
+                state.window_h = wh;
+            }
+        }
+
+        // Walk the accessibility tree
         walk_element(window, 0, &mut state);
 
         let text_content = state.text_buffer;
@@ -335,6 +345,11 @@ struct WalkState {
     truncated: bool,
     truncation_reason: super::TruncationReason,
     max_depth_reached: usize,
+    /// Window origin and size in screen points (for normalizing element bounds).
+    window_x: f64,
+    window_y: f64,
+    window_w: f64,
+    window_h: f64,
 }
 
 impl WalkState {
@@ -351,6 +366,10 @@ impl WalkState {
             truncated: false,
             truncation_reason: super::TruncationReason::None,
             max_depth_reached: 0,
+            window_x: 0.0,
+            window_y: 0.0,
+            window_w: 0.0,
+            window_h: 0.0,
         }
     }
 
@@ -471,6 +490,10 @@ fn walk_element(elem: &ax::UiElement, depth: usize, state: &mut WalkState) {
 
 /// Extract text attributes from an element, append to the buffer, and collect a structured node.
 fn extract_text(elem: &ax::UiElement, role_str: &str, depth: usize, state: &mut WalkState) {
+    // Read element bounds once (used for all text extraction paths)
+    let bounds = get_element_frame(elem)
+        .and_then(|(x, y, w, h)| normalize_bounds(x, y, w, h, state));
+
     // For text fields / text areas, prefer value (the actual content)
     if role_str == "AXTextField" || role_str == "AXTextArea" || role_str == "AXComboBox" {
         if let Some(val) = get_string_attr(elem, ax::attr::value()) {
@@ -480,6 +503,7 @@ fn extract_text(elem: &ax::UiElement, role_str: &str, depth: usize, state: &mut 
                     role: role_str.to_string(),
                     text: val.trim().to_string(),
                     depth: depth.min(255) as u8,
+                    bounds,
                 });
                 return;
             }
@@ -495,6 +519,7 @@ fn extract_text(elem: &ax::UiElement, role_str: &str, depth: usize, state: &mut 
                     role: role_str.to_string(),
                     text: val.trim().to_string(),
                     depth: depth.min(255) as u8,
+                    bounds,
                 });
                 return;
             }
@@ -509,6 +534,7 @@ fn extract_text(elem: &ax::UiElement, role_str: &str, depth: usize, state: &mut 
                 role: role_str.to_string(),
                 text: title.trim().to_string(),
                 depth: depth.min(255) as u8,
+                bounds,
             });
             return;
         }
@@ -522,6 +548,7 @@ fn extract_text(elem: &ax::UiElement, role_str: &str, depth: usize, state: &mut 
                 role: role_str.to_string(),
                 text: desc.trim().to_string(),
                 depth: depth.min(255) as u8,
+                bounds,
             });
         }
     }
@@ -537,6 +564,52 @@ fn append_text(buffer: &mut String, text: &str) {
         buffer.push('\n');
     }
     buffer.push_str(trimmed);
+}
+
+/// Read the AXPosition + AXSize of an element, returning (x, y, width, height) in screen points.
+fn get_element_frame(elem: &ax::UiElement) -> Option<(f64, f64, f64, f64)> {
+    let pos = elem.attr_value(ax::attr::pos()).ok().and_then(|v| {
+        if v.get_type_id() == ax::Value::type_id() {
+            let ax_val: &ax::Value = unsafe { std::mem::transmute(&*v) };
+            ax_val.cg_point().map(|p| (p.x, p.y))
+        } else {
+            None
+        }
+    })?;
+    let size = elem.attr_value(ax::attr::size()).ok().and_then(|v| {
+        if v.get_type_id() == ax::Value::type_id() {
+            let ax_val: &ax::Value = unsafe { std::mem::transmute(&*v) };
+            ax_val.cg_size().map(|s| (s.width, s.height))
+        } else {
+            None
+        }
+    })?;
+    Some((pos.0, pos.1, size.0, size.1))
+}
+
+/// Normalize an element's screen-absolute frame to 0-1 coords relative to the window.
+fn normalize_bounds(
+    elem_x: f64, elem_y: f64, elem_w: f64, elem_h: f64,
+    state: &WalkState,
+) -> Option<super::NodeBounds> {
+    if state.window_w <= 0.0 || state.window_h <= 0.0 {
+        return None;
+    }
+    let left = ((elem_x - state.window_x) / state.window_w) as f32;
+    let top = ((elem_y - state.window_y) / state.window_h) as f32;
+    let width = (elem_w / state.window_w) as f32;
+    let height = (elem_h / state.window_h) as f32;
+
+    // Sanity check — skip if out of window bounds
+    if left < -0.1 || top < -0.1 || width <= 0.0 || height <= 0.0 || left > 1.1 || top > 1.1 {
+        return None;
+    }
+    Some(super::NodeBounds {
+        left: left.clamp(0.0, 1.0),
+        top: top.clamp(0.0, 1.0),
+        width: width.min(1.0 - left.max(0.0)),
+        height: height.min(1.0 - top.max(0.0)),
+    })
 }
 
 /// Extract a string attribute from an AX element.

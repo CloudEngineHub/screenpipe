@@ -292,6 +292,7 @@ fn extract_text_from_tree(
                         role: ct.to_string(),
                         text: val.trim().to_string(),
                         depth: depth.min(255) as u8,
+                        bounds: None, // TODO: read UIA bounding rectangle
                     });
                     // Don't recurse into text controls — their children are sub-elements of the same text
                     return;
@@ -307,6 +308,7 @@ fn extract_text_from_tree(
                     role: ct.to_string(),
                     text: name.trim().to_string(),
                     depth: depth.min(255) as u8,
+                    bounds: None, // TODO: read UIA bounding rectangle
                 });
             }
         }

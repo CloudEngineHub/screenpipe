@@ -27,6 +27,10 @@ interface LineGroup {
   avgTop: number;
 }
 
+// Minimum horizontal gap (as fraction of displayedWidth) to split a line
+// into separate column groups. Prevents cross-panel selection in tiled terminals.
+const COLUMN_GAP_FRACTION = 0.04;
+
 /**
  * Renders OCR text as invisible but selectable DOM text nodes positioned
  * exactly over their bounding boxes on the screenshot. The browser's native
@@ -68,7 +72,7 @@ export const SelectableTextLayer = React.memo(function SelectableTextLayer({
 
     // Group into lines: blocks with similar top values
     const sorted = [...blocks].sort((a, b) => a.top - b.top);
-    const lines: LineGroup[] = [];
+    const rawLines: { blocks: PositionedBlock[]; top: number }[] = [];
     let currentLine: PositionedBlock[] = [sorted[0]];
     let lineTop = sorted[0].top;
     const lineThreshold = Math.max(
@@ -82,17 +86,35 @@ export const SelectableTextLayer = React.memo(function SelectableTextLayer({
         currentLine.push(block);
       } else {
         currentLine.sort((a, b) => a.left - b.left);
-        const avgTop =
-          currentLine.reduce((sum, b) => sum + b.top, 0) / currentLine.length;
-        lines.push({ blocks: currentLine, avgTop });
+        rawLines.push({ blocks: currentLine, top: lineTop });
         currentLine = [block];
         lineTop = block.top;
       }
     }
     currentLine.sort((a, b) => a.left - b.left);
-    const avgTop =
-      currentLine.reduce((sum, b) => sum + b.top, 0) / currentLine.length;
-    lines.push({ blocks: currentLine, avgTop });
+    rawLines.push({ blocks: currentLine, top: lineTop });
+
+    // Split lines at large X-gaps to isolate columns/panels.
+    // This prevents cross-panel text selection in tiled terminal layouts.
+    const columnGapPx = displayedWidth * COLUMN_GAP_FRACTION;
+    const lines: LineGroup[] = [];
+    for (const raw of rawLines) {
+      let columnStart = 0;
+      for (let i = 1; i < raw.blocks.length; i++) {
+        const prev = raw.blocks[i - 1];
+        const curr = raw.blocks[i];
+        const gap = curr.left - (prev.left + prev.width);
+        if (gap > columnGapPx) {
+          const segment = raw.blocks.slice(columnStart, i);
+          const avg = segment.reduce((s, b) => s + b.top, 0) / segment.length;
+          lines.push({ blocks: segment, avgTop: avg });
+          columnStart = i;
+        }
+      }
+      const segment = raw.blocks.slice(columnStart);
+      const avg = segment.reduce((s, b) => s + b.top, 0) / segment.length;
+      lines.push({ blocks: segment, avgTop: avg });
+    }
 
     lines.sort((a, b) => a.avgTop - b.avgTop);
 

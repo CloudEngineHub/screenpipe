@@ -40,6 +40,20 @@ async checkMicrophonePermission() : Promise<OSPermissionStatus> {
 async checkAccessibilityPermissionCmd() : Promise<OSPermissionStatus> {
     return await TAURI_INVOKE("check_accessibility_permission_cmd");
 },
+/**
+ * Check if Arc browser is installed (macOS only)
+ */
+async checkArcInstalled() : Promise<boolean> {
+    return await TAURI_INVOKE("check_arc_installed");
+},
+/**
+ * Request macOS Automation permission for Arc browser by running a harmless AppleScript.
+ * This triggers the "screenpipe wants to control Arc" system prompt if not already granted.
+ * Returns true if the command succeeded (permission granted), false otherwise.
+ */
+async requestArcAutomationPermission() : Promise<boolean> {
+    return await TAURI_INVOKE("request_arc_automation_permission");
+},
 async getEnv(name: string) : Promise<string> {
     return await TAURI_INVOKE("get_env", { name });
 },

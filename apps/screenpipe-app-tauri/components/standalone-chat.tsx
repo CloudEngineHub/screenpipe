@@ -24,6 +24,8 @@ import remarkGfm from "remark-gfm";
 // OpenAI SDK no longer used directly — all providers route through Pi agent
 import posthog from "posthog-js";
 import { open as openUrl } from "@tauri-apps/plugin-shell";
+import { save as saveDialog } from "@tauri-apps/plugin-dialog";
+import { writeTextFile } from "@tauri-apps/plugin-fs";
 import { commands } from "@/lib/utils/tauri";
 import { emit } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -434,23 +436,121 @@ function MarkdownBlock({ text, isUser }: { text: string; isUser: boolean }) {
   );
 }
 
+// Groups consecutive tool blocks into a single group for collapsible rendering
+type GroupedBlock =
+  | { type: "text"; text: string; key: number }
+  | { type: "thinking"; text: string; isThinking: boolean; durationMs?: number; key: number }
+  | { type: "tool-group"; toolCalls: ToolCall[]; key: number };
+
+function groupContentBlocks(blocks: ContentBlock[]): GroupedBlock[] {
+  const result: GroupedBlock[] = [];
+  let currentToolGroup: ToolCall[] = [];
+
+  for (let i = 0; i < blocks.length; i++) {
+    const block = blocks[i];
+    if (block.type === "tool") {
+      currentToolGroup.push(block.toolCall);
+    } else {
+      if (currentToolGroup.length > 0) {
+        result.push({ type: "tool-group", toolCalls: [...currentToolGroup], key: result.length });
+        currentToolGroup = [];
+      }
+      if (block.type === "text" && block.text.trim()) {
+        result.push({ type: "text", text: block.text, key: result.length });
+      } else if (block.type === "thinking") {
+        result.push({ type: "thinking", text: block.text, isThinking: block.isThinking, durationMs: block.durationMs, key: result.length });
+      }
+    }
+  }
+  if (currentToolGroup.length > 0) {
+    result.push({ type: "tool-group", toolCalls: [...currentToolGroup], key: result.length });
+  }
+  return result;
+}
+
+function ToolCallGroup({ toolCalls }: { toolCalls: ToolCall[] }) {
+  const [expanded, setExpanded] = useState(false);
+
+  // For 1-2 tool calls, render individually (not worth collapsing)
+  if (toolCalls.length <= 2) {
+    return (
+      <>
+        {toolCalls.map((tc) => (
+          <ToolCallBlock key={tc.id} toolCall={tc} />
+        ))}
+      </>
+    );
+  }
+
+  const doneCount = toolCalls.filter((tc) => !tc.isRunning).length;
+  const total = toolCalls.length;
+  const hasRunning = toolCalls.some((tc) => tc.isRunning);
+  const hasError = toolCalls.some((tc) => tc.isError);
+  const activeCall = toolCalls.find((tc) => tc.isRunning);
+
+  // Build a short preview of the active tool call
+  const activePreview = activeCall
+    ? `${activeCall.toolName} ${
+        activeCall.toolName === "bash"
+          ? activeCall.args.command || ""
+          : activeCall.toolName === "read" || activeCall.toolName === "edit" || activeCall.toolName === "write"
+            ? activeCall.args.path || ""
+            : ""
+      }`.trim()
+    : "";
+
+  return (
+    <div className="rounded-lg border border-border/50 bg-background/50 text-xs font-mono overflow-hidden w-full min-w-0">
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="w-full flex items-center gap-2 px-3 py-1.5 hover:bg-muted/50 transition-colors text-left min-w-0"
+      >
+        {hasRunning ? (
+          <Loader2 className="h-3 w-3 animate-spin text-muted-foreground flex-shrink-0" />
+        ) : hasError ? (
+          <span className="text-destructive flex-shrink-0">✗</span>
+        ) : (
+          <span className="text-green-500 flex-shrink-0">✓</span>
+        )}
+        <span className="font-semibold flex-shrink-0">
+          {total} steps{hasRunning ? ` (${doneCount}/${total})` : ""}
+        </span>
+        {!expanded && activePreview && (
+          <span className="text-muted-foreground truncate flex-1">{activePreview}</span>
+        )}
+        {!activePreview && <span className="flex-1" />}
+        <span className="text-muted-foreground flex-shrink-0">{expanded ? "▾" : "▸"}</span>
+      </button>
+      {expanded && (
+        <div className="border-t border-border/50 space-y-1 p-2">
+          {toolCalls.map((tc) => (
+            <ToolCallBlock key={tc.id} toolCall={tc} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // Renders message content with interleaved text and tool call blocks
 function MessageContent({ message }: { message: Message }) {
   const isUser = message.role === "user";
 
   // If we have content blocks (Pi messages with tool calls), render them in order
+  // Group consecutive tool blocks into collapsible containers
   if (message.contentBlocks && message.contentBlocks.length > 0) {
+    const grouped = groupContentBlocks(message.contentBlocks);
     return (
       <div className="space-y-2 min-w-0 w-full overflow-hidden">
-        {message.contentBlocks.map((block, i) => {
-          if (block.type === "text" && block.text.trim()) {
-            return <MarkdownBlock key={`text-${i}`} text={block.text} isUser={isUser} />;
+        {grouped.map((group) => {
+          if (group.type === "text") {
+            return <MarkdownBlock key={`text-${group.key}`} text={group.text} isUser={isUser} />;
           }
-          if (block.type === "tool") {
-            return <ToolCallBlock key={block.toolCall.id} toolCall={block.toolCall} />;
+          if (group.type === "thinking") {
+            return <ThinkingBlock key={`thinking-${group.key}`} text={group.text} isThinking={group.isThinking} durationMs={group.durationMs} />;
           }
-          if (block.type === "thinking") {
-            return <ThinkingBlock key={`thinking-${i}`} text={block.text} isThinking={block.isThinking} durationMs={block.durationMs} />;
+          if (group.type === "tool-group") {
+            return <ToolCallGroup key={`tools-${group.key}`} toolCalls={group.toolCalls} />;
           }
           return null;
         })}
@@ -2077,6 +2177,30 @@ export function StandaloneChat({ className }: { className?: string } = {}) {
     toast({ title: "copied full chat as markdown" });
   };
 
+  const exportChatAsMarkdownFile = async () => {
+    if (messages.length === 0) return;
+    const md = messages
+      .map((m) => {
+        const role = m.role === "user" ? "**User**" : "**Assistant**";
+        const ts = new Date(m.timestamp).toLocaleString();
+        return `### ${role} — ${ts}\n\n${m.content}`;
+      })
+      .join("\n\n---\n\n");
+    try {
+      const filePath = await saveDialog({
+        filters: [{ name: "Markdown", extensions: ["md"] }],
+        defaultPath: `screenpipe-chat-${new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19)}.md`,
+      });
+      if (filePath) {
+        await writeTextFile(filePath, md);
+        toast({ title: "chat exported as markdown" });
+      }
+    } catch (e) {
+      console.error("Failed to export chat:", e);
+      toast({ title: "failed to export chat", variant: "destructive" });
+    }
+  };
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!input.trim() || isLoading) return;
@@ -2278,6 +2402,15 @@ export function StandaloneChat({ className }: { className?: string } = {}) {
               menu.remove();
             };
             menu.appendChild(item);
+            const exportItem = document.createElement("button");
+            exportItem.className =
+              "w-full text-left px-3 py-1.5 hover:bg-muted transition-colors text-foreground cursor-pointer";
+            exportItem.textContent = "Export as markdown file";
+            exportItem.onclick = () => {
+              exportChatAsMarkdownFile();
+              menu.remove();
+            };
+            menu.appendChild(exportItem);
             document.body.appendChild(menu);
             const remove = (ev: MouseEvent) => {
               if (!menu.contains(ev.target as Node)) {

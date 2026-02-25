@@ -19,12 +19,25 @@ use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::time::Duration;
 
+/// Bounding box of an accessibility node, normalized to 0-1 relative to the window.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NodeBounds {
+    pub left: f32,
+    pub top: f32,
+    pub width: f32,
+    pub height: f32,
+}
+
 /// A single node extracted from the accessibility tree, preserving role and hierarchy.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AccessibilityTreeNode {
     pub role: String,
     pub text: String,
     pub depth: u8,
+    /// Bounding box in 0-1 normalized coordinates relative to the window.
+    /// None if the element doesn't expose AXPosition/AXSize.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bounds: Option<NodeBounds>,
 }
 
 /// Why the tree walk stopped early (if it did).

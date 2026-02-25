@@ -917,7 +917,7 @@ export const TimelineSlider = ({
 												width: `${frameWidth}px`,
 												marginLeft: `${frameMargin}px`,
 												marginRight: `${frameMargin}px`,
-												backgroundColor: appNameToBarColor(getFrameAppName(frame)),
+												backgroundColor: appNameToBarColor(group.appName),
 												height: isCurrent || isSelected || isInRange ? "80%" : hasAudio ? "60%" : "45%",
 												opacity: !matchesFilter ? 0.15 : isCurrent || isSelected || isInRange ? 1 : hasAudio ? 0.9 : 0.7,
 												direction: "ltr",

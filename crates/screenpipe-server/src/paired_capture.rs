@@ -362,6 +362,7 @@ mod tests {
                 role: "AXStaticText".to_string(),
                 text: "Hello World - Example Page".to_string(),
                 depth: 0,
+                bounds: None,
             }],
             browser_url: Some("https://example.com".to_string()),
             timestamp: now,
