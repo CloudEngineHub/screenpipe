@@ -8,7 +8,7 @@ import { useFrameOcrData } from "@/lib/hooks/use-frame-ocr-data";
 import { usePlatform } from "@/lib/hooks/use-platform";
 import { formatShortcutDisplay } from "@/lib/chat-utils";
 import { TextOverlay, extractUrlsFromText, isUrl, normalizeUrl } from "@/components/text-overlay";
-import { SelectableTextLayer } from "@/components/selectable-text-layer";
+import { SelectableTextLayer, getSelectableLayerText, clearSelectableLayerSelection } from "@/components/selectable-text-layer";
 import { RegionOcrOverlay } from "@/components/rewind/region-ocr-overlay";
 import { useSearchHighlight } from "@/lib/hooks/use-search-highlight";
 import { useSettings } from "@/lib/hooks/use-settings";
@@ -176,7 +176,7 @@ export const CurrentFrameTimeline: FC<CurrentFrameTimelineProps> = ({
 
 	// Clear text selection when frame changes (avoid stale selection from previous frame)
 	useEffect(() => {
-		window.getSelection()?.removeAllRanges();
+		clearSelectableLayerSelection();
 	}, [debouncedFrame?.frameId]);
 
 	// Clear search highlights after fade-out transition completes (600ms)
@@ -623,8 +623,8 @@ export const CurrentFrameTimeline: FC<CurrentFrameTimelineProps> = ({
 			const isCopy = (e.metaKey || e.ctrlKey) && e.key === "c";
 			if (!isCopy) return;
 
-			// If the selectable text layer has an active selection, let the browser handle it
-			const sel = window.getSelection()?.toString()?.trim();
+			// If the selectable text layer has an active selection, let it handle copy
+			const sel = getSelectableLayerText()?.trim();
 			if (sel) return;
 
 			// No selection — copy all frame text (accessibility or OCR)
@@ -749,14 +749,14 @@ export const CurrentFrameTimeline: FC<CurrentFrameTimelineProps> = ({
 				>
 					{/* Copy Selected Text — only when there's an active text selection */}
 					{(() => {
-						const sel = window.getSelection()?.toString()?.trim();
+						const sel = getSelectableLayerText()?.trim();
 						if (!sel) return null;
 						return (
 							<button
 								type="button"
 								className="block group w-full text-left px-3 py-2 -my-px first:mt-0 last:mb-0 border-0 outline-none ring-0 bg-transparent hover:bg-foreground hover:text-background text-foreground flex items-center gap-2 cursor-pointer transition-colors duration-150"
 								onClick={() => {
-									const text = window.getSelection()?.toString()?.trim();
+									const text = getSelectableLayerText()?.trim();
 									if (text) {
 										navigator.clipboard.writeText(text).catch(() => {});
 										toast({ title: "copied selection", description: "selected text copied to clipboard" });
@@ -902,7 +902,7 @@ export const CurrentFrameTimeline: FC<CurrentFrameTimelineProps> = ({
 
 			{/* Search highlights + URL links (pointer-events: none wrapper, links have auto) */}
 			{!isLoading && !hasError && !ocrLoading && naturalDimensions && renderedImageInfo && textPositions.length > 0 && (
-				<div className="absolute overflow-hidden" style={{ zIndex: 6, top: 0, left: 0, right: 0, bottom: 0 }}>
+				<div className="absolute overflow-hidden" style={{ zIndex: 6, top: 0, left: 0, right: 0, bottom: 0, pointerEvents: "none" }}>
 					<div style={{
 						position: "absolute",
 						left: renderedImageInfo.offsetX,

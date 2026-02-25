@@ -47,8 +47,10 @@ async checkArcInstalled() : Promise<boolean> {
     return await TAURI_INVOKE("check_arc_installed");
 },
 /**
- * Check if Automation permission for Arc is already granted (without triggering a prompt).
- * Queries the user TCC database for an AppleEvents entry from our bundle to Arc.
+ * Check if Automation permission for Arc is already granted.
+ * If Arc is running, tests the actual automation via osascript (TCC.db can have
+ * stale entries from previous builds with different code-signing identities).
+ * Falls back to TCC.db query when Arc is not running.
  */
 async checkArcAutomationPermission() : Promise<boolean> {
     return await TAURI_INVOKE("check_arc_automation_permission");
@@ -56,6 +58,7 @@ async checkArcAutomationPermission() : Promise<boolean> {
 /**
  * Request macOS Automation permission for Arc browser by running a harmless AppleScript.
  * This triggers the "screenpipe wants to control Arc" system prompt if not already granted.
+ * Clears stale TCC entries first so macOS will show a fresh prompt.
  * Returns true if the command succeeded (permission granted), false otherwise.
  */
 async requestArcAutomationPermission() : Promise<boolean> {

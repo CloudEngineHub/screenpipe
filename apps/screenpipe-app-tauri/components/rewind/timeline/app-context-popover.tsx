@@ -5,7 +5,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { StreamTimeSeriesResponse } from "@/components/rewind/timeline";
-import { Copy, Search, X, Globe, AppWindow, Mic, Clock, ExternalLink, MousePointerClick } from "lucide-react";
+import { Copy, Search, X, Globe, AppWindow, Mic, Clock, MousePointerClick } from "lucide-react";
+import { extractDomain, FaviconImg } from "./favicon-utils";
 import { format } from "date-fns";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { commands } from "@/lib/utils/tauri";
@@ -287,20 +288,27 @@ export function AppContextPopover({
 							<span>top sites</span>
 						</div>
 						<div className="pl-4 space-y-0.5">
-							{data.topUrls.map((u, i) => (
-								<button
-									key={i}
-									className="flex items-center gap-1 text-blue-400 hover:text-blue-300 truncate w-full text-left transition-colors"
-									title={u.url}
-									onClick={() => {
-										openUrl(u.url).catch(() => {});
-										commands.closeWindow("Main").catch(() => {});
-									}}
-								>
-									<ExternalLink className="w-2.5 h-2.5 flex-shrink-0" />
-									<span className="truncate">{u.url.replace(/^https?:\/\/(www\.)?/, "")}</span>
-								</button>
-							))}
+							{data.topUrls.map((u, i) => {
+								const domain = extractDomain(u.url);
+								return (
+									<button
+										key={i}
+										className="flex items-center gap-1 text-blue-400 hover:text-blue-300 truncate w-full text-left transition-colors"
+										title={u.url}
+										onClick={() => {
+											openUrl(u.url).catch(() => {});
+											commands.closeWindow("Main").catch(() => {});
+										}}
+									>
+										{domain ? (
+											<FaviconImg domain={domain} size={12} className="w-3 h-3 rounded-sm flex-shrink-0" />
+										) : (
+											<Globe className="w-2.5 h-2.5 flex-shrink-0" />
+										)}
+										<span className="truncate">{u.url.replace(/^https?:\/\/(www\.)?/, "")}</span>
+									</button>
+								);
+							})}
 						</div>
 					</div>
 				)}

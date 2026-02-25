@@ -12,6 +12,7 @@ use crate::audio_fixtures::{self, SAMPLE_RATE};
 use crate::ground_truth::{ScenarioManifest, SpeechSegment, synthetic_manifest};
 use crate::metrics::{self, CrossDeviceResult};
 
+use screenpipe_audio::utils::audio::normalize_v2;
 use screenpipe_audio::vad::silero::SileroVad;
 use screenpipe_audio::vad::VadEngine;
 use vad_rs::VadStatus;
@@ -53,7 +54,9 @@ fn segment_passes_vad(
     }
 
     let segment_audio = &audio[start_sample..end_sample];
-    let ratio = compute_speech_ratio(segment_audio, vad);
+    // Apply normalize_v2, matching production prepare_segments.rs:24
+    let normalized = normalize_v2(segment_audio);
+    let ratio = compute_speech_ratio(&normalized, vad);
     ratio > threshold
 }
 

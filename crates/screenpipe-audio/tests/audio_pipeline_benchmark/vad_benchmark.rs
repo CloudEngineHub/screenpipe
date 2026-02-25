@@ -16,6 +16,7 @@ use crate::audio_fixtures::{self, SAMPLE_RATE};
 use crate::ground_truth::ScenarioManifest;
 use crate::metrics::{self, VadSweepResult};
 
+use screenpipe_audio::utils::audio::normalize_v2;
 use screenpipe_audio::vad::silero::SileroVad;
 use screenpipe_audio::vad::VadEngine;
 use vad_rs::VadStatus;
@@ -28,6 +29,9 @@ const FRAME_SIZE: usize = 1600;
 
 /// Chunk duration matching the audio pipeline (30 seconds).
 const CHUNK_DURATION_SECS: f64 = 30.0;
+
+/// Chunk durations to sweep for finding optimal value.
+const CHUNK_DURATIONS: &[f64] = &[5.0, 10.0, 15.0, 20.0, 30.0, 45.0, 60.0];
 
 /// Result of processing a single chunk through VAD.
 #[derive(Debug)]
@@ -65,7 +69,8 @@ fn compute_speech_ratio(audio_chunk: &[f32], vad: &mut SileroVad) -> f32 {
 
 /// Run the VAD threshold sweep on given audio data with ground truth labels.
 ///
-/// Splits audio into 30s chunks, computes speech_ratio for each, then evaluates
+/// Applies normalize_v2 (matching production `prepare_segments.rs:24`), then
+/// splits audio into chunks, computes speech_ratio for each, and evaluates
 /// each threshold by checking which chunks would pass/fail.
 fn run_vad_sweep(
     audio: &[f32],
@@ -73,15 +78,29 @@ fn run_vad_sweep(
     channel: &str,
     vad: &mut SileroVad,
 ) -> Vec<VadSweepResult> {
-    let chunk_samples = (CHUNK_DURATION_SECS * SAMPLE_RATE as f64) as usize;
+    run_vad_sweep_with_chunk_duration(audio, manifest, channel, vad, CHUNK_DURATION_SECS, true)
+}
+
+/// Run VAD sweep with configurable chunk duration and optional verbose output.
+fn run_vad_sweep_with_chunk_duration(
+    audio: &[f32],
+    manifest: &ScenarioManifest,
+    channel: &str,
+    vad: &mut SileroVad,
+    chunk_duration_secs: f64,
+    verbose: bool,
+) -> Vec<VadSweepResult> {
+    let chunk_samples = (chunk_duration_secs * SAMPLE_RATE as f64) as usize;
 
     // Process each chunk through VAD
     let mut chunk_results = Vec::new();
     for (i, chunk) in audio.chunks(chunk_samples).enumerate() {
-        let chunk_start_sec = i as f64 * CHUNK_DURATION_SECS;
-        let speech_ratio = compute_speech_ratio(chunk, vad);
+        let chunk_start_sec = i as f64 * chunk_duration_secs;
+        // Apply normalize_v2 per-chunk, matching production prepare_segments.rs:24
+        let normalized = normalize_v2(chunk);
+        let speech_ratio = compute_speech_ratio(&normalized, vad);
         let (gt_has_speech, gt_ratio) =
-            manifest.chunk_ground_truth(channel, chunk_start_sec, CHUNK_DURATION_SECS);
+            manifest.chunk_ground_truth(channel, chunk_start_sec, chunk_duration_secs);
 
         chunk_results.push(ChunkVadResult {
             _chunk_index: i,
@@ -92,16 +111,18 @@ fn run_vad_sweep(
     }
 
     // Print per-chunk details
-    println!("\n  Per-chunk VAD analysis ({} channel):", channel);
-    println!("  {:>5} {:>12} {:>12} {:>8}", "Chunk", "VAD Ratio", "GT Ratio", "GT Speech");
-    for (i, cr) in chunk_results.iter().enumerate() {
-        println!(
-            "  {:>5} {:>11.4} {:>11.4} {:>8}",
-            i,
-            cr.speech_ratio,
-            cr._ground_truth_speech_ratio,
-            if cr.ground_truth_has_speech { "YES" } else { "no" },
-        );
+    if verbose {
+        println!("\n  Per-chunk VAD analysis ({} channel):", channel);
+        println!("  {:>5} {:>12} {:>12} {:>8}", "Chunk", "VAD Ratio", "GT Ratio", "GT Speech");
+        for (i, cr) in chunk_results.iter().enumerate() {
+            println!(
+                "  {:>5} {:>11.4} {:>11.4} {:>8}",
+                i,
+                cr.speech_ratio,
+                cr._ground_truth_speech_ratio,
+                if cr.ground_truth_has_speech { "YES" } else { "no" },
+            );
+        }
     }
 
     sweep_thresholds(&chunk_results)
@@ -407,6 +428,104 @@ async fn vad_debug_single_wav() {
         }
     }
     println!("  max_prob={:.4} speech_frames={}/{}", max_prob, speech_count, total);
+}
+
+/// Chunk duration sweep — tests 5s, 10s, 15s, 20s, 30s, 45s, 60s chunks
+/// at the current threshold (0.05) and proposed threshold (0.02) to find
+/// the optimal chunk duration.
+///
+/// Shorter chunks → more granular VAD decisions (speech covers a larger
+/// fraction of each chunk, so speech_ratio is higher, making detection easier).
+/// But shorter chunks give Whisper less context for transcription.
+///
+/// Longer chunks → more silence dilutes speech_ratio, making it harder
+/// to pass threshold. But Whisper has more context.
+#[tokio::test]
+#[ignore]
+async fn chunk_duration_sweep_dataset() {
+    let dataset_dir = std::env::var("AUDIO_BENCHMARK_DATASET")
+        .expect("set AUDIO_BENCHMARK_DATASET to the dataset directory");
+    let dataset_path = std::path::Path::new(&dataset_dir);
+
+    println!("\n{}", "=".repeat(70));
+    println!(" CHUNK DURATION SWEEP (with normalize_v2)");
+    println!("{}", "=".repeat(70));
+
+    // Find all scenario directories
+    let mut scenarios: Vec<_> = std::fs::read_dir(dataset_path)
+        .expect("failed to read dataset directory")
+        .filter_map(|e| e.ok())
+        .filter(|e| e.path().is_dir())
+        .collect();
+    scenarios.sort_by_key(|e| e.file_name());
+
+    // For each threshold, sweep chunk durations
+    for &threshold in &[0.02f32, 0.05] {
+        let marker = if (threshold - 0.05).abs() < 0.001 { " (CURRENT)" } else { " (PROPOSED)" };
+        println!("\n  === Threshold: {:.2}{} ===", threshold, marker);
+        println!("  {:>8} {:>8} {:>8} {:>8} {:>10} {:>12}",
+            "Duration", "Recall", "Sil Rej", "F1", "Passed", "Total Chunks");
+        println!("  {}", "─".repeat(62));
+
+        for &chunk_dur in CHUNK_DURATIONS {
+            let mut vad = SileroVad::new().await.expect("failed to init SileroVad");
+
+            // Aggregate across all scenarios and channels
+            let mut total_speech_passed = 0usize;
+            let mut total_speech_chunks = 0usize;
+            let mut total_silence_rejected = 0usize;
+            let mut total_silence_chunks = 0usize;
+            let mut total_passed = 0usize;
+            let mut total_chunks = 0usize;
+
+            for entry in &scenarios {
+                let manifest_path = entry.path().join("manifest.json");
+                if !manifest_path.exists() { continue; }
+                let manifest = ScenarioManifest::load(&manifest_path).unwrap();
+
+                for (channel, track_file) in [("mic", &manifest.tracks.input_mic), ("system", &manifest.tracks.output_system)] {
+                    let wav_path = entry.path().join(track_file);
+                    if !wav_path.exists() { continue; }
+                    let audio = audio_fixtures::load_wav(&wav_path).unwrap();
+
+                    let chunk_samples = (chunk_dur * SAMPLE_RATE as f64) as usize;
+                    for (i, chunk) in audio.chunks(chunk_samples).enumerate() {
+                        let chunk_start = i as f64 * chunk_dur;
+                        let normalized = normalize_v2(chunk);
+                        let speech_ratio = compute_speech_ratio(&normalized, &mut vad);
+                        let (gt_speech, _) = manifest.chunk_ground_truth(channel, chunk_start, chunk_dur);
+
+                        let passes = speech_ratio > threshold;
+                        total_chunks += 1;
+                        if passes { total_passed += 1; }
+
+                        if gt_speech {
+                            total_speech_chunks += 1;
+                            if passes { total_speech_passed += 1; }
+                        } else {
+                            total_silence_chunks += 1;
+                            if !passes { total_silence_rejected += 1; }
+                        }
+                    }
+                }
+            }
+
+            let recall = if total_speech_chunks > 0 {
+                total_speech_passed as f64 / total_speech_chunks as f64
+            } else { 1.0 };
+            let sil_rej = if total_silence_chunks > 0 {
+                total_silence_rejected as f64 / total_silence_chunks as f64
+            } else { 1.0 };
+            let f1 = if recall + sil_rej > 0.0 {
+                2.0 * recall * sil_rej / (recall + sil_rej)
+            } else { 0.0 };
+
+            let dur_marker = if (chunk_dur - 30.0).abs() < 0.1 { " ←" } else { "" };
+            println!("  {:>6.0}s {:>7.1}% {:>7.1}% {:>7.3} {:>5}/{:<5} {:>5}{}",
+                chunk_dur, recall * 100.0, sil_rej * 100.0, f1,
+                total_passed, total_chunks, total_chunks, dur_marker);
+        }
+    }
 }
 
 /// Full dataset benchmark — requires `AUDIO_BENCHMARK_DATASET` env var.

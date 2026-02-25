@@ -10,6 +10,7 @@ interface PermissionLostPayload {
   screen_recording: boolean;
   microphone: boolean;
   accessibility: boolean;
+  arc_automation?: boolean;
 }
 
 /**
@@ -30,28 +31,29 @@ export function usePermissionMonitor() {
     if (skipPaths.some((p) => pathname?.startsWith(p))) return;
 
     const unlisten = listen<PermissionLostPayload>("permission-lost", async (event) => {
-      const { screen_recording, microphone, accessibility } = event.payload;
+      const { screen_recording, microphone, accessibility, arc_automation } = event.payload;
 
       // Don't show multiple times in quick succession
       if (hasShownRef.current) return;
 
-      console.log("Permission lost event received:", { screen_recording, microphone, accessibility });
+      console.log("Permission lost event received:", { screen_recording, microphone, accessibility, arc_automation });
 
-      // Double-check permissions before showing modal to avoid false positives
-      // The backend already requires 3 consecutive failures, but let's verify once more
+      // Double-check core permissions before showing modal to avoid false positives
+      // The backend already requires consecutive failures, but let's verify once more
+      // Note: arc_automation is checked by the backend via osascript, no need to re-verify here
       try {
         const currentPerms = await commands.doPermissionsCheck(false);
         const screenOk = currentPerms.screenRecording === "granted" || currentPerms.screenRecording === "notNeeded";
         const micOk = currentPerms.microphone === "granted" || currentPerms.microphone === "notNeeded";
         const accessibilityOk = currentPerms.accessibility === "granted" || currentPerms.accessibility === "notNeeded";
 
-        // Show modal if ANY permission is lost (screen, mic, OR accessibility)
-        if (screenOk && micOk && accessibilityOk) {
+        // Show modal if ANY permission is lost (screen, mic, accessibility, OR arc automation)
+        if (screenOk && micOk && accessibilityOk && !arc_automation) {
           console.log("Permission check passed on frontend verification, skipping modal");
           return;
         }
 
-        console.log("Permission loss confirmed:", { screenOk, micOk, accessibilityOk });
+        console.log("Permission loss confirmed:", { screenOk, micOk, accessibilityOk, arc_automation });
       } catch (error) {
         console.error("Failed to verify permissions:", error);
         // Continue to show modal if we can't verify
@@ -64,6 +66,7 @@ export function usePermissionMonitor() {
         screen_recording_lost: screen_recording,
         microphone_lost: microphone,
         accessibility_lost: accessibility,
+        arc_automation_lost: arc_automation,
       });
 
       // Show the permission recovery window

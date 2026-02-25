@@ -1,21 +1,17 @@
 use anyhow;
 use vad_rs::VadStatus;
 
-use super::{VadEngine, VadSensitivity};
+use super::VadEngine;
 
 #[derive(Default)]
 pub struct WebRtcVad {
     vad: webrtc_vad::Vad,
-    sensitivity: VadSensitivity,
 }
 
 impl WebRtcVad {
     pub fn new() -> Self {
         let vad = webrtc_vad::Vad::new();
-        Self {
-            vad,
-            sensitivity: VadSensitivity::Medium,
-        }
+        Self { vad }
     }
 }
 impl VadEngine for WebRtcVad {
@@ -23,13 +19,7 @@ impl VadEngine for WebRtcVad {
         // Convert f32 to i16
         let i16_chunk: Vec<i16> = audio_chunk.iter().map(|&x| (x * 32767.0) as i16).collect();
 
-        // Set VAD mode based on sensitivity
-        let mode = match self.sensitivity {
-            VadSensitivity::Low => webrtc_vad::VadMode::Quality,
-            VadSensitivity::Medium => webrtc_vad::VadMode::Aggressive,
-            VadSensitivity::High => webrtc_vad::VadMode::VeryAggressive,
-        };
-        self.vad.set_mode(mode);
+        self.vad.set_mode(webrtc_vad::VadMode::Aggressive);
 
         let result = self
             .vad
@@ -42,13 +32,7 @@ impl VadEngine for WebRtcVad {
         // Convert f32 to i16
         let i16_chunk: Vec<i16> = audio_chunk.iter().map(|&x| (x * 32767.0) as i16).collect();
 
-        // Set VAD mode based on sensitivity
-        let mode = match self.sensitivity {
-            VadSensitivity::Low => webrtc_vad::VadMode::Quality,
-            VadSensitivity::Medium => webrtc_vad::VadMode::Aggressive,
-            VadSensitivity::High => webrtc_vad::VadMode::VeryAggressive,
-        };
-        self.vad.set_mode(mode);
+        self.vad.set_mode(webrtc_vad::VadMode::Aggressive);
 
         let result = self
             .vad
@@ -60,13 +44,5 @@ impl VadEngine for WebRtcVad {
         }
 
         Ok(VadStatus::Speech)
-    }
-
-    fn set_sensitivity(&mut self, sensitivity: VadSensitivity) {
-        self.sensitivity = sensitivity;
-    }
-
-    fn get_min_speech_ratio(&self) -> f32 {
-        self.sensitivity.min_speech_ratio()
     }
 }

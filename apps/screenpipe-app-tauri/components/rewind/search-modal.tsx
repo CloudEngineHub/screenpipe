@@ -770,7 +770,7 @@ export function SearchModal({ isOpen, onClose, onNavigateToTimestamp, embedded =
         return; // Don't capture — let the input handle it
       }
 
-      const cols = 4; // Grid columns
+      const cols = 3; // Grid columns
 
       switch (e.key) {
         case "Escape":
@@ -853,7 +853,7 @@ export function SearchModal({ isOpen, onClose, onNavigateToTimestamp, embedded =
           )}
 
           {speakerTranscriptions.length > 0 && (
-            <div className="grid grid-cols-4 gap-3">
+            <div className="grid grid-cols-3 gap-3">
               {speakerTranscriptions.map((t, index) => {
                 const frameId = transcriptionFrames.get(t.timestamp);
                 return (
@@ -956,7 +956,7 @@ export function SearchModal({ isOpen, onClose, onNavigateToTimestamp, embedded =
 
           {/* Tag timeline entries — thumbnail grid */}
           {isTagSearch && tagResults.length > 0 && (
-            <div className="grid grid-cols-4 gap-3">
+            <div className="grid grid-cols-3 gap-3">
               {tagResults.map((frame) => (
                 <div
                   key={frame.frame_id}
@@ -1034,8 +1034,8 @@ export function SearchModal({ isOpen, onClose, onNavigateToTimestamp, embedded =
 
           {/* Loading skeleton */}
           {!isTagSearch && !isPeopleSearch && (isSearching || isSearchingUiEvents) && searchResults.length === 0 && uiEventResults.length === 0 && speakerResults.length === 0 && (
-            <div className="grid grid-cols-4 gap-3">
-              {Array.from({ length: 8 }).map((_, i) => (
+            <div className="grid grid-cols-3 gap-3">
+              {Array.from({ length: 6 }).map((_, i) => (
                 <div key={i} className="bg-muted animate-pulse rounded overflow-hidden">
                   <div className="aspect-video" />
                   <div className="p-2 space-y-1">
@@ -1114,7 +1114,7 @@ export function SearchModal({ isOpen, onClose, onNavigateToTimestamp, embedded =
                   <button
                     onClick={() => { setAppFilter(null); setSelectedIndex(0); }}
                     className={cn(
-                      "px-2 py-0.5 text-[11px] rounded-full border transition-colors",
+                      "px-2.5 py-1 text-[11px] rounded-full border transition-colors flex items-center gap-1.5",
                       !appFilter
                         ? "bg-foreground text-background border-foreground"
                         : "border-border text-muted-foreground hover:border-foreground/40"
@@ -1127,19 +1127,26 @@ export function SearchModal({ isOpen, onClose, onNavigateToTimestamp, embedded =
                       key={app}
                       onClick={() => { setAppFilter(appFilter === app ? null : app); setSelectedIndex(0); }}
                       className={cn(
-                        "px-2 py-0.5 text-[11px] rounded-full border transition-colors",
+                        "px-2.5 py-1 text-[11px] rounded-full border transition-colors flex items-center gap-1.5",
                         appFilter === app
                           ? "bg-foreground text-background border-foreground"
                           : "border-border text-muted-foreground hover:border-foreground/40"
                       )}
                     >
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={`http://localhost:11435/app-icon?name=${encodeURIComponent(app)}`}
+                        className="w-4 h-4 rounded-sm object-contain"
+                        alt=""
+                        onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                      />
                       {app} ({count})
                     </button>
                   ))}
                 </div>
               )}
 
-              <div className="grid grid-cols-4 gap-3">
+              <div className="grid grid-cols-3 gap-3">
                 {filteredResults.map((result, index) => {
                   const isActive = index === activeIndex;
                   const group = filteredGroups[index];

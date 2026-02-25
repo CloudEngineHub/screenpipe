@@ -15,7 +15,7 @@ use crate::{
     },
     meeting_detector::MeetingDetector,
     transcription::{deepgram::CUSTOM_DEEPGRAM_API_TOKEN, VocabularyEntry},
-    vad::{VadEngineEnum, VadSensitivity},
+    vad::VadEngineEnum,
 };
 
 use crate::audio_manager::AudioManager;
@@ -41,7 +41,6 @@ pub struct AudioManagerOptions {
     pub enable_diarization: bool,
     pub enable_realtime: bool,
     pub audio_chunk_duration: Duration,
-    pub vad_sensitivity: VadSensitivity,
     pub health_check_grace_period: u64,
     pub enabled_devices: HashSet<String>,
     pub use_all_devices: bool,
@@ -79,7 +78,6 @@ impl Default for AudioManagerOptions {
             enable_diarization: true,
             enable_realtime: false,
             audio_chunk_duration: Duration::from_secs(30),
-            vad_sensitivity: VadSensitivity::Medium,
             health_check_grace_period: 15,
             enabled_devices,
             use_all_devices: false,
@@ -139,11 +137,6 @@ impl AudioManagerBuilder {
 
     pub fn audio_chunk_duration(mut self, audio_chunk_duration: Duration) -> Self {
         self.options.audio_chunk_duration = audio_chunk_duration;
-        self
-    }
-
-    pub fn vad_sensitivity(mut self, vad_sensitivity: VadSensitivity) -> Self {
-        self.options.vad_sensitivity = vad_sensitivity;
         self
     }
 

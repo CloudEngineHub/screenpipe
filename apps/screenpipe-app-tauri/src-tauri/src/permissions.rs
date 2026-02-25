@@ -373,8 +373,10 @@ pub fn check_arc_installed() -> bool {
     }
 }
 
-/// Check if Automation permission for Arc is already granted (without triggering a prompt).
-/// Queries the user TCC database for an AppleEvents entry from our bundle to Arc.
+/// Check if Automation permission for Arc is already granted.
+/// If Arc is running, tests the actual automation via osascript (TCC.db can have
+/// stale entries from previous builds with different code-signing identities).
+/// Falls back to TCC.db query when Arc is not running.
 #[tauri::command(async)]
 #[specta::specta]
 pub fn check_arc_automation_permission(app: tauri::AppHandle) -> bool {
@@ -382,36 +384,64 @@ pub fn check_arc_automation_permission(app: tauri::AppHandle) -> bool {
     {
         use std::process::Command;
 
-        let bundle_id = app.config().identifier.as_str().to_string();
-        let arc_bundle = "company.thebrowser.Browser";
-
-        let home = match std::env::var("HOME") {
-            Ok(h) => h,
-            Err(_) => return false,
-        };
-        let tcc_db = format!(
-            "{}/Library/Application Support/com.apple.TCC/TCC.db",
-            home
-        );
-
-        match Command::new("sqlite3")
-            .args([
-                &tcc_db,
-                &format!(
-                    "SELECT auth_value FROM access WHERE service='kTCCServiceAppleEvents' AND client='{}' AND indirect_object_identifier='{}' LIMIT 1;",
-                    bundle_id, arc_bundle
-                ),
-            ])
+        // Check if Arc is actually running — we can only test automation when it is
+        let arc_running = Command::new("pgrep")
+            .args(["-x", "Arc"])
             .output()
-        {
-            Ok(output) => {
-                let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
-                // auth_value 2 = granted
-                stdout == "2"
+            .map(|o| o.status.success())
+            .unwrap_or(false);
+
+        if arc_running {
+            // Arc is running — test actual automation (most reliable, avoids stale TCC entries)
+            match Command::new("osascript")
+                .args(["-e", "tell application \"Arc\" to return \"ok\""])
+                .output()
+            {
+                Ok(output) => {
+                    let success = output.status.success();
+                    if !success {
+                        let stderr = String::from_utf8_lossy(&output.stderr);
+                        info!("arc automation check failed (permission likely not granted): {}", stderr.trim());
+                    }
+                    success
+                }
+                Err(e) => {
+                    warn!("failed to run osascript for arc automation check: {}", e);
+                    false
+                }
             }
-            Err(e) => {
-                warn!("failed to query TCC.db for arc automation: {}", e);
-                false
+        } else {
+            // Arc not running — fall back to TCC.db query
+            let bundle_id = app.config().identifier.as_str().to_string();
+            let arc_bundle = "company.thebrowser.Browser";
+
+            let home = match std::env::var("HOME") {
+                Ok(h) => h,
+                Err(_) => return false,
+            };
+            let tcc_db = format!(
+                "{}/Library/Application Support/com.apple.TCC/TCC.db",
+                home
+            );
+
+            match Command::new("sqlite3")
+                .args([
+                    &tcc_db,
+                    &format!(
+                        "SELECT auth_value FROM access WHERE service='kTCCServiceAppleEvents' AND client='{}' AND indirect_object_identifier='{}' LIMIT 1;",
+                        bundle_id, arc_bundle
+                    ),
+                ])
+                .output()
+            {
+                Ok(output) => {
+                    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                    stdout == "2"
+                }
+                Err(e) => {
+                    warn!("failed to query TCC.db for arc automation: {}", e);
+                    false
+                }
             }
         }
     }
@@ -425,13 +455,23 @@ pub fn check_arc_automation_permission(app: tauri::AppHandle) -> bool {
 
 /// Request macOS Automation permission for Arc browser by running a harmless AppleScript.
 /// This triggers the "screenpipe wants to control Arc" system prompt if not already granted.
+/// Clears stale TCC entries first so macOS will show a fresh prompt.
 /// Returns true if the command succeeded (permission granted), false otherwise.
 #[tauri::command(async)]
 #[specta::specta]
-pub async fn request_arc_automation_permission() -> bool {
+pub async fn request_arc_automation_permission(app: tauri::AppHandle) -> bool {
     #[cfg(target_os = "macos")]
     {
         use std::process::Command;
+
+        // Clear stale TCC entries first — after rebuilds with different code-signing
+        // identities, macOS may have a stale entry that silently denies without
+        // prompting the user again. tccutil reset clears these.
+        let bundle_id = app.config().identifier.as_str();
+        info!("resetting stale AppleEvents TCC entries for {}", bundle_id);
+        let _ = Command::new("tccutil")
+            .args(["reset", "AppleEvents", bundle_id])
+            .output();
 
         info!("requesting arc automation permission via osascript");
         match Command::new("osascript")
@@ -457,6 +497,7 @@ pub async fn request_arc_automation_permission() -> bool {
 
     #[cfg(not(target_os = "macos"))]
     {
+        let _ = app;
         false
     }
 }
@@ -485,19 +526,24 @@ pub async fn start_permission_monitor(app: tauri::AppHandle) {
     // Extra delay after onboarding to let permissions settle
     tokio::time::sleep(Duration::from_secs(5)).await;
 
+    // Check if Arc is installed once at startup
+    let arc_installed = std::path::Path::new("/Applications/Arc.app").exists();
+
     let mut check_interval = interval(Duration::from_secs(10));
     let mut last_screen_ok = true;
     let mut last_mic_ok = true;
     let mut last_accessibility_ok = true;
+    let mut last_arc_ok = true;
 
     // Track consecutive failures to avoid false positives from transient TCC issues
     // macOS preflight() can return false transiently even when permission is granted
     let mut screen_fail_count = 0u32;
     let mut mic_fail_count = 0u32;
     let mut accessibility_fail_count = 0u32;
+    let mut arc_fail_count = 0u32;
     const REQUIRED_CONSECUTIVE_FAILURES: u32 = 2; // Require 2 consecutive failures (~20 seconds)
 
-    info!("permission monitor started");
+    info!("permission monitor started (arc_installed: {})", arc_installed);
 
     loop {
         check_interval.tick().await;
@@ -506,6 +552,13 @@ pub async fn start_permission_monitor(app: tauri::AppHandle) {
         let screen_ok = perms.screen_recording.permitted();
         let mic_ok = perms.microphone.permitted();
         let accessibility_ok = perms.accessibility.permitted();
+
+        // Check Arc automation permission if Arc is installed
+        let arc_ok = if arc_installed {
+            check_arc_automation_permission(app.clone())
+        } else {
+            true
+        };
 
         // Update consecutive failure counts
         if screen_ok {
@@ -526,22 +579,30 @@ pub async fn start_permission_monitor(app: tauri::AppHandle) {
             accessibility_fail_count += 1;
         }
 
+        if arc_ok {
+            arc_fail_count = 0;
+        } else if last_arc_ok || arc_fail_count > 0 {
+            arc_fail_count += 1;
+        }
+
         // Only trigger when we have REQUIRED_CONSECUTIVE_FAILURES in a row
         // This prevents false positives from transient TCC database issues
         let screen_confirmed_lost = screen_fail_count == REQUIRED_CONSECUTIVE_FAILURES;
         let mic_confirmed_lost = mic_fail_count == REQUIRED_CONSECUTIVE_FAILURES;
         let accessibility_confirmed_lost = accessibility_fail_count == REQUIRED_CONSECUTIVE_FAILURES;
+        let arc_confirmed_lost = arc_fail_count == REQUIRED_CONSECUTIVE_FAILURES;
 
-        if screen_confirmed_lost || mic_confirmed_lost || accessibility_confirmed_lost {
+        if screen_confirmed_lost || mic_confirmed_lost || accessibility_confirmed_lost || arc_confirmed_lost {
             // Double-check: only emit if at least one permission is actually lost right now
             // This prevents phantom events from transient TCC flickers
-            if !screen_ok || !mic_ok || !accessibility_ok {
+            if !screen_ok || !mic_ok || !accessibility_ok || !arc_ok {
                 warn!(
-                    "permission confirmed lost after {} consecutive failures - screen: {} (fails: {}), mic: {} (fails: {}), accessibility: {} (fails: {})",
+                    "permission confirmed lost after {} consecutive failures - screen: {} (fails: {}), mic: {} (fails: {}), accessibility: {} (fails: {}), arc: {} (fails: {})",
                     REQUIRED_CONSECUTIVE_FAILURES,
                     screen_ok, screen_fail_count,
                     mic_ok, mic_fail_count,
-                    accessibility_ok, accessibility_fail_count
+                    accessibility_ok, accessibility_fail_count,
+                    arc_ok, arc_fail_count
                 );
 
                 // Emit event to frontend
@@ -549,6 +610,7 @@ pub async fn start_permission_monitor(app: tauri::AppHandle) {
                     "screen_recording": !screen_ok,
                     "microphone": !mic_ok,
                     "accessibility": !accessibility_ok,
+                    "arc_automation": !arc_ok,
                 })) {
                     error!("failed to emit permission-lost event: {}", e);
                 }
@@ -558,6 +620,7 @@ pub async fn start_permission_monitor(app: tauri::AppHandle) {
         last_screen_ok = screen_ok;
         last_mic_ok = mic_ok;
         last_accessibility_ok = accessibility_ok;
+        last_arc_ok = arc_ok;
     }
 }
 

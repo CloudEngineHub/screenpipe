@@ -17,6 +17,7 @@ use screenpipe_audio::core::engine::AudioTranscriptionEngine;
 use screenpipe_audio::transcription::whisper::model::{
     create_whisper_context_parameters, download_whisper_model,
 };
+use screenpipe_audio::utils::audio::normalize_v2;
 use screenpipe_audio::vad::silero::SileroVad;
 use screenpipe_audio::vad::VadEngine;
 use screenpipe_core::Language;
@@ -55,11 +56,14 @@ fn simulate_pipeline(
 
     // Process each chunk
     for (chunk_idx, chunk) in audio.chunks(chunk_samples).enumerate() {
+        // Apply normalize_v2 per-chunk (matching production prepare_segments.rs:24)
+        let normalized = normalize_v2(chunk);
+
         // Compute speech ratio (replicating prepare_segments.rs)
         let mut total_frames = 0u32;
         let mut speech_frames = 0u32;
 
-        for frame in chunk.chunks(FRAME_SIZE) {
+        for frame in normalized.chunks(FRAME_SIZE) {
             total_frames += 1;
             if let Ok(VadStatus::Speech) = vad.audio_type(frame) {
                 speech_frames += 1;
@@ -230,8 +234,8 @@ async fn pipeline_with_whisper_dataset() {
 
     let mut total_gt_words = 0usize;
     let mut total_recalled_words = 0usize;
-    let mut total_segments = 0usize;
-    let mut total_transcribed = 0usize;
+    let mut total_chunks = 0usize;
+    let mut total_with_speech = 0usize;
 
     for entry in &scenarios {
         let manifest_path = entry.path().join("manifest.json");
@@ -249,41 +253,40 @@ async fn pipeline_with_whisper_dataset() {
             }
 
             let audio = audio_fixtures::load_wav(&wav_path).unwrap();
-
-            // Get speech segments for this channel
-            let speech_segments: Vec<&SpeechSegment> = manifest
-                .ground_truth
-                .iter()
-                .filter(|s| s.is_speech && (s.channel == channel || s.channel == "both"))
-                .collect();
-
-            if speech_segments.is_empty() {
-                continue;
-            }
+            let chunk_samples = (CHUNK_DURATION_SECS * SAMPLE_RATE as f64) as usize;
 
             let mut channel_recall_sum = 0.0f64;
             let mut channel_recall_count = 0usize;
 
-            // Transcribe each speech segment directly (bypassing VAD)
-            for seg in &speech_segments {
-                total_segments += 1;
-                let start_sample = (seg.start_secs * SAMPLE_RATE as f64) as usize;
-                let end_sample = ((seg.end_secs * SAMPLE_RATE as f64) as usize).min(audio.len());
+            // Process in 30-second chunks (matching production pipeline)
+            for (chunk_idx, chunk) in audio.chunks(chunk_samples).enumerate() {
+                let chunk_start = chunk_idx as f64 * CHUNK_DURATION_SECS;
+                let chunk_end = chunk_start + CHUNK_DURATION_SECS;
+                total_chunks += 1;
 
-                if start_sample >= end_sample || end_sample > audio.len() {
-                    continue;
+                // Get ground truth text for this chunk
+                let gt_texts: Vec<&str> = manifest
+                    .ground_truth
+                    .iter()
+                    .filter(|s| {
+                        s.is_speech
+                            && (s.channel == channel || s.channel == "both")
+                            && s.start_secs < chunk_end
+                            && s.end_secs > chunk_start
+                    })
+                    .filter_map(|s| s.text.as_deref())
+                    .collect();
+
+                if gt_texts.is_empty() {
+                    continue; // No speech in this chunk
                 }
 
-                let segment_audio = &audio[start_sample..end_sample];
-                let duration = (end_sample - start_sample) as f64 / SAMPLE_RATE as f64;
+                total_with_speech += 1;
+                let gt_combined = gt_texts.join(" ");
 
-                // Skip very short segments (< 0.5s)
-                if duration < 0.5 {
-                    continue;
-                }
-
+                // Transcribe the full 30-second chunk
                 match screenpipe_audio::stt(
-                    segment_audio,
+                    chunk,
                     SAMPLE_RATE,
                     "benchmark",
                     engine.clone(),
@@ -295,28 +298,27 @@ async fn pipeline_with_whisper_dataset() {
                 .await
                 {
                     Ok(text) => {
-                        total_transcribed += 1;
-                        if let Some(gt_text) = &seg.text {
-                            if !gt_text.is_empty() && !text.is_empty() {
-                                let wr = word_recall(gt_text, &text);
-                                channel_recall_sum += wr;
-                                channel_recall_count += 1;
+                        if !text.is_empty() {
+                            let wr = word_recall(&gt_combined, &text);
+                            channel_recall_sum += wr;
+                            channel_recall_count += 1;
 
-                                let gt_word_count = gt_text.split_whitespace().count();
-                                let recalled = (wr * gt_word_count as f64).round() as usize;
-                                total_gt_words += gt_word_count;
-                                total_recalled_words += recalled;
+                            let gt_word_count = gt_combined.split_whitespace().count();
+                            let recalled = (wr * gt_word_count as f64).round() as usize;
+                            total_gt_words += gt_word_count;
+                            total_recalled_words += recalled;
 
-                                if wr < 0.5 {
-                                    println!("    LOW recall {:.0}% ({:.1}s):", wr * 100.0, duration);
-                                    println!("      GT:    \"{}\"", &gt_text[..gt_text.len().min(80)]);
-                                    println!("      Trans: \"{}\"", &text[..text.len().min(80)]);
-                                }
+                            if wr < 0.5 {
+                                println!("    Chunk {}: recall {:.0}%", chunk_idx, wr * 100.0);
+                                println!("      GT:    \"{}\"", &gt_combined[..gt_combined.len().min(80)]);
+                                println!("      Trans: \"{}\"", &text[..text.len().min(80)]);
+                            } else {
+                                println!("    Chunk {}: recall {:.0}% OK", chunk_idx, wr * 100.0);
                             }
                         }
                     }
                     Err(e) => {
-                        eprintln!("    Whisper error: {}", e);
+                        eprintln!("    Whisper error on chunk {}: {}", chunk_idx, e);
                     }
                 }
             }
@@ -324,8 +326,8 @@ async fn pipeline_with_whisper_dataset() {
             if channel_recall_count > 0 {
                 let avg_wr = channel_recall_sum / channel_recall_count as f64;
                 println!(
-                    "    {} {}: {}/{} segments transcribed, avg word recall {:.1}%",
-                    manifest.scenario_id, channel, channel_recall_count, speech_segments.len(), avg_wr * 100.0,
+                    "    {} {}: avg word recall {:.1}% ({} chunks with speech)",
+                    manifest.scenario_id, channel, avg_wr * 100.0, channel_recall_count,
                 );
             }
         }
@@ -341,11 +343,11 @@ async fn pipeline_with_whisper_dataset() {
     println!("\n{}", "=".repeat(70));
     println!(" WHISPER TRANSCRIPTION QUALITY SUMMARY");
     println!("{}", "=".repeat(70));
-    println!("  Segments:     {}/{} transcribed", total_transcribed, total_segments);
+    println!("  Chunks:       {}/{} had speech", total_with_speech, total_chunks);
     println!("  Word recall:  {:.1}% ({}/{})", overall_recall * 100.0, total_recalled_words, total_gt_words);
     println!("  Model:        WhisperLargeV3TurboQuantized (ggml-large-v3-turbo-q8_0.bin)");
     println!("\n  NOTE: VAD bypassed. Silero VAD v5 does not detect ElevenLabs TTS as speech.");
-    println!("  This test measures Whisper quality independently from VAD thresholding.");
+    println!("  Audio fed as 30s chunks (matching production) to avoid Whisper hallucination.");
     println!("{}", "=".repeat(70));
 }
 

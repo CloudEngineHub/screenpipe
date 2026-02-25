@@ -13,14 +13,13 @@ use vad_rs::{Vad, VadStatus};
 use crate::vad::FRAME_HISTORY;
 
 use super::{
-    VadEngine, VadSensitivity, DOWNLOADING, MODEL_PATH, SILENCE_THRESHOLD, SPEECH_FRAME_THRESHOLD,
+    VadEngine, DOWNLOADING, MODEL_PATH, SILENCE_THRESHOLD, SPEECH_FRAME_THRESHOLD,
     SPEECH_THRESHOLD,
 };
 
 pub struct SileroVad {
     vad: Vad,
     prob_history: VecDeque<f32>,
-    sensitivity: VadSensitivity,
 }
 
 impl SileroVad {
@@ -42,7 +41,6 @@ impl SileroVad {
         Ok(Self {
             vad,
             prob_history: VecDeque::with_capacity(FRAME_HISTORY),
-            sensitivity: VadSensitivity::Medium,
         })
     }
 
@@ -172,13 +170,6 @@ impl SileroVad {
         }
     }
 
-    fn get_threshold(&self) -> f32 {
-        match self.sensitivity {
-            VadSensitivity::Low => 0.7,
-            VadSensitivity::Medium => 0.5,
-            VadSensitivity::High => 0.3,
-        }
-    }
 }
 
 impl VadEngine for SileroVad {
@@ -186,7 +177,7 @@ impl VadEngine for SileroVad {
         // Silero VAD v5 requires fixed 512 samples for 16kHz (~32ms)
         const CHUNK_SIZE: usize = 512;
 
-        let threshold = self.get_threshold();
+        let threshold = SPEECH_THRESHOLD;
 
         let mut chunk_data: Vec<f32> = audio_chunk.to_vec();
         chunk_data.resize(CHUNK_SIZE, 0.0);
@@ -205,7 +196,7 @@ impl VadEngine for SileroVad {
         // Silero VAD v5 requires fixed 512 samples for 16kHz (~32ms)
         const CHUNK_SIZE: usize = 512;
 
-        let threshold = self.get_threshold();
+        let threshold = SPEECH_THRESHOLD;
 
         let mut chunk_data: Vec<f32> = audio_chunk.to_vec();
         chunk_data.resize(CHUNK_SIZE, 0.0);
@@ -228,11 +219,4 @@ impl VadEngine for SileroVad {
         }
     }
 
-    fn set_sensitivity(&mut self, sensitivity: VadSensitivity) {
-        self.sensitivity = sensitivity;
-    }
-
-    fn get_min_speech_ratio(&self) -> f32 {
-        self.sensitivity.min_speech_ratio()
-    }
 }

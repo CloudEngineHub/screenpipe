@@ -31,13 +31,31 @@ interface LineGroup {
 // into separate column groups. Prevents cross-panel selection in tiled terminals.
 const COLUMN_GAP_FRACTION = 0.04;
 
+// --- Module-level exports for external access ---
+
+/**
+ * Get the currently selected text from the selectable text layer.
+ * Thin wrapper around window.getSelection() for use by external code.
+ */
+export function getSelectableLayerText(): string {
+  return window.getSelection()?.toString() ?? "";
+}
+
+/**
+ * Clear the current selection in the selectable text layer.
+ * Thin wrapper around window.getSelection() for use by external code.
+ */
+export function clearSelectableLayerSelection(): void {
+  window.getSelection()?.removeAllRanges();
+}
+
 /**
  * Renders OCR text as invisible but selectable DOM text nodes positioned
- * exactly over their bounding boxes on the screenshot. The browser's native
+ * over their bounding boxes on the screenshot. The browser's native
  * selection engine handles click-drag, multi-block selection, and Cmd+C.
  *
- * Uses inline styles (not CSS classes) to force WebKit to allow text selection
- * even when ancestor elements have user-select: none.
+ * Each line is an absolutely positioned div with inline spans inside,
+ * so WebKit renders selection highlights cleanly within lines.
  */
 export const SelectableTextLayer = React.memo(function SelectableTextLayer({
   textPositions,
@@ -139,32 +157,28 @@ export const SelectableTextLayer = React.memo(function SelectableTextLayer({
   }, []);
 
   // Force WebKit to allow selection by setting properties via DOM API
-  // This is more reliable than CSS classes when fighting global user-select:none
   const containerRefCallback = useCallback(
     (node: HTMLDivElement | null) => {
       (containerRef as React.MutableRefObject<HTMLDivElement | null>).current =
         node;
       if (!node) return;
-      // Force on the container
       node.style.setProperty("-webkit-user-select", "text", "important");
       node.style.setProperty("user-select", "text", "important");
       node.style.setProperty("cursor", "text", "important");
-      // Force on all children
-      const spans = node.querySelectorAll("span");
-      spans.forEach((span) => {
-        (span as HTMLElement).style.setProperty(
+      const els = node.querySelectorAll("span, div");
+      els.forEach((el) => {
+        (el as HTMLElement).style.setProperty(
           "-webkit-user-select",
           "text",
           "important"
         );
-        (span as HTMLElement).style.setProperty(
+        (el as HTMLElement).style.setProperty(
           "user-select",
           "text",
           "important"
         );
       });
     },
-    // Re-run when lineGroups change (new spans rendered)
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [lineGroups]
   );
@@ -188,72 +202,81 @@ export const SelectableTextLayer = React.memo(function SelectableTextLayer({
         cursor: "text",
       }}
     >
-      {lineGroups.map((line, lineIdx) => (
-        <React.Fragment key={lineIdx}>
-          {line.blocks.map((block, blockIdx) => (
-            <React.Fragment key={`${lineIdx}-${blockIdx}`}>
-              <span
-                style={{
-                  position: "absolute",
-                  left: block.left,
-                  top: block.top,
-                  width: block.width,
-                  height: block.height,
-                  fontSize: block.height * 0.85,
-                  fontFamily: "monospace",
-                  color: "transparent",
-                  lineHeight: 1,
-                  whiteSpace: "pre",
-                  overflow: "hidden",
-                  display: "inline-block",
-                  WebkitUserSelect: "text",
-                  userSelect: "text" as any,
-                  cursor: "text",
-                }}
-              >
-                {block.text}
-              </span>
-              {blockIdx < line.blocks.length - 1 && (
+      {lineGroups.map((line, lineIdx) => {
+        const firstBlock = line.blocks[0];
+        const lastBlock = line.blocks[line.blocks.length - 1];
+        const lineLeft = firstBlock.left;
+        const lineWidth =
+          lastBlock.left + lastBlock.width - firstBlock.left;
+        const lineHeight = Math.max(...line.blocks.map((b) => b.height));
+
+        return (
+          <div
+            key={lineIdx}
+            style={{
+              position: "absolute",
+              left: lineLeft,
+              top: line.avgTop,
+              width: lineWidth,
+              height: lineHeight,
+              whiteSpace: "pre",
+              lineHeight: 1,
+              fontSize: lineHeight * 0.85,
+              fontFamily: "monospace",
+              color: "transparent",
+              WebkitUserSelect: "text",
+              userSelect: "text" as any,
+              cursor: "text",
+            }}
+          >
+            {line.blocks.map((block, blockIdx) => (
+              <React.Fragment key={blockIdx}>
+                {/* Pad gap from previous block or line start */}
+                {(() => {
+                  const gapStart =
+                    blockIdx === 0
+                      ? lineLeft
+                      : line.blocks[blockIdx - 1].left +
+                        line.blocks[blockIdx - 1].width;
+                  const gap = block.left - gapStart;
+                  if (gap > 2) {
+                    return (
+                      <span
+                        style={{
+                          display: "inline-block",
+                          width: gap,
+                          height: lineHeight,
+                          overflow: "hidden",
+                          color: "transparent",
+                          fontSize: 1,
+                        }}
+                      >
+                        {" "}
+                      </span>
+                    );
+                  }
+                  return blockIdx > 0 ? " " : null;
+                })()}
                 <span
                   style={{
-                    position: "absolute",
-                    left: block.left + block.width,
-                    top: block.top,
-                    width: 1,
-                    height: block.height,
-                    fontSize: 1,
-                    color: "transparent",
+                    display: "inline-block",
+                    width: block.width,
+                    height: lineHeight,
                     overflow: "hidden",
-                    lineHeight: 1,
+                    color: "transparent",
                     WebkitUserSelect: "text",
                     userSelect: "text" as any,
+                    cursor: "text",
                   }}
                 >
-                  {" "}
+                  {block.text}
                 </span>
-              )}
-            </React.Fragment>
-          ))}
-          {lineIdx < lineGroups.length - 1 && (
-            <span
-              style={{
-                position: "absolute",
-                left: 0,
-                top: line.avgTop + (line.blocks[0]?.height ?? 0),
-                width: 1,
-                height: 1,
-                fontSize: 1,
-                color: "transparent",
-                overflow: "hidden",
-                WebkitUserSelect: "text",
-                userSelect: "text" as any,
-              }}
-            >
-              {"\n"}
-            </span>
-          )}
-        </React.Fragment>
-      ))}
+              </React.Fragment>
+            ))}
+            {lineIdx < lineGroups.length - 1 ? "\n" : ""}
+          </div>
+        );
+      })}
     </div>
   );
 });

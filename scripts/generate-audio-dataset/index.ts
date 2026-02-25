@@ -54,19 +54,17 @@ async function synthesizeSpeech(
   voiceId: string,
   apiKey: string
 ): Promise<Buffer> {
-  const url = `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`;
+  const url = `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}?output_format=pcm_16000`;
 
   const response = await fetch(url, {
     method: "POST",
     headers: {
       "xi-api-key": apiKey,
       "Content-Type": "application/json",
-      Accept: "audio/wav",
     },
     body: JSON.stringify({
       text,
       model_id: "eleven_turbo_v2_5",
-      output_format: "pcm_16000",
       voice_settings: {
         stability: 0.75,
         similarity_boost: 0.75,

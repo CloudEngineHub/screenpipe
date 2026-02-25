@@ -16,6 +16,7 @@ import { emit } from "@tauri-apps/api/event";
 import { PipeAIIcon } from "@/components/pipe-ai-icon";
 import { AppContextPopover } from "./app-context-popover";
 import { TimelineTagToolbar } from "./timeline-tag-toolbar";
+import { extractDomain, FaviconImg } from "./favicon-utils";
 
 interface UiEventSummary {
 	event_type: string;
@@ -76,6 +77,8 @@ interface AppGroup {
 	color: string;
 	colors: string[]; // Colors for all apps
 	iconSrc?: string;
+	/** Top website domains visited in this group (browser groups only) */
+	topDomains?: string[];
 	/** If set, this group starts a new day — render a day boundary divider before it */
 	dayBoundaryDate?: string;
 }
@@ -417,12 +420,36 @@ export const TimelineSlider = ({
 		const flushGroup = () => {
 			if (currentGroup.length > 0) {
 				const allApps = [...currentGroupAllApps];
+				// Compute top domains for browser groups
+				let topDomains: string[] | undefined;
+				const isBrowser = getAppCategory(currentApp) === 'browser';
+				if (isBrowser) {
+					const domainCounts = new Map<string, number>();
+					for (const f of currentGroup) {
+						for (const d of f.devices) {
+							const url = d.metadata?.browser_url;
+							if (url) {
+								const domain = extractDomain(url);
+								if (domain) {
+									domainCounts.set(domain, (domainCounts.get(domain) || 0) + 1);
+								}
+							}
+						}
+					}
+					if (domainCounts.size > 0) {
+						topDomains = [...domainCounts.entries()]
+							.sort((a, b) => b[1] - a[1])
+							.slice(0, 2)
+							.map(([domain]) => domain);
+					}
+				}
 				groups.push({
 					appName: currentApp,
 					appNames: allApps,
 					frames: currentGroup,
 					color: stringToColor(currentApp),
 					colors: allApps.map(app => stringToColor(app)),
+					topDomains,
 				});
 			}
 		};
@@ -799,11 +826,11 @@ export const TimelineSlider = ({
 									// borderLeft removed — caused visible white lines between groups
 								}}
 							>
-								{/* Vertical stacked app icons - click for context popover */}
+								{/* Vertical stacked icons - favicons for browser groups, app icons otherwise */}
 								{groupWidth > 30 && (
 									<motion.div
 										className="absolute top-1 left-1/2 -translate-x-1/2 z-10 flex flex-col cursor-pointer p-1.5"
-										style={{ 
+										style={{
 											direction: 'ltr',
 											pointerEvents: 'auto',
 											isolation: 'isolate'
@@ -819,47 +846,84 @@ export const TimelineSlider = ({
 											);
 										}}
 									>
-										{group.appNames.slice(0, 2).map((appName, idx) => (
-											<motion.div
-												key={`${appName}-${idx}`}
-												className="w-8 h-8 rounded flex-shrink-0 overflow-hidden flex items-center justify-center"
-												style={{
-													zIndex: 10 - idx,
-													position: 'relative',
-													backgroundColor: appNameToColor(appName, 0.3),
-												}}
-												variants={{
-													collapsed: {
-														marginTop: idx === 0 ? 0 : -10,
-														scale: 1
-													},
-													expanded: {
-														marginTop: idx === 0 ? 0 : 4,
-														scale: 1.1
-													}
-												}}
-												transition={{ type: "spring", stiffness: 400, damping: 25 }}
-											>
-												{/* eslint-disable-next-line @next/next/no-img-element */}
-												<img
-													src={`http://localhost:11435/app-icon?name=${encodeURIComponent(appName)}`}
-													className="w-full h-full rounded-sm object-contain scale-110"
-													alt={appName}
-													loading="lazy"
-													decoding="async"
-													onError={(e) => {
-														// Hide broken img, let fallback letter show
-														(e.target as HTMLImageElement).style.display = 'none';
+										{group.topDomains && group.topDomains.length > 0 ? (
+											// Browser group: show website favicons
+											group.topDomains.slice(0, groupWidth > 60 ? 2 : 1).map((domain, idx) => {
+												const iconSize = groupWidth > 60 ? 32 : 20;
+												const wh = groupWidth > 60 ? 'w-8 h-8' : 'w-5 h-5';
+												return (
+													<motion.div
+														key={`fav-${domain}-${idx}`}
+														className={`${wh} rounded flex-shrink-0 overflow-hidden flex items-center justify-center bg-background/60`}
+														style={{
+															zIndex: 10 - idx,
+															position: 'relative',
+														}}
+														variants={{
+															collapsed: {
+																marginTop: idx === 0 ? 0 : -10,
+																scale: 1
+															},
+															expanded: {
+																marginTop: idx === 0 ? 0 : 4,
+																scale: 1.1
+															}
+														}}
+														transition={{ type: "spring", stiffness: 400, damping: 25 }}
+													>
+														<FaviconImg
+															domain={domain}
+															fallbackAppName={group.appName}
+															size={iconSize}
+															className="rounded-sm object-contain"
+														/>
+													</motion.div>
+												);
+											})
+										) : (
+											// Non-browser group (or no URLs): show app icons
+											group.appNames.slice(0, 2).map((appName, idx) => (
+												<motion.div
+													key={`${appName}-${idx}`}
+													className="w-8 h-8 rounded flex-shrink-0 overflow-hidden flex items-center justify-center"
+													style={{
+														zIndex: 10 - idx,
+														position: 'relative',
+														backgroundColor: appNameToColor(appName, 0.3),
 													}}
-												/>
-												<span
-													className="absolute inset-0 flex items-center justify-center text-[10px] font-bold text-white/90 pointer-events-none"
-													style={{ zIndex: -1 }}
+													variants={{
+														collapsed: {
+															marginTop: idx === 0 ? 0 : -10,
+															scale: 1
+														},
+														expanded: {
+															marginTop: idx === 0 ? 0 : 4,
+															scale: 1.1
+														}
+													}}
+													transition={{ type: "spring", stiffness: 400, damping: 25 }}
 												>
-													{appName.charAt(0).toUpperCase()}
-												</span>
-											</motion.div>
-										))}
+													{/* eslint-disable-next-line @next/next/no-img-element */}
+													<img
+														src={`http://localhost:11435/app-icon?name=${encodeURIComponent(appName)}`}
+														className="w-full h-full rounded-sm object-contain scale-110"
+														alt={appName}
+														loading="lazy"
+														decoding="async"
+														onError={(e) => {
+															// Hide broken img, let fallback letter show
+															(e.target as HTMLImageElement).style.display = 'none';
+														}}
+													/>
+													<span
+														className="absolute inset-0 flex items-center justify-center text-[10px] font-bold text-white/90 pointer-events-none"
+														style={{ zIndex: -1 }}
+													>
+														{appName.charAt(0).toUpperCase()}
+													</span>
+												</motion.div>
+											))
+										)}
 									</motion.div>
 								)}
 
@@ -1007,14 +1071,27 @@ export const TimelineSlider = ({
 													}}
 												>
 													<div className="flex items-center gap-2 mb-1">
-														{/* eslint-disable-next-line @next/next/no-img-element */}
-														<img
-															src={`http://localhost:11435/app-icon?name=${encodeURIComponent(group.appName)}`}
-															className="w-4 h-4 rounded"
-															alt=""
-														/>
+														{(() => {
+															const browserUrl = frame.devices?.find(d => d.metadata?.browser_url)?.metadata?.browser_url;
+															const domain = browserUrl ? extractDomain(browserUrl) : null;
+															if (domain) {
+																return <FaviconImg domain={domain} fallbackAppName={group.appName} size={16} className="w-4 h-4 rounded" />;
+															}
+															return (
+																// eslint-disable-next-line @next/next/no-img-element
+																<img
+																	src={`http://localhost:11435/app-icon?name=${encodeURIComponent(group.appName)}`}
+																	className="w-4 h-4 rounded"
+																	alt=""
+																/>
+															);
+														})()}
 														<p className="font-medium text-popover-foreground">
-															{getFrameAppName(frame)}
+															{(() => {
+																const browserUrl = frame.devices?.find(d => d.metadata?.browser_url)?.metadata?.browser_url;
+																const domain = browserUrl ? extractDomain(browserUrl) : null;
+																return domain || getFrameAppName(frame);
+															})()}
 														</p>
 													</div>
 													<p className="text-muted-foreground">

@@ -1525,33 +1525,56 @@ async fn main() {
                 space_monitor::setup_space_listener(app.handle().clone());
 
                 // Forward native trackpad magnify (pinch) gestures to JS as Tauri events.
-                // WKWebView swallows magnifyWithEvent: and doesn't fire JS gesture events,
-                // so we use an NSEvent local monitor to catch them and emit to the frontend.
+                // WKWebView swallows magnifyWithEvent: and doesn't fire JS gesture events.
+                // We use BOTH local + global NSEvent monitors:
+                // - Local catches magnify when our panel is key window
+                // - Global catches magnify when panel lost key status (e.g. after gesture ends)
+                // The global monitor requires Accessibility permission (already granted).
                 {
                     use objc::{class, msg_send, sel, sel_impl, runtime::Object};
                     use tauri_nspanel::block::ConcreteBlock;
 
-                    let app_for_magnify = app.handle().clone();
-
                     // NSEventMaskMagnify = 1 << 30
                     let mask: u64 = 1 << 30;
 
-                    let block = ConcreteBlock::new(move |event: *mut Object| -> *mut Object {
+                    // Local monitor — catches events when our app is active.
+                    // Returns nil to CONSUME the event, preventing WKWebView's
+                    // built-in magnification from handling it (which would steal
+                    // subsequent gesture events after the first pinch).
+                    let app_local = app.handle().clone();
+                    let local_block = ConcreteBlock::new(move |event: *mut Object| -> *mut Object {
                         let magnification: f64 = unsafe { msg_send![event, magnification] };
-                        let _ = app_for_magnify.emit("native-magnify", magnification);
-                        event
+                        let _ = app_local.emit("native-magnify", magnification);
+                        std::ptr::null_mut() // consume event — don't let WKWebView handle it
                     });
-                    let block = block.copy();
-
+                    let local_block = local_block.copy();
                     unsafe {
-                        let _monitor: *mut Object = msg_send![
+                        let _: *mut Object = msg_send![
                             class!(NSEvent),
                             addLocalMonitorForEventsMatchingMask: mask
-                            handler: &*block
+                            handler: &*local_block
                         ];
                     }
-                    // Intentionally leak block + monitor — lives for app lifetime
-                    std::mem::forget(block);
+                    std::mem::forget(local_block);
+
+                    // Global monitor — catches events when another app is active
+                    // but our overlay panel is visible (nonactivating panel scenario)
+                    let app_global = app.handle().clone();
+                    let global_block = ConcreteBlock::new(move |event: *mut Object| {
+                        let magnification: f64 = unsafe { msg_send![event, magnification] };
+                        let _ = app_global.emit("native-magnify", magnification);
+                    });
+                    let global_block = global_block.copy();
+                    unsafe {
+                        let _: *mut Object = msg_send![
+                            class!(NSEvent),
+                            addGlobalMonitorForEventsMatchingMask: mask
+                            handler: &*global_block
+                        ];
+                    }
+                    std::mem::forget(global_block);
+
+                    info!("magnify event monitors installed (local + global)");
                 }
             }
 
@@ -1845,10 +1868,19 @@ async fn main() {
                 let startup_perms = permissions::do_permissions_check(false);
                 let screen_ok = startup_perms.screen_recording.permitted();
                 let mic_ok = startup_perms.microphone.permitted();
-                if !screen_ok || !mic_ok {
+
+                // Also check Arc automation if Arc is installed
+                let arc_installed = std::path::Path::new("/Applications/Arc.app").exists();
+                let arc_ok = if arc_installed {
+                    permissions::check_arc_automation_permission(app.handle().clone())
+                } else {
+                    true
+                };
+
+                if !screen_ok || !mic_ok || !arc_ok {
                     warn!(
-                        "Startup permission check failed — screen: {:?}, mic: {:?}. Showing recovery window.",
-                        startup_perms.screen_recording, startup_perms.microphone
+                        "Startup permission check failed — screen: {:?}, mic: {:?}, arc: {}. Showing recovery window.",
+                        startup_perms.screen_recording, startup_perms.microphone, arc_ok
                     );
                     let _ = ShowRewindWindow::PermissionRecovery.show(&app.handle());
                 }

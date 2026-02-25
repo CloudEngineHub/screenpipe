@@ -5,7 +5,7 @@ import { useState, useRef, useMemo, useCallback, useEffect } from "react";
 import { AudioData, StreamTimeSeriesResponse, TimeRange } from "@/components/rewind/timeline";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { Play, Pause, Volume2, GripHorizontal, X, MessageSquare, Layers, Users, Copy, Check, BotMessageSquare } from "lucide-react";
+import { Play, Pause, Volume2, GripHorizontal, X, MessageSquare, Layers, Users, Copy, Check, BotMessageSquare, Sparkles } from "lucide-react";
 import { commands } from "@/lib/utils/tauri";
 import { emit } from "@tauri-apps/api/event";
 import { VideoComponent } from "@/components/rewind/video";
@@ -465,6 +465,32 @@ export function AudioTranscript({
 		await emit("chat-prefill", { context, prompt: "" });
 	}, [tabMode, meetingConversationData, conversationData, getSpeakerInfo]);
 
+	const handleSummarizeMeeting = useCallback(async () => {
+		const data = meetingConversationData;
+		if (!data.items.length) return;
+
+		const lines = data.items.map((item) => {
+			const { speakerName } = getSpeakerInfo(item.audio);
+			const time = item.audio.timestamp.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+			const name = speakerName || (item.audio.is_input ? "me" : "speaker");
+			return `[${time}] ${name}: ${item.audio.transcription || "(no transcription)"}`;
+		});
+
+		const timeRange = data.timeRange
+			? `${data.timeRange.start.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} – ${data.timeRange.end.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`
+			: "";
+
+		const context = `here is my meeting transcript (${timeRange}):\n\n${lines.join("\n")}`;
+
+		await commands.showWindow("Chat");
+		await new Promise((r) => setTimeout(r, 200));
+		await emit("chat-prefill", {
+			context,
+			prompt: "summarize this meeting with key takeaways and action items",
+			autoSend: true,
+		});
+	}, [meetingConversationData, getSpeakerInfo]);
+
 	// Auto-switch to thread view if multiple speakers detected
 	const hasMultipleSpeakers = conversationData.participants.length > 1;
 
@@ -611,6 +637,16 @@ export function AudioTranscript({
 						)}
 
 						<div className="w-px h-4 bg-border mx-0.5" />
+						{(tabMode === "meeting" && activeMeeting) && (
+							<Tooltip>
+								<TooltipTrigger asChild>
+									<Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={handleSummarizeMeeting}>
+										<Sparkles className="h-3 w-3" />
+									</Button>
+								</TooltipTrigger>
+								<TooltipContent side="bottom"><p>summarize meeting</p></TooltipContent>
+							</Tooltip>
+						)}
 						<Tooltip>
 							<TooltipTrigger asChild>
 								<Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={handleSendToChat}>

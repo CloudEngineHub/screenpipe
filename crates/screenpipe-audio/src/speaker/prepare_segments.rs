@@ -52,18 +52,16 @@ pub async fn prepare_segments(
     }
 
     let speech_ratio = speech_frame_count as f32 / total_frames as f32;
-    let min_speech_ratio = vad_engine.lock().await.get_min_speech_ratio();
-
     info!(
         "device: {}, speech ratio: {}, min_speech_ratio: {}, audio_frames: {}, speech_frames: {}",
         device,
         speech_ratio,
-        min_speech_ratio,
+        crate::vad::MIN_SPEECH_RATIO,
         audio_frames.len(),
         speech_frame_count
     );
 
-    let threshold_met = speech_ratio > min_speech_ratio;
+    let threshold_met = speech_ratio > crate::vad::MIN_SPEECH_RATIO;
 
     let (tx, rx) = tokio::sync::mpsc::channel(100);
     if !audio_frames.is_empty() && threshold_met {
