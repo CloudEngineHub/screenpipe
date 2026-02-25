@@ -8,7 +8,6 @@ import { cn } from "@/lib/utils";
 import { open as shellOpen } from "@tauri-apps/plugin-shell";
 import { commands } from "@/lib/utils/tauri";
 import type { TextPosition } from "@/lib/hooks/use-frame-ocr-data";
-import { Check } from "lucide-react";
 
 /**
  * Check if a string looks like a URL.
@@ -157,8 +156,8 @@ interface TextOverlayProps {
 	clickableUrls?: boolean;
 	/** Search terms to highlight on the screenshot */
 	highlightTerms?: string[];
-	/** Whether to enable click-to-copy text blocks */
-	selectable?: boolean;
+	/** Whether highlights are fading out (opacity transition to 0) */
+	highlightFading?: boolean;
 }
 
 interface UrlLink {
@@ -195,39 +194,9 @@ export const TextOverlay = memo(function TextOverlay({
 	debug = false,
 	clickableUrls = true,
 	highlightTerms,
-	selectable = true,
+	highlightFading = false,
 }: TextOverlayProps) {
 	const [hoveredLinkIndex, setHoveredLinkIndex] = useState<number | null>(null);
-	const [hoveredBlockIndex, setHoveredBlockIndex] = useState<number | null>(null);
-	const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
-
-	// Compute pixel-positioned blocks for the text layer
-	const textBlocks = useMemo(() => {
-		if (!selectable || !displayedWidth || !displayedHeight) return [];
-
-		return textPositions
-			.map((pos, index) => {
-				if (pos.confidence < minConfidence) return null;
-				if (pos.text.trim().length === 0) return null;
-
-				const left = pos.bounds.left * displayedWidth;
-				const top = pos.bounds.top * displayedHeight;
-				const width = pos.bounds.width * displayedWidth;
-				const height = pos.bounds.height * displayedHeight;
-
-				if (width <= 0 || height <= 0) return null;
-
-				return { index, text: pos.text, left, top, width, height };
-			})
-			.filter(Boolean) as {
-				index: number;
-				text: string;
-				left: number;
-				top: number;
-				width: number;
-				height: number;
-			}[];
-	}, [selectable, textPositions, displayedWidth, displayedHeight, minConfidence]);
 
 	// URL links
 	const urlLinks = useMemo<UrlLink[]>(() => {
@@ -337,24 +306,9 @@ export const TextOverlay = memo(function TextOverlay({
 		[]
 	);
 
-	const flashCopied = useCallback((index: number) => {
-		setCopiedIndex(index);
-		setTimeout(() => setCopiedIndex(null), 1200);
-	}, []);
-
-	const handleBlockClick = useCallback((blockIndex: number, e: React.MouseEvent) => {
-		e.stopPropagation();
-		const block = textBlocks.find(b => b.index === blockIndex);
-		if (block) {
-			navigator.clipboard.writeText(block.text).catch(() => {});
-			flashCopied(block.index);
-		}
-	}, [textBlocks, flashCopied]);
-
 	const hasContent =
 		(clickableUrls && urlLinks.length > 0) ||
-		highlights.length > 0 ||
-		textBlocks.length > 0;
+		highlights.length > 0;
 
 	if (!hasContent) {
 		return null;
@@ -370,57 +324,31 @@ export const TextOverlay = memo(function TextOverlay({
 			}}
 		>
 			{/* Search term highlights */}
-			{highlights.map((hl) => (
+			{highlights.length > 0 && (
 				<div
-					key={hl.key}
-					className="absolute pointer-events-none"
+					className="absolute inset-0 pointer-events-none"
 					style={{
-						left: hl.left,
-						top: hl.top,
-						width: hl.width,
-						height: hl.height,
-						backgroundColor: "rgba(250, 204, 21, 0.35)",
-						border: "1px solid rgba(250, 204, 21, 0.7)",
-						borderRadius: "2px",
+						opacity: highlightFading ? 0 : 1,
+						transition: "opacity 600ms ease-out",
 					}}
-				/>
-			))}
-			{/* Click-to-copy text blocks */}
-			{textBlocks.map((block) => {
-				const isHovered = hoveredBlockIndex === block.index;
-				const isCopied = copiedIndex === block.index;
-
-				return (
-					<div
-						key={`blk-${block.index}`}
-						className="absolute"
-						style={{
-							left: block.left,
-							top: block.top,
-							width: block.width,
-							height: block.height,
-							cursor: "pointer",
-							pointerEvents: "auto",
-							backgroundColor: isCopied
-								? "rgba(255, 255, 255, 0.30)"
-								: isHovered
-									? "rgba(255, 255, 255, 0.18)"
-									: "transparent",
-							borderRadius: "2px",
-							transition: "background-color 0.15s",
-							...(debug
-								? {
-										backgroundColor: "rgba(0, 255, 0, 0.1)",
-										border: "1px solid rgba(0, 255, 0, 0.5)",
-									}
-								: {}),
-						}}
-						onMouseEnter={() => setHoveredBlockIndex(block.index)}
-						onMouseLeave={() => setHoveredBlockIndex(null)}
-						onClick={(e) => handleBlockClick(block.index, e)}
-					/>
-				);
-			})}
+				>
+					{highlights.map((hl) => (
+						<div
+							key={hl.key}
+							className="absolute"
+							style={{
+								left: hl.left,
+								top: hl.top,
+								width: hl.width,
+								height: hl.height,
+								backgroundColor: "rgba(250, 204, 21, 0.35)",
+								border: "1px solid rgba(250, 204, 21, 0.7)",
+								borderRadius: "2px",
+							}}
+						/>
+					))}
+				</div>
+			)}
 			{/* URL links — on top of text blocks */}
 			{urlLinks.map((link, index) => {
 				const isHovered = hoveredLinkIndex === index;
@@ -484,24 +412,6 @@ export const TextOverlay = memo(function TextOverlay({
 					</a>
 				);
 			})}
-			{/* "Copied" toast */}
-			{copiedIndex !== null && (
-				<div
-					className="absolute pointer-events-none flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium shadow-lg"
-					style={{
-						top: 8,
-						left: "50%",
-						transform: "translateX(-50%)",
-						zIndex: 30,
-						backgroundColor: "rgba(0, 0, 0, 0.85)",
-						color: "rgba(255, 255, 255, 0.9)",
-						border: "1px solid rgba(255, 255, 255, 0.15)",
-					}}
-				>
-					<Check className="w-3.5 h-3.5" />
-					copied
-				</div>
-			)}
 		</div>
 	);
 });

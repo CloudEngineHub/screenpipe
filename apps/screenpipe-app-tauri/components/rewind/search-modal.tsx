@@ -3,11 +3,13 @@
 import { useEffect, useState, useRef, useCallback, useMemo } from "react";
 import { Search, X, Loader2, Clock, MessageSquare, User, ArrowLeft, Mic, Volume2, Hash, Tag, Monitor, Keyboard, ClipboardCopy, AppWindow } from "lucide-react";
 import { useKeywordSearchStore, SearchMatch, UiEventResult } from "@/lib/hooks/use-keyword-search-store";
+import { useSearchHighlight } from "@/lib/hooks/use-search-highlight";
 import { useDebounce } from "@/lib/hooks/use-debounce";
 import { format, isToday, isYesterday } from "date-fns";
 import { cn } from "@/lib/utils";
 import { commands } from "@/lib/utils/tauri";
 import { emit } from "@tauri-apps/api/event";
+import { ThumbnailHighlightOverlay } from "./thumbnail-highlight-overlay";
 
 interface SpeakerResult {
   id: number;
@@ -345,12 +347,21 @@ export function SearchModal({ isOpen, onClose, onNavigateToTimestamp, embedded =
     return searchGroups.filter(g => g.representative.app_name === appFilter);
   }, [searchGroups, appFilter]);
 
+  // Tokenize query for thumbnail highlights (split on spaces, filter empty)
+  const queryTokens = useMemo(() => {
+    if (!debouncedQuery || isTagSearch || isPeopleSearch) return [];
+    return debouncedQuery.split(/\s+/).filter((t) => t.length > 0);
+  }, [debouncedQuery, isTagSearch, isPeopleSearch]);
+
+  const { setHighlight, clear: clearHighlight } = useSearchHighlight();
+
   // Focus input when modal opens
   useEffect(() => {
     if (isOpen) {
       setSelectedIndex(0);
       setQuery("");
       resetSearch();
+      clearHighlight();
       setAppFilter(null);
       setContentFilter("all");
       setSpeakerResults([]);
@@ -713,6 +724,14 @@ export function SearchModal({ isOpen, onClose, onNavigateToTimestamp, embedded =
     }
   }, [selectedSpeaker, loadMoreOcr, loadMoreTranscriptions]);
 
+  const handleSelectResult = useCallback((result: SearchMatch) => {
+    if (queryTokens.length > 0) {
+      setHighlight(queryTokens, result.frame_id);
+    }
+    onNavigateToTimestamp(result.timestamp);
+    onClose();
+  }, [onNavigateToTimestamp, onClose, queryTokens, setHighlight]);
+
   // Keyboard navigation — skip arrow key capture when input is focused (let cursor move)
   useEffect(() => {
     if (!isOpen) return;
@@ -780,8 +799,7 @@ export function SearchModal({ isOpen, onClose, onNavigateToTimestamp, embedded =
             handleSendToAI();
           } else if (filteredResults[selectedIndex]) {
             // Enter = navigate to timestamp
-            onNavigateToTimestamp(filteredResults[selectedIndex].timestamp);
-            onClose();
+            handleSelectResult(filteredResults[selectedIndex]);
           }
           break;
       }
@@ -789,7 +807,7 @@ export function SearchModal({ isOpen, onClose, onNavigateToTimestamp, embedded =
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isOpen, filteredResults, selectedIndex, selectedSpeaker, speakerTranscriptions, selectedTranscriptionIndex, onClose, onNavigateToTimestamp, handleSendToAI, handleBackFromSpeaker]);
+  }, [isOpen, filteredResults, selectedIndex, selectedSpeaker, speakerTranscriptions, selectedTranscriptionIndex, onClose, onNavigateToTimestamp, handleSelectResult, handleSendToAI, handleBackFromSpeaker]);
 
   // Scroll selected item into view
   useEffect(() => {
@@ -798,11 +816,6 @@ export function SearchModal({ isOpen, onClose, onNavigateToTimestamp, embedded =
       selectedEl?.scrollIntoView({ block: "nearest" });
     }
   }, [selectedIndex, filteredResults.length]);
-
-  const handleSelectResult = useCallback((result: SearchMatch) => {
-    onNavigateToTimestamp(result.timestamp);
-    onClose();
-  }, [onNavigateToTimestamp, onClose]);
 
   if (!isOpen) return null;
 
@@ -1151,6 +1164,12 @@ export function SearchModal({ isOpen, onClose, onNavigateToTimestamp, embedded =
                           frameId={result.frame_id}
                           alt={`${result.app_name} - ${result.window_name}`}
                         />
+                        {result.text_positions?.length > 0 && queryTokens.length > 0 && (
+                          <ThumbnailHighlightOverlay
+                            textPositions={result.text_positions}
+                            highlightTerms={queryTokens}
+                          />
+                        )}
                         {groupSize > 1 && (
                           <span className="absolute top-1.5 right-1.5 px-1.5 py-0.5 text-[10px] font-medium bg-black/70 text-white rounded">
                             {groupSize} frames

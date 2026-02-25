@@ -618,6 +618,9 @@ impl SettingsStore {
             use_chinese_mirror: self.use_chinese_mirror,
             analytics_enabled: self.analytics_enabled,
             analytics_id: self.analytics_id.clone(),
+            vocabulary: self.extra.get("vocabularyWords")
+                .and_then(|v| serde_json::from_value::<Vec<screenpipe_audio::transcription::VocabularyEntry>>(v.clone()).ok())
+                .unwrap_or_default(),
         }
     }
 

@@ -104,6 +104,8 @@ export type Settings = SettingsStore & {
 		includedWindows: string[];
 		ignoredUrls: string[];
 	};
+	/** Custom vocabulary entries for transcription biasing and word replacement */
+	vocabularyWords?: Array<{ word: string; replacement?: string }>;
 }
 
 export function getEffectiveFilters(settings: Settings) {

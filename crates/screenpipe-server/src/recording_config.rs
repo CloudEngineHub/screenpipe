@@ -5,6 +5,7 @@
 use screenpipe_audio::audio_manager::builder::TranscriptionMode;
 use screenpipe_audio::audio_manager::AudioManagerBuilder;
 use screenpipe_audio::core::engine::AudioTranscriptionEngine;
+use screenpipe_audio::transcription::VocabularyEntry;
 use screenpipe_audio::vad::{VadEngineEnum, VadSensitivity};
 use screenpipe_core::Language;
 use screenpipe_vision::PipelineMetrics;
@@ -65,6 +66,9 @@ pub struct RecordingConfig {
     pub use_chinese_mirror: bool,
     pub analytics_enabled: bool,
     pub analytics_id: String,
+
+    /// Custom vocabulary for transcription biasing and word replacement.
+    pub vocabulary: Vec<VocabularyEntry>,
 }
 
 impl RecordingConfig {
@@ -101,6 +105,7 @@ impl RecordingConfig {
             .output_path(output_path)
             .use_pii_removal(self.use_pii_removal)
             .transcription_mode(self.transcription_mode.clone())
+            .vocabulary(self.vocabulary.clone())
     }
 
     /// Build a `VisionManagerConfig` from this config.

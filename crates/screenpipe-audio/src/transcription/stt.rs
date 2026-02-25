@@ -22,6 +22,7 @@ use tokio::sync::Mutex;
 use tracing::error;
 use whisper_rs::WhisperState;
 
+use crate::transcription::VocabularyEntry;
 use crate::{AudioInput, TranscriptionResult};
 
 pub const SAMPLE_RATE: u32 = 16000;
@@ -35,6 +36,7 @@ pub async fn stt_sync(
     deepgram_api_key: Option<String>,
     languages: Vec<Language>,
     whisper_state: &mut WhisperState,
+    vocabulary: &[VocabularyEntry],
 ) -> Result<String> {
     let audio = audio.to_vec();
 
@@ -48,6 +50,7 @@ pub async fn stt_sync(
         deepgram_api_key,
         languages,
         whisper_state,
+        vocabulary,
     )
     .await
 }
@@ -61,6 +64,7 @@ pub async fn stt(
     deepgram_api_key: Option<String>,
     languages: Vec<Language>,
     whisper_state: &mut WhisperState,
+    vocabulary: &[VocabularyEntry],
 ) -> Result<String> {
     let transcription: Result<String> =
         if *audio_transcription_engine == AudioTranscriptionEngine::Disabled {
@@ -69,7 +73,7 @@ pub async fn stt(
             // Deepgram implementation
             let api_key = deepgram_api_key.unwrap_or_default();
 
-            match transcribe_with_deepgram(&api_key, audio, device, sample_rate, languages.clone())
+            match transcribe_with_deepgram(&api_key, audio, device, sample_rate, languages.clone(), vocabulary)
                 .await
             {
                 Ok(transcription) => Ok(transcription),
@@ -79,15 +83,26 @@ pub async fn stt(
                         device, e
                     );
                     // Fallback to Whisper
-                    process_with_whisper(audio, languages.clone(), whisper_state).await
+                    process_with_whisper(audio, languages.clone(), whisper_state, vocabulary).await
                 }
             }
         } else {
             // Existing Whisper implementation
-            process_with_whisper(audio, languages, whisper_state).await
+            process_with_whisper(audio, languages, whisper_state, vocabulary).await
         };
 
-    transcription
+    // Post-processing: apply vocabulary replacements
+    match transcription {
+        Ok(mut text) => {
+            for entry in vocabulary {
+                if let Some(ref replacement) = entry.replacement {
+                    text = text.replace(&entry.word, replacement);
+                }
+            }
+            Ok(text)
+        }
+        err => err,
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -104,6 +119,7 @@ pub async fn process_audio_input(
     output_sender: &crossbeam::channel::Sender<TranscriptionResult>,
     whisper_state: &mut WhisperState,
     metrics: Arc<AudioPipelineMetrics>,
+    vocabulary: &[VocabularyEntry],
 ) -> Result<()> {
     // NOTE: capture_timestamp is set when audio enters the channel, but smart mode
     // deferral can delay processing by 20+ minutes. The DB now uses Utc::now() at
@@ -163,6 +179,7 @@ pub async fn process_audio_input(
             path,
             timestamp,
             whisper_state,
+            vocabulary,
         )
         .await?;
 
@@ -184,6 +201,7 @@ pub async fn run_stt(
     path: String,
     timestamp: u64,
     whisper_state: &mut WhisperState,
+    vocabulary: &[VocabularyEntry],
 ) -> Result<TranscriptionResult> {
     let audio = segment.samples.clone();
     let sample_rate = segment.sample_rate;
@@ -195,6 +213,7 @@ pub async fn run_stt(
         deepgram_api_key.clone(),
         languages.clone(),
         whisper_state,
+        vocabulary,
     )
     .await
     {

@@ -78,6 +78,9 @@ pub struct AudioManager {
     /// Optional callback invoked after each audio transcription DB insert.
     /// Used by the hot frame cache to receive live audio updates.
     on_transcription_insert: Option<crate::transcription::AudioInsertCallback>,
+    /// Shared WhisperContext for re-transcription requests.
+    /// Set after the model is loaded in start_audio_receiver_handler.
+    whisper_context: Arc<RwLock<Option<Arc<WhisperContext>>>>,
 }
 
 impl AudioManager {
@@ -135,6 +138,7 @@ impl AudioManager {
             meeting_detector,
             transcription_paused: Arc::new(AtomicBool::new(false)),
             on_transcription_insert: None,
+            whisper_context: Arc::new(RwLock::new(None)),
         };
 
         Ok(manager)
@@ -376,6 +380,7 @@ impl AudioManager {
         let languages = options.languages.clone();
         let deepgram_api_key = options.deepgram_api_key.clone();
         let audio_transcription_engine = options.transcription_engine.clone();
+        let vocabulary = options.vocabulary.clone();
         let vad_engine = self.vad_engine.clone();
         let whisper_receiver = self.recording_receiver.clone();
         let metrics = self.metrics.clone();
@@ -397,6 +402,9 @@ impl AudioManager {
         .await
         .expect("whisper model loading task panicked");
         info!("whisper model loaded successfully");
+
+        // Store the context for re-transcription use
+        *self.whisper_context.write().await = Some(whisper_context.clone());
 
         // Create a single WhisperState and reuse it across all segments.
         // whisper_full_with_state() clears KV caches and results internally,
@@ -498,6 +506,7 @@ impl AudioManager {
                     &transcription_sender.clone(),
                     &mut whisper_state,
                     metrics.clone(),
+                    &vocabulary,
                 )
                 .await
                 {
@@ -563,6 +572,36 @@ impl AudioManager {
     /// Returns a reference to the meeting detector, if smart mode is active.
     pub fn meeting_detector(&self) -> Option<&Arc<MeetingDetector>> {
         self.meeting_detector.as_ref()
+    }
+
+    /// Returns the shared WhisperContext for re-transcription, if loaded.
+    pub async fn whisper_context(&self) -> Option<Arc<WhisperContext>> {
+        self.whisper_context.read().await.clone()
+    }
+
+    /// Returns the STT model path (for creating new WhisperContext if needed).
+    pub fn stt_model_path(&self) -> &PathBuf {
+        &self.stt_model_path
+    }
+
+    /// Returns the current transcription engine.
+    pub async fn transcription_engine(&self) -> Arc<AudioTranscriptionEngine> {
+        self.options.read().await.transcription_engine.clone()
+    }
+
+    /// Returns the current deepgram API key.
+    pub async fn deepgram_api_key(&self) -> Option<String> {
+        self.options.read().await.deepgram_api_key.clone()
+    }
+
+    /// Returns the current languages.
+    pub async fn languages(&self) -> Vec<screenpipe_core::Language> {
+        self.options.read().await.languages.clone()
+    }
+
+    /// Returns the current vocabulary.
+    pub async fn vocabulary(&self) -> Vec<crate::transcription::VocabularyEntry> {
+        self.options.read().await.vocabulary.clone()
     }
 
     /// Check for recording handles that have finished (crashed or timed out)

@@ -14,7 +14,7 @@ use crate::{
         engine::AudioTranscriptionEngine,
     },
     meeting_detector::MeetingDetector,
-    transcription::deepgram::CUSTOM_DEEPGRAM_API_TOKEN,
+    transcription::{deepgram::CUSTOM_DEEPGRAM_API_TOKEN, VocabularyEntry},
     vad::{VadEngineEnum, VadSensitivity},
 };
 
@@ -60,6 +60,8 @@ pub struct AudioManagerOptions {
     /// Meeting detector for smart mode — defers Whisper during detected meetings.
     /// Shared with UI recorder which feeds app switch events into it.
     pub meeting_detector: Option<Arc<MeetingDetector>>,
+    /// Custom vocabulary entries for transcription biasing and word replacement.
+    pub vocabulary: Vec<VocabularyEntry>,
 }
 
 impl Default for AudioManagerOptions {
@@ -88,6 +90,7 @@ impl Default for AudioManagerOptions {
             use_system_default_audio: true,
             transcription_mode: TranscriptionMode::default(),
             meeting_detector: None,
+            vocabulary: vec![],
         }
     }
 }
@@ -186,6 +189,11 @@ impl AudioManagerBuilder {
 
     pub fn meeting_detector(mut self, detector: Arc<MeetingDetector>) -> Self {
         self.options.meeting_detector = Some(detector);
+        self
+    }
+
+    pub fn vocabulary(mut self, vocabulary: Vec<VocabularyEntry>) -> Self {
+        self.options.vocabulary = vocabulary;
         self
     }
 

@@ -65,6 +65,8 @@ interface TimelineSliderProps {
 	selectedDeviceId?: string; // "all" or a specific device_id — dims non-matching bars
 	allDeviceIds?: string[]; // All unique device IDs for monitor dot indicators
 	onDeviceChange?: (deviceId: string) => void; // Callback when a monitor dot is clicked
+	selectedAppName?: string; // "all" or a specific app_name — dims non-matching bars
+	onAppChange?: (appName: string) => void; // Callback when an app dot is clicked
 }
 
 interface AppGroup {
@@ -163,6 +165,23 @@ export function getFrameAppNames(frame: StreamTimeSeriesResponse | undefined): s
 	return appNames.length > 0 ? [...new Set(appNames)] : ['Unknown'];
 }
 
+// Deterministic hue from app name
+function appNameToHue(name: string): number {
+	let hash = 0;
+	for (let i = 0; i < name.length; i++) hash = name.charCodeAt(i) + ((hash << 5) - hash);
+	return Math.abs(hash) % 360;
+}
+
+// Color for filter dots — identifiable but not loud
+function appNameToColor(name: string): string {
+	return `hsl(${appNameToHue(name)}, 40%, 55%)`;
+}
+
+// Color for timeline bars — muted tint, fits black/white aesthetic
+function appNameToBarColor(name: string): string {
+	return `hsl(${appNameToHue(name)}, 25%, 70%)`;
+}
+
 export const TimelineSlider = ({
 	frames = [],
 	currentIndex,
@@ -183,6 +202,8 @@ export const TimelineSlider = ({
 	selectedDeviceId = "all",
 	allDeviceIds = [],
 	onDeviceChange,
+	selectedAppName = "all",
+	onAppChange,
 }: TimelineSliderProps) => {
 	const containerRef = useRef<HTMLDivElement>(null);
 	const observerTargetRef = useRef<HTMLDivElement>(null);
@@ -282,6 +303,9 @@ export const TimelineSlider = ({
 		}, 300);
 	}, []);
 
+	// App dot tooltip state (portal-based to escape overflow clipping)
+	const [hoveredAppDot, setHoveredAppDot] = useState<{ name: string; x: number; y: number } | null>(null);
+
 	// App context popover state
 	const [activePopoverGroup, setActivePopoverGroup] = useState<number | null>(null);
 	const [popoverAnchor, setPopoverAnchor] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
@@ -361,6 +385,22 @@ export const TimelineSlider = ({
 		const end = Math.min(frames.length, currentIndex + visibleCount);
 		return frames.slice(start, end);
 	}, [frames, currentIndex]);
+
+	// Dynamically compute app names from the current viewport, sorted by frequency
+	const viewportAppNames = useMemo(() => {
+		const counts = new Map<string, number>();
+		for (const frame of visibleFrames) {
+			for (const d of frame.devices) {
+				const name = d.metadata?.app_name;
+				if (name && name !== "Unknown" && name.trim() !== "") {
+					counts.set(name, (counts.get(name) || 0) + 1);
+				}
+			}
+		}
+		return [...counts.entries()]
+			.sort((a, b) => b[1] - a[1])
+			.map(([name]) => name);
+	}, [visibleFrames]);
 
 	const appGroups = useMemo(() => {
 		if (!visibleFrames || visibleFrames.length === 0) return [];
@@ -620,8 +660,8 @@ export const TimelineSlider = ({
 
 	return (
 		<div className="relative w-full" dir="rtl">
-			{/* Zoom controls + monitor dots - floating on left side */}
-			<div className="absolute left-3 top-1/2 -translate-y-1/2 z-30 flex flex-col gap-1 bg-background/80 backdrop-blur-sm border border-border rounded-lg p-1">
+			{/* Zoom controls + filter dots - floating on left side */}
+			<div className="absolute left-3 bottom-[calc(100%-60px)] z-30 flex flex-col gap-1 items-center bg-background/80 backdrop-blur-sm border border-border rounded-lg p-1">
 				{/* Monitor filter dots — above zoom, only with 2+ monitors */}
 				{allDeviceIds.length > 1 && onDeviceChange && (
 					<>
@@ -644,7 +684,36 @@ export const TimelineSlider = ({
 								/>
 							))}
 						</div>
-						<div className="h-px bg-border mx-0.5" />
+						<div className="h-px w-full bg-border" />
+					</>
+				)}
+				{/* App filter dots — below monitor dots, dynamically from viewport */}
+				{viewportAppNames.length > 1 && onAppChange && (
+					<>
+						<div className="flex items-center justify-center gap-1 py-0.5 flex-wrap max-w-[60px]" dir="ltr">
+							{viewportAppNames.map((name) => (
+								<button
+									key={name}
+									onClick={() => onAppChange(selectedAppName === name ? "all" : name)}
+									className="rounded-full transition-all duration-200 hover:scale-125"
+									style={{
+										width: selectedAppName === name ? 8 : 6,
+										height: selectedAppName === name ? 8 : 6,
+										backgroundColor: selectedAppName === name
+											? appNameToColor(name)
+											: selectedAppName === "all"
+												? appNameToColor(name) + "99"
+												: "hsl(var(--foreground) / 0.15)",
+									}}
+									onMouseEnter={(e) => {
+										const rect = e.currentTarget.getBoundingClientRect();
+										setHoveredAppDot({ name, x: rect.right + 8, y: rect.top + rect.height / 2 });
+									}}
+									onMouseLeave={() => setHoveredAppDot(null)}
+								/>
+							))}
+						</div>
+						<div className="h-px w-full bg-border" />
 					</>
 				)}
 				<button
@@ -815,6 +884,8 @@ export const TimelineSlider = ({
 									const hasAudio = Boolean(frame?.devices?.[0]?.audio?.length);
 									const isCurrent = frameIndex === currentIndex;
 									const matchesDevice = selectedDeviceId === "all" || frame.devices.some((d) => d.device_id === selectedDeviceId);
+									const matchesApp = selectedAppName === "all" || frame.devices.some((d) => d.metadata?.app_name === selectedAppName);
+									const matchesFilter = matchesDevice && matchesApp;
 
 									// Show time marker on first frame of each hour
 									const showTimeMarker = timeMarkers.some(
@@ -846,16 +917,15 @@ export const TimelineSlider = ({
 												width: `${frameWidth}px`,
 												marginLeft: `${frameMargin}px`,
 												marginRight: `${frameMargin}px`,
-												backgroundColor: isCurrent ? '#ffffff' : hasAudio ? 'hsl(var(--foreground))' : group.color,
+												backgroundColor: appNameToBarColor(getFrameAppName(frame)),
 												height: isCurrent || isSelected || isInRange ? "80%" : hasAudio ? "60%" : "45%",
-												opacity: !matchesDevice ? 0.15 : isCurrent || isSelected || isInRange ? 1 : hasAudio ? 0.9 : 0.7,
-												borderBottom: matchesDevice && selectedDeviceId !== "all" ? '2px solid hsl(var(--primary))' : 'none',
+												opacity: !matchesFilter ? 0.15 : isCurrent || isSelected || isInRange ? 1 : hasAudio ? 0.9 : 0.7,
 												direction: "ltr",
 												boxShadow: isCurrent
 												? isPlaying
-													? '0 0 8px rgba(255, 255, 255, 0.9), 0 0 20px rgba(255, 255, 255, 0.5), 0 0 40px rgba(255, 255, 255, 0.2)'
-													: '0 0 6px rgba(255, 255, 255, 0.8), 0 0 16px rgba(255, 255, 255, 0.4), 0 0 32px rgba(255, 255, 255, 0.15)'
-												: 'inset 0 0 0 0.5px rgba(255, 255, 255, 0.15)',
+													? '0 0 6px rgba(255, 255, 255, 0.7), 0 0 14px rgba(255, 255, 255, 0.3)'
+													: '0 0 4px rgba(255, 255, 255, 0.6), 0 0 10px rgba(255, 255, 255, 0.25)'
+												: 'inset 0 0 0 0.5px rgba(255, 255, 255, 0.1)',
 												transform: isCurrent ? 'scale(1.15)' : 'scale(1)',
 												transition: 'all 0.2s ease-out',
 												borderRadius: '4px 4px 0 0',
@@ -990,6 +1060,21 @@ export const TimelineSlider = ({
 			{/* Tag toolbar — floating above selection */}
 			{selectedIndices.size > 1 && selectionRange && (
 				<TimelineTagToolbar anchorRect={selectionRect} onAskAI={onAskAI} />
+			)}
+
+			{/* App filter dot tooltip */}
+			{hoveredAppDot && createPortal(
+				<div
+					className="fixed z-[9999] bg-popover border border-border rounded px-1.5 py-0.5 text-[10px] text-popover-foreground whitespace-nowrap shadow-lg pointer-events-none"
+					style={{
+						left: `${hoveredAppDot.x}px`,
+						top: `${hoveredAppDot.y}px`,
+						transform: "translateY(-50%)",
+					}}
+				>
+					{hoveredAppDot.name}
+				</div>,
+				document.body
 			)}
 
 			{/* Chat conversation tooltip */}

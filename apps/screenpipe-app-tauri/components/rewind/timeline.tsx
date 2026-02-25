@@ -23,6 +23,7 @@ import { useMeetings } from "@/lib/hooks/use-meetings";
 import { useTimelineStore } from "@/lib/hooks/use-timeline-store";
 import { findNearestDateWithFrames } from "@/lib/actions/has-frames-date";
 import { CurrentFrameTimeline } from "@/components/rewind/current-frame-timeline";
+import { useSearchHighlight } from "@/lib/hooks/use-search-highlight";
 import { usePlatform } from "@/lib/hooks/use-platform";
 import { useAudioPlayback } from "@/lib/hooks/use-audio-playback";
 import { useHealthCheck } from "@/lib/hooks/use-health-check";
@@ -86,7 +87,7 @@ export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 	const [showAudioTranscript, setShowAudioTranscript] = useState(false);
 	const [showSearchModal, setShowSearchModal] = useState(false);
 	const [selectedDeviceId, setSelectedDeviceId] = useState<string>("all");
-
+	const [selectedAppName, setSelectedAppName] = useState<string>("all");
 
 	const containerRef = useRef<HTMLDivElement | null>(null);
 	// const [searchResults, setSearchResults] = useState<number[]>([]);
@@ -151,6 +152,18 @@ export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 	// When true, CurrentFrameTimeline uses HTTP JPEG fallback instead of video seek
 	// for the first frame after a cross-date search navigation (avoids ~5s video load)
 	const [searchNavFrame, setSearchNavFrame] = useState(false);
+
+	const dismissSearchHighlight = useSearchHighlight((s) => s.dismiss);
+	const hasSearchHighlight = useSearchHighlight((s) => s.highlightTerms.length > 0 && !s.dismissed);
+
+	// Dismiss search highlights when user scrolls/navigates away (not from the initial search jump)
+	const prevIndexRef = useRef(currentIndex);
+	useEffect(() => {
+		if (prevIndexRef.current !== currentIndex && !searchNavFrame && hasSearchHighlight) {
+			dismissSearchHighlight();
+		}
+		prevIndexRef.current = currentIndex;
+	}, [currentIndex, searchNavFrame, hasSearchHighlight, dismissSearchHighlight]);
 
 	// Get timeline selection for chat context
 	const { selectionRange, loadTagsForFrames } = useTimelineSelection();
@@ -219,18 +232,22 @@ export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 		return clamped;
 	}, [selectedDeviceId, allDeviceIds.length, frames]);
 
-	// Pre-computed sorted list of frame indices matching the selected device.
+	// Pre-computed sorted list of frame indices matching BOTH device and app filters.
 	// Used by scroll handler to navigate in "matching frame space".
 	const matchingIndices = useMemo(() => {
-		if (selectedDeviceId === "all" || allDeviceIds.length <= 1) return null;
+		const filterDevice = selectedDeviceId !== "all" && allDeviceIds.length > 1;
+		const filterApp = selectedAppName !== "all";
+		if (!filterDevice && !filterApp) return null;
 		const indices: number[] = [];
 		for (let i = 0; i < frames.length; i++) {
-			if (frames[i].devices.some((d) => d.device_id === selectedDeviceId)) {
+			const matchesDevice = !filterDevice || frames[i].devices.some((d) => d.device_id === selectedDeviceId);
+			const matchesApp = !filterApp || frames[i].devices.some((d) => d.metadata?.app_name === selectedAppName);
+			if (matchesDevice && matchesApp) {
 				indices.push(i);
 			}
 		}
 		return indices.length > 0 ? indices : null;
-	}, [frames, selectedDeviceId, allDeviceIds.length]);
+	}, [frames, selectedDeviceId, allDeviceIds.length, selectedAppName]);
 
 	// When monitor filter changes, snap to nearest matching frame
 	const handleDeviceChange = useCallback((deviceId: string) => {
@@ -242,6 +259,31 @@ export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 			setCurrentFrame(frames[snapped]);
 		}
 	}, [currentIndex, frames, snapToDevice, setCurrentFrame]);
+
+	// Snap to nearest frame matching the app filter
+	const snapToApp = useCallback((idx: number): number => {
+		if (selectedAppName === "all") return idx;
+		const clamped = Math.max(0, Math.min(idx, frames.length - 1));
+		if (frames[clamped]?.devices.some((d) => d.metadata?.app_name === selectedAppName)) return clamped;
+		for (let offset = 1; offset < frames.length; offset++) {
+			const lo = clamped - offset;
+			const hi = clamped + offset;
+			if (lo >= 0 && frames[lo]?.devices.some((d) => d.metadata?.app_name === selectedAppName)) return lo;
+			if (hi < frames.length && frames[hi]?.devices.some((d) => d.metadata?.app_name === selectedAppName)) return hi;
+		}
+		return clamped;
+	}, [selectedAppName, frames]);
+
+	// When app filter changes, snap to nearest matching frame
+	const handleAppChange = useCallback((appName: string) => {
+		setSelectedAppName(appName);
+		if (appName === "all") return;
+		const snapped = snapToApp(currentIndex);
+		if (snapped !== currentIndex) {
+			setCurrentIndex(snapped);
+			setCurrentFrame(frames[snapped]);
+		}
+	}, [currentIndex, frames, snapToApp, setCurrentFrame]);
 
 	// Audio playback engine
 	const {
@@ -1690,7 +1732,8 @@ export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 							currentIndex={currentIndex}
 							onFrameChange={(index) => {
 								pausePlayback();
-								const snapped = snapToDevice(index);
+								let snapped = snapToDevice(index);
+								snapped = snapToApp(snapped);
 								setCurrentIndex(snapped);
 								if (frames[snapped]) {
 									setCurrentFrame(frames[snapped]);
@@ -1711,6 +1754,8 @@ export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 							selectedDeviceId={selectedDeviceId}
 							allDeviceIds={allDeviceIds}
 							onDeviceChange={handleDeviceChange}
+							selectedAppName={selectedAppName}
+							onAppChange={handleAppChange}
 						/>
 					) : (
 						<div className="bg-card/80 backdrop-blur-sm p-4 border-t border-border">

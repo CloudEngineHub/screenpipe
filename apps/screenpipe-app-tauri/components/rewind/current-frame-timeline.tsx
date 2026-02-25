@@ -8,7 +8,9 @@ import { useFrameOcrData } from "@/lib/hooks/use-frame-ocr-data";
 import { usePlatform } from "@/lib/hooks/use-platform";
 import { formatShortcutDisplay } from "@/lib/chat-utils";
 import { TextOverlay, extractUrlsFromText, isUrl, normalizeUrl } from "@/components/text-overlay";
-import { ImageOff, ChevronLeft, ChevronRight, Copy, ImageIcon, Link2, MessageCircle, ExternalLink } from "lucide-react";
+import { SelectableTextLayer } from "@/components/selectable-text-layer";
+import { useSearchHighlight } from "@/lib/hooks/use-search-highlight";
+import { ImageOff, ChevronLeft, ChevronRight, Copy, ImageIcon, Link2, MessageCircle, ExternalLink, Type, Lock, Globe } from "lucide-react";
 import posthog from "posthog-js";
 import { toast } from "@/components/ui/use-toast";
 import { commands } from "@/lib/utils/tauri";
@@ -92,6 +94,7 @@ export const CurrentFrameTimeline: FC<CurrentFrameTimelineProps> = ({
 	onSearchNavComplete,
 }) => {
 	const { isMac } = usePlatform();
+	const { highlightTerms, dismissed: highlightDismissed, clear: clearHighlight } = useSearchHighlight();
 	const [isLoading, setIsLoading] = useState(true);
 	const [contextMenuOpen, setContextMenuOpen] = useState(false);
 	const contextMenuPositionRef = useRef<{ x: number; y: number } | null>(null);
@@ -135,6 +138,7 @@ export const CurrentFrameTimeline: FC<CurrentFrameTimelineProps> = ({
 	const filePath = device?.metadata?.file_path;
 	const offsetIndex = device?.offset_index ?? 0;
 	const fpsFromServer = device?.fps ?? 0.5;
+	const browserUrl = device?.metadata?.browser_url;
 
 
 	// Track skipped frames for analytics
@@ -166,6 +170,18 @@ export const CurrentFrameTimeline: FC<CurrentFrameTimelineProps> = ({
 			if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
 		};
 	}, [frameId, filePath, offsetIndex, fpsFromServer]);
+
+	// Clear text selection when frame changes (avoid stale selection from previous frame)
+	useEffect(() => {
+		window.getSelection()?.removeAllRanges();
+	}, [debouncedFrame?.frameId]);
+
+	// Clear search highlights after fade-out transition completes (600ms)
+	useEffect(() => {
+		if (!highlightDismissed || highlightTerms.length === 0) return;
+		const timer = setTimeout(clearHighlight, 650);
+		return () => clearTimeout(timer);
+	}, [highlightDismissed, highlightTerms.length, clearHighlight]);
 
 	// Detect snapshot frames (event-driven JPEGs) vs video chunks
 	const isSnapshotFrame = useMemo(() => {
@@ -682,6 +698,28 @@ export const CurrentFrameTimeline: FC<CurrentFrameTimelineProps> = ({
 						top: contextMenuPositionRef.current.y,
 					}}
 				>
+					{/* Copy Selected Text — only when there's an active text selection */}
+					{(() => {
+						const sel = window.getSelection()?.toString()?.trim();
+						if (!sel) return null;
+						return (
+							<button
+								type="button"
+								className="block group w-full text-left px-3 py-2 -my-px first:mt-0 last:mb-0 border-0 outline-none ring-0 bg-transparent hover:bg-foreground hover:text-background text-foreground flex items-center gap-2 cursor-pointer transition-colors duration-150"
+								onClick={() => {
+									const text = window.getSelection()?.toString()?.trim();
+									if (text) {
+										navigator.clipboard.writeText(text).catch(() => {});
+										toast({ title: "copied selection", description: "selected text copied to clipboard" });
+									}
+									setContextMenuOpen(false);
+								}}
+							>
+								<Type className="w-4 h-4 shrink-0" />
+								<span className="flex-1 min-w-0 truncate">copy selected text</span>
+							</button>
+						);
+					})()}
 					<button
 						type="button"
 						className="block group w-full text-left px-3 py-2 -my-px first:mt-0 last:mb-0 border-0 outline-none ring-0 bg-transparent hover:bg-foreground hover:text-background text-foreground flex items-center gap-2 cursor-pointer transition-colors duration-150"
@@ -779,7 +817,41 @@ export const CurrentFrameTimeline: FC<CurrentFrameTimelineProps> = ({
 			)}
 
 
-			{/* OCR text overlay — clickable text + URLs for frames with OCR data */}
+			{/* Browser address bar overlay — shows URL when viewing a web page */}
+			{!isLoading && !hasError && browserUrl && (
+				<div
+					className="absolute top-0 left-0 right-0 z-10 flex items-center gap-2 px-3 py-1.5 bg-black/70 backdrop-blur-sm border-b border-white/10"
+				>
+					<div className="flex items-center gap-1.5 text-white/40">
+						<Globe className="w-3.5 h-3.5" />
+					</div>
+					<div className="flex-1 flex items-center gap-1.5 min-w-0 px-2 py-0.5 rounded-sm bg-white/10">
+						{browserUrl.startsWith("https") && (
+							<Lock className="w-3 h-3 text-green-400/80 shrink-0" />
+						)}
+						<span className="text-[12px] font-mono text-white/80 truncate">
+							{browserUrl.replace(/^https?:\/\/(www\.)?/, "")}
+						</span>
+					</div>
+					<button
+						type="button"
+						className="flex items-center gap-1 px-1.5 py-0.5 rounded-sm text-white/60 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
+						title={`Open ${browserUrl}`}
+						onClick={async () => {
+							try {
+								const { open } = await import("@tauri-apps/plugin-shell");
+								await open(browserUrl);
+							} catch {
+								window.open(browserUrl, "_blank");
+							}
+						}}
+					>
+						<ExternalLink className="w-3.5 h-3.5" />
+					</button>
+				</div>
+			)}
+
+			{/* Search highlights + URL links (pointer-events: none wrapper, links have auto) */}
 			{!isLoading && !hasError && !ocrLoading && naturalDimensions && renderedImageInfo && textPositions.length > 0 && (
 				<div className="absolute overflow-hidden" style={{ zIndex: 3, top: 0, left: 0, right: 0, bottom: 0 }}>
 					<div style={{
@@ -796,11 +868,32 @@ export const CurrentFrameTimeline: FC<CurrentFrameTimelineProps> = ({
 							displayedWidth={renderedImageInfo.width}
 							displayedHeight={renderedImageInfo.height}
 							clickableUrls={true}
+							highlightTerms={highlightTerms.length > 0 ? highlightTerms : undefined}
+							highlightFading={highlightDismissed}
 						/>
 					</div>
 				</div>
 			)}
 
+			{/* Selectable text layer — rendered as its own layer, NOT inside TextOverlay's
+			    pointer-events:none wrapper. This ensures WebKit allows text selection. */}
+			{!isLoading && !hasError && !ocrLoading && renderedImageInfo && textPositions.length > 0 && (
+				<div className="absolute" style={{ zIndex: 4, top: 0, left: 0, right: 0, bottom: 0, pointerEvents: "none" }}>
+					<div style={{
+						position: "absolute",
+						left: renderedImageInfo.offsetX,
+						top: renderedImageInfo.offsetY,
+						width: renderedImageInfo.width,
+						height: renderedImageInfo.height,
+					}}>
+						<SelectableTextLayer
+							textPositions={textPositions}
+							displayedWidth={renderedImageInfo.width}
+							displayedHeight={renderedImageInfo.height}
+						/>
+					</div>
+				</div>
+			)}
 
 			{/* URL chips — bottom of frame, when no OCR TextOverlay is showing */}
 			{!isLoading && !hasError && textPositions.length === 0 && detectedUrls.length > 0 && (

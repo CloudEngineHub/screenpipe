@@ -21,6 +21,15 @@ pub struct AudioInput {
     pub capture_timestamp: u64,
 }
 
+/// A custom vocabulary entry for transcription biasing/correction.
+/// If `replacement` is set, the engine will be biased toward `word` and then
+/// post-processing will replace `word` with `replacement` in the output.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct VocabularyEntry {
+    pub word: String,
+    pub replacement: Option<String>,
+}
+
 pub mod text_utils;
 
 mod transcription_result;

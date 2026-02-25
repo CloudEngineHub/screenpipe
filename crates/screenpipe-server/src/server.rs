@@ -436,6 +436,10 @@ impl SCServer {
             .route(
                 "/data/delete-range",
                 axum::routing::post(delete_time_range_handler),
+            )
+            .route(
+                "/audio/retranscribe",
+                axum::routing::post(crate::routes::retranscribe::retranscribe_handler),
             );
 
         // Apple Intelligence — generic OpenAI-compatible endpoint (macOS only)

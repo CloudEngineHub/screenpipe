@@ -243,6 +243,24 @@
     draggable: false;
   }
 
+  /* Selectable text layer — override global user-select:none for OCR text overlay.
+     Must override *, :not(input):not(textarea), and ::before/::after rules above. */
+  .selectable-text-layer,
+  .selectable-text-layer *,
+  .selectable-text-layer *::before,
+  .selectable-text-layer *::after {
+    -webkit-user-select: text !important;
+    -moz-user-select: text !important;
+    -ms-user-select: text !important;
+    user-select: text !important;
+    cursor: text !important;
+    -webkit-user-drag: none !important;
+  }
+  .selectable-text-layer::selection,
+  .selectable-text-layer *::selection {
+    background-color: rgba(59, 130, 246, 0.35) !important;
+  }
+
   /* Allow video/audio controls to work normally */
   video, audio {
     -webkit-user-drag: auto !important;

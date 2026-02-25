@@ -529,6 +529,7 @@ impl RecordArgs {
             use_chinese_mirror: false,
             analytics_enabled: !self.disable_telemetry,
             analytics_id: String::new(),
+            vocabulary: vec![],
         }
     }
 }

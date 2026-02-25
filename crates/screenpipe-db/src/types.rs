@@ -5,6 +5,19 @@ use sqlx::FromRow;
 use std::error::Error as StdError;
 use std::fmt::{self, Display};
 
+/// Info about an audio chunk and its transcription, used for re-transcription.
+#[derive(Debug, Clone, FromRow)]
+pub struct AudioChunkInfo {
+    pub id: i64,
+    pub file_path: String,
+    pub transcription: Option<String>,
+    pub transcription_engine: Option<String>,
+    pub offset_index: Option<i64>,
+    pub timestamp: Option<DateTime<Utc>>,
+    pub device: Option<String>,
+    pub is_input_device: Option<bool>,
+}
+
 /// Data for a single window result to be batch-inserted with its frame.
 /// Used by `insert_frames_with_ocr_batch` to reduce write lock contention.
 #[derive(Debug, Clone)]

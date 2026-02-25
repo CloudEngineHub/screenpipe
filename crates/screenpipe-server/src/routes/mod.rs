@@ -8,6 +8,7 @@ pub mod data;
 pub mod frames;
 pub mod health;
 pub mod meetings;
+pub mod retranscribe;
 pub mod search;
 pub mod speakers;
 pub mod streaming;
