@@ -93,6 +93,11 @@ export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 		setSelectedDeviceId("all");
 		setSelectedAppName("all");
 	}, []);
+	// Track filter state in refs so event listeners can read fresh values
+	const selectedDeviceIdRef = useRef(selectedDeviceId);
+	selectedDeviceIdRef.current = selectedDeviceId;
+	const selectedAppNameRef = useRef(selectedAppName);
+	selectedAppNameRef.current = selectedAppName;
 
 	const containerRef = useRef<HTMLDivElement | null>(null);
 	// const [searchResults, setSearchResults] = useState<number[]>([]);
@@ -702,6 +707,7 @@ export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 		const unlisten = listen("open-search", () => {
 			if (!showSearchModal) {
 				setShowSearchModal(true);
+				resetFilters();
 			}
 		});
 
@@ -819,6 +825,7 @@ export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 			if (e.key === "/") {
 				e.preventDefault();
 				setShowSearchModal(true);
+				resetFilters();
 			}
 		};
 
@@ -868,20 +875,26 @@ export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 		return () => window.removeEventListener("keydown", handleCopyFrame);
 	}, [currentFrame, isMac, showSearchModal]);
 
-	// Handle Escape: close search modal if open, otherwise close the window
+	// Handle Escape: reset filters first, then close search modal, then close window
 	// In embedded mode, only handle closing the search modal (don't close the window)
 	useEffect(() => {
 		if (embedded) return;
 		const unlisten = listen("escape-pressed", () => {
 			if (showSearchModal) {
 				setShowSearchModal(false);
+				resetFilters();
+				return;
+			}
+			// If any filter is active, clear it instead of closing window
+			if (selectedDeviceIdRef.current !== "all" || selectedAppNameRef.current !== "all") {
+				resetFilters();
 				return;
 			}
 			pausePlayback();
 			commands.closeWindow("Main");
 		});
 		return () => { unlisten.then((fn) => fn()); };
-	}, [showSearchModal, embedded]);
+	}, [showSearchModal, embedded, resetFilters]);
 
 	// Handle arrow key navigation via JS keydown (no global hotkey stealing)
 	useEffect(() => {
@@ -1282,8 +1295,9 @@ export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 		// Guard against double-click / re-entry while navigation is in progress
 		if (isNavigatingRef.current) return;
 
-		// Pause playback on date change
+		// Pause playback and reset filters on date change
 		pausePlayback();
+		resetFilters();
 
 		// Set navigation flag to prevent frame-date sync from fighting
 		isNavigatingRef.current = true;
