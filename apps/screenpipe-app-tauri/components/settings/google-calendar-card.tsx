@@ -225,8 +225,8 @@ export function GoogleCalendarCard() {
             </div>
 
             <p className="text-xs text-muted-foreground mb-3 leading-relaxed">
-              Connect your Google Calendar for meeting context. Requires a
-              screenpipe account.
+              Reads your Google Calendar to detect meetings. Requires a
+              screenpipe account. Read-only — never writes to your calendar.
             </p>
 
             {!connected ? (
@@ -375,7 +375,9 @@ export function GoogleCalendarCard() {
           <div className="flex items-center gap-3 text-xs text-muted-foreground">
             <span>
               {connected && enabled
-                ? `connected as ${email || "unknown"}`
+                ? email
+                  ? `synced as ${email}`
+                  : "calendar synced"
                 : "Enriches meeting detection with Google Calendar context"}
             </span>
             <span className="ml-auto">

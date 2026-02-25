@@ -14,6 +14,8 @@ import {
   RefreshCw,
   Users,
   XCircle,
+  LogOut,
+  Monitor,
 } from "lucide-react";
 import { platform } from "@tauri-apps/plugin-os";
 import { invoke } from "@tauri-apps/api/core";
@@ -155,7 +157,8 @@ export function CalendarCard() {
               <h3 className="text-sm font-semibold text-foreground">
                 Calendar
               </h3>
-              <span className="px-2 py-0.5 text-xs font-medium bg-muted text-muted-foreground rounded-full">
+              <span className="px-2 py-0.5 text-xs font-medium bg-muted text-muted-foreground rounded-full inline-flex items-center gap-1">
+                <Monitor className="h-2.5 w-2.5" />
                 on-device
               </span>
               {authorized && (
@@ -233,6 +236,23 @@ export function CalendarCard() {
                       : "Meeting detection disabled"}
                   </Label>
                 </div>
+
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    setAuthorized(false);
+                    setEnabled(false);
+                    try {
+                      localStorage?.setItem("calendar-enabled", "false");
+                    } catch {}
+                    posthog.capture("calendar_disconnected");
+                  }}
+                  className="text-xs text-muted-foreground hover:text-destructive h-7 px-2"
+                >
+                  <LogOut className="h-3 w-3 mr-1.5" />
+                  Disconnect
+                </Button>
               </div>
             )}
           </div>
@@ -329,7 +349,7 @@ export function CalendarCard() {
           <div className="flex items-center gap-3 text-xs text-muted-foreground">
             <span>
               {authorized && enabled
-                ? `${calendarCount} calendar${calendarCount !== 1 ? "s" : ""} connected`
+                ? `${calendarCount} calendar${calendarCount !== 1 ? "s" : ""} synced`
                 : "Enriches meeting detection with calendar context"}
             </span>
             <span className="ml-auto">
