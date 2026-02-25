@@ -991,11 +991,12 @@ async fn main() {
         .map(|enabled| !enabled)
         .unwrap_or(false);
 
+    let app_version = env!("CARGO_PKG_VERSION");
     let sentry_guard = if !telemetry_disabled {
         Some(sentry::init((
             "https://da4edafe2c8e5e8682505945695ecad7@o4505591122886656.ingest.us.sentry.io/4510761355116544",
             sentry::ClientOptions {
-                release: sentry::release_name!(),
+                release: Some(format!("screenpipe-app@{}", app_version).into()),
                 send_default_pii: false,
                 server_name: Some("screenpipe-app".into()),
                 before_send: Some(std::sync::Arc::new(|mut event| {

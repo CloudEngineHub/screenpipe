@@ -41,6 +41,11 @@ pub fn screen_is_locked() -> bool {
     SCREEN_IS_LOCKED.load(Ordering::SeqCst)
 }
 
+/// Set the screen locked state (called from capture loop when lock-screen app detected).
+pub fn set_screen_locked(locked: bool) {
+    SCREEN_IS_LOCKED.store(locked, Ordering::SeqCst);
+}
+
 /// Start the sleep/wake monitor on macOS
 /// This sets up NSWorkspace notification observers for sleep and wake events.
 /// Must be called from within a tokio runtime context so we can capture the handle.

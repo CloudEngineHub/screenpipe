@@ -565,6 +565,31 @@ async fn do_capture(
         None => (None, None, None),
     };
 
+    // Skip lock screen / screensaver — these waste disk and pollute timeline.
+    // Also update the global SCREEN_IS_LOCKED flag so subsequent loop iterations
+    // skip the screenshot entirely (saves CPU).
+    if let Some(ref app) = app_name_owned {
+        let app_lower = app.to_lowercase();
+        if app_lower == "loginwindow"
+            || app_lower == "screensaverengine"
+            || app_lower == "lockscreen"
+        {
+            debug!(
+                "skipping capture: lock screen app '{}' on monitor {}",
+                app, monitor_id
+            );
+            crate::sleep_monitor::set_screen_locked(true);
+            return Ok(CaptureOutput {
+                result: None,
+                image,
+            });
+        } else if crate::sleep_monitor::screen_is_locked() {
+            // Screen was marked locked but now a real app is focused — unlock
+            debug!("screen unlocked: app '{}' detected on monitor {}", app, monitor_id);
+            crate::sleep_monitor::set_screen_locked(false);
+        }
+    }
+
     let ctx = CaptureContext {
         db,
         snapshot_writer,
