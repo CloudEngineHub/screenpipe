@@ -5,6 +5,15 @@ use sqlx::FromRow;
 use std::error::Error as StdError;
 use std::fmt::{self, Display};
 
+/// Audio chunk that has no corresponding transcription row.
+/// Used by the reconciliation sweep to detect and retry orphaned chunks.
+#[derive(Debug, Clone, FromRow)]
+pub struct UntranscribedChunk {
+    pub id: i64,
+    pub file_path: String,
+    pub timestamp: DateTime<Utc>,
+}
+
 /// Info about an audio chunk and its transcription, used for re-transcription.
 #[derive(Debug, Clone, FromRow)]
 pub struct AudioChunkInfo {

@@ -38,9 +38,10 @@ use crate::{
     transcription::{
         deepgram::streaming::stream_transcription_deepgram,
         handle_new_transcript,
-        stt::process_audio_input,
+        stt::{process_audio_input, SAMPLE_RATE},
         whisper::model::{create_whisper_context_parameters, download_whisper_model},
     },
+    utils::{audio::resample, ffmpeg::{get_new_file_path, write_audio_to_file}},
     vad::{silero::SileroVad, webrtc::WebRtcVad, VadEngine, VadEngineEnum},
     AudioInput, TranscriptionResult,
 };
@@ -184,6 +185,38 @@ impl AudioManager {
                 loop {
                     detector.refresh();
                     tokio::time::sleep(Duration::from_secs(10)).await;
+                }
+            });
+        }
+
+        // Spawn reconciliation sweep for orphaned audio chunks (smart mode only)
+        if self.idle_detector.is_some() || self.meeting_detector.is_some() {
+            let db = self.db.clone();
+            let whisper_ctx_ref = self.whisper_context.clone();
+            let options = self.options.clone();
+            let transcription_paused = self.transcription_paused.clone();
+            tokio::spawn(async move {
+                // Wait for Whisper model to load + initial recordings
+                tokio::time::sleep(Duration::from_secs(120)).await;
+                loop {
+                    if !transcription_paused.load(Ordering::Relaxed) {
+                        if let Some(ref ctx) = *whisper_ctx_ref.read().await {
+                            let opts = options.read().await;
+                            let engine = opts.transcription_engine.clone();
+                            let key = opts.deepgram_api_key.clone();
+                            let langs = opts.languages.clone();
+                            let vocab = opts.vocabulary.clone();
+                            drop(opts);
+                            let count = super::reconciliation::reconcile_untranscribed(
+                                &db, ctx, engine, key, langs, &vocab,
+                            )
+                            .await;
+                            if count > 0 {
+                                info!("reconciliation: transcribed {} orphaned chunks", count);
+                            }
+                        }
+                    }
+                    tokio::time::sleep(Duration::from_secs(300)).await;
                 }
             });
         }
@@ -397,6 +430,7 @@ impl AudioManager {
         let idle_detector = self.idle_detector.clone();
         let meeting_detector = self.meeting_detector.clone();
         let transcription_paused = self.transcription_paused.clone();
+        let db = self.db.clone();
 
         let quantized_path = self.stt_model_path.clone();
         info!("loading whisper model with GPU acceleration...");
@@ -436,6 +470,42 @@ impl AudioManager {
                     };
                     meeting.on_audio_activity(&audio.device.device_type, rms > 0.05);
                 }
+
+                // ALWAYS persist audio to disk immediately, before any deferral.
+                // This ensures audio survives app restarts and can be retranscribed later.
+                let persisted_file_path = if let Some(ref out) = output_path {
+                    let resampled = if audio.sample_rate != SAMPLE_RATE {
+                        match resample(audio.data.as_ref(), audio.sample_rate, SAMPLE_RATE) {
+                            Ok(r) => r,
+                            Err(e) => {
+                                error!("failed to resample for early persist: {:?}", e);
+                                audio.data.as_ref().to_vec()
+                            }
+                        }
+                    } else {
+                        audio.data.as_ref().to_vec()
+                    };
+                    let path = get_new_file_path(&audio.device.to_string(), out);
+                    if let Err(e) = write_audio_to_file(
+                        &resampled,
+                        SAMPLE_RATE,
+                        &PathBuf::from(&path),
+                        false,
+                    ) {
+                        error!("failed to persist audio before deferral: {:?}", e);
+                        None
+                    } else {
+                        debug!("audio persisted to disk: {}", path);
+                        // Insert into DB immediately so retranscribe can find this audio
+                        // even if transcription is deferred. No transcription yet — just the chunk.
+                        if let Err(e) = db.insert_audio_chunk(&path, None).await {
+                            error!("failed to insert audio chunk into db: {:?}", e);
+                        }
+                        Some(path)
+                    }
+                } else {
+                    None
+                };
 
                 // Smart mode: defer Whisper during meetings, then check CPU idle
                 let mut deferred = false;
@@ -516,6 +586,7 @@ impl AudioManager {
                     &mut whisper_state,
                     metrics.clone(),
                     &vocabulary,
+                    persisted_file_path.clone(),
                 )
                 .await
                 {
