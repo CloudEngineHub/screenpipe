@@ -57,6 +57,7 @@ export default function PermissionRecoveryPage() {
   const [permissions, setPermissions] = useState<Record<string, string> | null>(null);
   const [arcInstalled, setArcInstalled] = useState(false);
   const [arcAutomationOk, setArcAutomationOk] = useState(false);
+  const [arcChecked, setArcChecked] = useState(false);
 
   const { isMac: isMacOS } = usePlatform();
 
@@ -72,6 +73,7 @@ export default function PermissionRecoveryPage() {
         const granted = await commands.checkArcAutomationPermission().catch(() => false);
         setArcAutomationOk(granted);
       }
+      setArcChecked(true);
 
       return perms;
     } catch (error) {
@@ -102,6 +104,9 @@ export default function PermissionRecoveryPage() {
     const screenOk = permissions.screenRecording === "granted" || permissions.screenRecording === "notNeeded";
     const micOk = permissions.microphone === "granted" || permissions.microphone === "notNeeded";
 
+    // Wait for Arc check to complete before deciding
+    if (!arcChecked) return;
+
     // Close window and restart screenpipe if all permissions are granted (including Arc)
     const arcOk = !arcInstalled || arcAutomationOk;
     if (screenOk && micOk && arcOk) {
@@ -129,7 +134,7 @@ export default function PermissionRecoveryPage() {
         }
       }, 1500);
     }
-  }, [permissions]);
+  }, [permissions, arcChecked, arcInstalled, arcAutomationOk]);
 
   // Open system settings for a permission
   const openSettings = async (permission: OSPermission) => {
@@ -162,7 +167,7 @@ export default function PermissionRecoveryPage() {
 
   const allCriticalOk = screenStatus === "granted" && micStatus === "granted";
   const arcNeedsFix = isMacOS && arcInstalled && !arcAutomationOk;
-  const allOk = allCriticalOk && !arcNeedsFix;
+  const allOk = allCriticalOk && !arcNeedsFix && arcChecked;
 
   return (
     <div className="flex flex-col w-full h-screen overflow-hidden bg-background">
