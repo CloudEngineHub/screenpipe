@@ -376,7 +376,7 @@ export const TextOverlay = memo(function TextOverlay({
 							zIndex: 5,
 							borderBottom: isHovered
 								? "2px solid rgba(96, 165, 250, 0.9)"
-								: "2px solid rgba(96, 165, 250, 0.45)",
+								: "none",
 							backgroundColor: isHovered
 								? "rgba(96, 165, 250, 0.15)"
 								: "transparent",

@@ -884,7 +884,7 @@ export const CurrentFrameTimeline: FC<CurrentFrameTimelineProps> = ({
 
 			{/* Search highlights + URL links (pointer-events: none wrapper, links have auto) */}
 			{!isLoading && !hasError && !ocrLoading && naturalDimensions && renderedImageInfo && textPositions.length > 0 && (
-				<div className="absolute overflow-hidden" style={{ zIndex: 3, top: 0, left: 0, right: 0, bottom: 0 }}>
+				<div className="absolute overflow-hidden" style={{ zIndex: 6, top: 0, left: 0, right: 0, bottom: 0 }}>
 					<div style={{
 						position: "absolute",
 						left: renderedImageInfo.offsetX,
