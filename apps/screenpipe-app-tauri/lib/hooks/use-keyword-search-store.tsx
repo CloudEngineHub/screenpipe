@@ -31,6 +31,15 @@ export interface SearchMatchGroup {
 	frame_ids: number[];
 }
 
+export interface UiEventResult {
+	id: number;
+	timestamp: string;
+	event_type: string;
+	text_content: string | null;
+	app_name: string | null;
+	window_title: string | null;
+}
+
 export interface SearchRequest {
 	query: string;
 	params: {
@@ -47,6 +56,8 @@ export interface SearchRequest {
 export interface KeywordSearchState {
 	searchResults: SearchMatch[];
 	searchGroups: SearchMatchGroup[];
+	uiEventResults: UiEventResult[];
+	isSearchingUiEvents: boolean;
 	currentResultIndex: number;
 	isSearching: boolean;
 	searchQuery: string;
@@ -81,6 +92,8 @@ const offset_default = 0;
 export const useKeywordSearchStore = create<KeywordSearchState>((set, get) => ({
 	searchResults: [],
 	searchGroups: [],
+	uiEventResults: [],
+	isSearchingUiEvents: false,
 	currentResultIndex: -1,
 	isSearching: false,
 	searchQuery: "",
@@ -138,6 +151,8 @@ export const useKeywordSearchStore = create<KeywordSearchState>((set, get) => ({
 			set({
 				searchResults: [],
 				searchGroups: [],
+				uiEventResults: [],
+				isSearchingUiEvents: true,
 				currentResultIndex: -1,
 				activeRequestId: requestId,
 				isSearching: true,
@@ -216,6 +231,47 @@ export const useKeywordSearchStore = create<KeywordSearchState>((set, get) => ({
 				params.append("limit", options.limit.toString());
 			}
 
+			// Fire UI events search in parallel (only on initial search)
+			if (isInitialSearch) {
+				const uiParams = new URLSearchParams({
+					content_type: "input",
+					q: query,
+					limit: "20",
+					offset: "0",
+				});
+				if (options.start_time) {
+					uiParams.append("start_time", options.start_time.toISOString());
+				}
+				if (options.end_time) {
+					uiParams.append("end_time", options.end_time.toISOString());
+				}
+
+				fetch(`http://localhost:3030/search?${uiParams}`, {
+					signal: combinedSignal.signal,
+				})
+					.then((resp) => (resp.ok ? resp.json() : null))
+					.then((data) => {
+						if (!data || get().activeRequestId !== requestId) return;
+						const items: UiEventResult[] = (data.data || [])
+							.map((item: any) => ({
+								id: item.content?.id ?? 0,
+								timestamp: item.content?.timestamp || "",
+								event_type: item.content?.event_type || "",
+								text_content: item.content?.text_content ?? null,
+								app_name: item.content?.app_name ?? null,
+								window_title: item.content?.window_title ?? null,
+							}))
+							.filter(
+								(e: UiEventResult) =>
+									e.text_content && e.text_content.trim().length > 0,
+							);
+						set({ uiEventResults: items, isSearchingUiEvents: false });
+					})
+					.catch(() => {
+						set({ isSearchingUiEvents: false });
+					});
+			}
+
 			const response = await fetch(
 				`http://localhost:3030/search/keyword?${params}`,
 				{ signal: combinedSignal.signal },
@@ -290,6 +346,8 @@ export const useKeywordSearchStore = create<KeywordSearchState>((set, get) => ({
 		set({
 			searchResults: [],
 			searchGroups: [],
+			uiEventResults: [],
+			isSearchingUiEvents: false,
 			currentResultIndex: -1,
 			isSearching: false,
 			searchQuery: "",

@@ -1,8 +1,8 @@
 "use client";
 
 import { useEffect, useState, useRef, useCallback, useMemo } from "react";
-import { Search, X, Loader2, Clock, MessageSquare, User, ArrowLeft, Mic, Volume2, Hash, Tag } from "lucide-react";
-import { useKeywordSearchStore, SearchMatch } from "@/lib/hooks/use-keyword-search-store";
+import { Search, X, Loader2, Clock, MessageSquare, User, ArrowLeft, Mic, Volume2, Hash, Tag, Monitor, Keyboard, ClipboardCopy, AppWindow } from "lucide-react";
+import { useKeywordSearchStore, SearchMatch, UiEventResult } from "@/lib/hooks/use-keyword-search-store";
 import { useDebounce } from "@/lib/hooks/use-debounce";
 import { format, isToday, isYesterday } from "date-fns";
 import { cn } from "@/lib/utils";
@@ -294,6 +294,10 @@ export function SearchModal({ isOpen, onClose, onNavigateToTimestamp, embedded =
   const isTagSearch = query.startsWith("#");
   const isPeopleSearch = query.startsWith("@");
 
+  // Content type filter
+  type ContentFilter = "all" | "screen" | "input";
+  const [contentFilter, setContentFilter] = useState<ContentFilter>("all");
+
   // App filter
   const [appFilter, setAppFilter] = useState<string | null>(null);
 
@@ -314,6 +318,8 @@ export function SearchModal({ isOpen, onClose, onNavigateToTimestamp, embedded =
   const {
     searchResults,
     searchGroups,
+    uiEventResults,
+    isSearchingUiEvents,
     isSearching,
     searchKeywords,
     resetSearch,
@@ -346,6 +352,7 @@ export function SearchModal({ isOpen, onClose, onNavigateToTimestamp, embedded =
       setQuery("");
       resetSearch();
       setAppFilter(null);
+      setContentFilter("all");
       setSpeakerResults([]);
       setTagResults([]);
       setAllTags([]);
@@ -393,6 +400,7 @@ export function SearchModal({ isOpen, onClose, onNavigateToTimestamp, embedded =
     }
 
     setAppFilter(null);
+    setContentFilter("all");
     setTagResults([]);
     setOcrOffset(0);
     setHasMoreOcr(true);
@@ -798,8 +806,8 @@ export function SearchModal({ isOpen, onClose, onNavigateToTimestamp, embedded =
 
   if (!isOpen) return null;
 
-  const hasResults = searchResults.length > 0 || speakerResults.length > 0 || tagResults.length > 0;
-  const showEmpty = !isSearching && !isSearchingSpeakers && !isSearchingTags && debouncedQuery && !hasResults && !selectedSpeaker && !isTagSearch && !isPeopleSearch;
+  const hasResults = searchResults.length > 0 || speakerResults.length > 0 || tagResults.length > 0 || uiEventResults.length > 0;
+  const showEmpty = !isSearching && !isSearchingSpeakers && !isSearchingTags && !isSearchingUiEvents && debouncedQuery && !hasResults && !selectedSpeaker && !isTagSearch && !isPeopleSearch;
   const activeIndex = hoveredIndex ?? selectedIndex;
 
   const renderResults = () => (
@@ -1012,7 +1020,7 @@ export function SearchModal({ isOpen, onClose, onNavigateToTimestamp, embedded =
           )}
 
           {/* Loading skeleton */}
-          {!isTagSearch && !isPeopleSearch && isSearching && searchResults.length === 0 && speakerResults.length === 0 && (
+          {!isTagSearch && !isPeopleSearch && (isSearching || isSearchingUiEvents) && searchResults.length === 0 && uiEventResults.length === 0 && speakerResults.length === 0 && (
             <div className="grid grid-cols-4 gap-3">
               {Array.from({ length: 8 }).map((_, i) => (
                 <div key={i} className="bg-muted animate-pulse rounded overflow-hidden">
@@ -1052,12 +1060,37 @@ export function SearchModal({ isOpen, onClose, onNavigateToTimestamp, embedded =
             </div>
           )}
 
+          {/* Content type filter chips — shown when we have any results */}
+          {(searchResults.length > 0 || uiEventResults.length > 0) && (
+            <div className="flex gap-2 mb-3">
+              {([
+                { key: "all" as ContentFilter, label: "All", icon: null },
+                { key: "screen" as ContentFilter, label: "Screen", icon: Monitor },
+                { key: "input" as ContentFilter, label: "Keyboard & Clipboard", icon: Keyboard },
+              ] as const).map(({ key, label, icon: Icon }) => (
+                <button
+                  key={key}
+                  onClick={() => { setContentFilter(key); setSelectedIndex(0); }}
+                  className={cn(
+                    "inline-flex items-center gap-1.5 px-2.5 py-1 text-xs rounded-full border transition-colors",
+                    contentFilter === key
+                      ? "bg-foreground text-background border-foreground"
+                      : "border-border text-muted-foreground hover:border-foreground/40"
+                  )}
+                >
+                  {Icon && <Icon className="w-3 h-3" />}
+                  {label}
+                </button>
+              ))}
+            </div>
+          )}
+
           {/* Screen results grid */}
-          {searchResults.length > 0 && (
+          {searchResults.length > 0 && contentFilter !== "input" && (
             <>
-              {speakerResults.length > 0 && (
+              {(speakerResults.length > 0 || (contentFilter === "all" && uiEventResults.length > 0)) && (
                 <p className="text-xs text-muted-foreground mb-2 flex items-center gap-1.5">
-                  <Search className="w-3 h-3" />
+                  <Monitor className="w-3 h-3" />
                   screen
                 </p>
               )}
@@ -1165,6 +1198,60 @@ export function SearchModal({ isOpen, onClose, onNavigateToTimestamp, embedded =
                 </div>
               )}
             </>
+          )}
+
+          {/* UI event results */}
+          {uiEventResults.length > 0 && contentFilter !== "screen" && (
+            <div className={cn(contentFilter === "all" && searchResults.length > 0 && "mt-6")}>
+              <p className="text-xs text-muted-foreground mb-2 flex items-center gap-1.5">
+                <Keyboard className="w-3 h-3" />
+                keyboard & clipboard
+              </p>
+              <div className="flex flex-col gap-2">
+                {(contentFilter === "all" ? uiEventResults.slice(0, 5) : uiEventResults).map((evt) => {
+                  const EvtIcon = evt.event_type === "clipboard" ? ClipboardCopy
+                    : evt.event_type === "app_switch" ? AppWindow
+                    : Keyboard;
+                  return (
+                    <div
+                      key={evt.id}
+                      onClick={() => {
+                        onNavigateToTimestamp(evt.timestamp);
+                        if (!embedded) onClose();
+                      }}
+                      className="cursor-pointer border border-border rounded p-3 hover:border-foreground/50 transition-colors"
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex items-start gap-2 min-w-0">
+                          <EvtIcon className="w-3.5 h-3.5 text-muted-foreground mt-0.5 flex-shrink-0" />
+                          <div className="min-w-0">
+                            <p className="text-xs text-foreground line-clamp-2">
+                              {evt.text_content}
+                            </p>
+                            {(evt.app_name || evt.window_title) && (
+                              <p className="text-[11px] text-muted-foreground mt-0.5 truncate">
+                                {[evt.app_name, evt.window_title].filter(Boolean).join(" — ")}
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                        <span className="text-[11px] text-muted-foreground font-mono flex-shrink-0">
+                          {formatRelativeTime(evt.timestamp)}
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+              {contentFilter === "all" && uiEventResults.length > 5 && (
+                <button
+                  onClick={() => setContentFilter("input")}
+                  className="mt-2 text-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+                >
+                  show all {uiEventResults.length} results
+                </button>
+              )}
+            </div>
           )}
 
           {/* Suggestions when no query */}
