@@ -1189,8 +1189,9 @@ export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 			zoomTimeoutRef.current = setTimeout(() => {
 				isZoomingRef.current = false;
 			}, 150);
+			// Amplify: NSEvent magnification is small (~0.01-0.05 per tick)
 			setTargetZoom((prev) =>
-				Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, prev * (1 + magnification))),
+				Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, prev * (1 + magnification * 5))),
 			);
 		});
 		return () => { unlisten.then((f) => f()); };
