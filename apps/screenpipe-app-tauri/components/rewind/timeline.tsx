@@ -581,6 +581,7 @@ export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 					}
 				});
 
+				resetFilters();
 				const snapped = snapToDevice(closestIndex);
 				setCurrentIndex(snapped);
 				setCurrentFrame(frames[snapped]);

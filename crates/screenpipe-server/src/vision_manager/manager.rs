@@ -200,8 +200,12 @@ impl VisionManager {
         // Create activity feed for this monitor
         let activity_feed = ActivityFeed::new();
 
-        // Tree walker config with defaults
-        let tree_walker_config = TreeWalkerConfig::default();
+        // Tree walker config — pass through user's ignored/included window filters
+        let tree_walker_config = TreeWalkerConfig {
+            ignored_windows: self.config.ignored_windows.clone(),
+            included_windows: self.config.included_windows.clone(),
+            ..TreeWalkerConfig::default()
+        };
 
         // Event-driven capture config
         let capture_config = EventDrivenCaptureConfig::default();

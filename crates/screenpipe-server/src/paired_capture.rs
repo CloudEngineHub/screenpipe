@@ -92,11 +92,30 @@ pub async fn paired_capture(
     // ~50-200ms of Apple Vision CPU work per capture AND prevents cloning
     // the Arc<DynamicImage> into the spawn_blocking closure (which would
     // make Arc::try_unwrap fail later, forcing a full image copy).
-    let has_accessibility_text = tree_snapshot
-        .map(|s| !s.text_content.is_empty())
-        .unwrap_or(false);
+    //
+    // Exception: terminal emulators expose their buffer via AXTextArea,
+    // which returns non-empty but low-quality text (raw buffer content
+    // without visual formatting). For these apps we always run OCR to get
+    // proper bounding-box text positions for the selectable overlay.
+    let app_prefers_ocr = ctx.app_name.map_or(false, |name| {
+        let n = name.to_lowercase();
+        // Terminal emulators whose AX text is raw buffer and not useful
+        // for bounding-box overlay. OCR produces better results.
+        n.contains("wezterm")
+            || n.contains("iterm")
+            || n.contains("terminal")
+            || n.contains("alacritty")
+            || n.contains("kitty")
+            || n.contains("hyper")
+            || n.contains("warp")
+            || n.contains("ghostty")
+    });
+    let has_accessibility_text = !app_prefers_ocr
+        && tree_snapshot
+            .map(|s| !s.text_content.is_empty())
+            .unwrap_or(false);
 
-    // Only run OCR when accessibility tree returned no text (games, terminals, etc.)
+    // Only run OCR when accessibility tree returned no text or app prefers OCR
     let (ocr_text, ocr_text_json) = if !has_accessibility_text {
         let image_for_ocr = ctx.image.clone();
         let ocr_result = tokio::task::spawn_blocking(move || {
@@ -131,7 +150,8 @@ pub async fn paired_capture(
             )
         }
         _ => {
-            // OCR fallback: accessibility returned no text (games, terminals, bad a11y apps).
+            // OCR fallback: accessibility returned no text (games, bad a11y apps)
+            // or app_prefers_ocr forced OCR (terminals).
             if ocr_text.is_empty() {
                 (None, None, None, None)
             } else {
