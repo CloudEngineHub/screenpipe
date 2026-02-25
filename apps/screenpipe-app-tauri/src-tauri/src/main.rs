@@ -1523,6 +1523,36 @@ async fn main() {
                 // This no longer causes feedback loops because we removed
                 // activateIgnoringOtherApps + activation policy toggling.
                 space_monitor::setup_space_listener(app.handle().clone());
+
+                // Forward native trackpad magnify (pinch) gestures to JS as Tauri events.
+                // WKWebView swallows magnifyWithEvent: and doesn't fire JS gesture events,
+                // so we use an NSEvent local monitor to catch them and emit to the frontend.
+                {
+                    use objc::{class, msg_send, sel, sel_impl, runtime::Object};
+                    use tauri_nspanel::block::ConcreteBlock;
+
+                    let app_for_magnify = app.handle().clone();
+
+                    // NSEventMaskMagnify = 1 << 30
+                    let mask: u64 = 1 << 30;
+
+                    let block = ConcreteBlock::new(move |event: *mut Object| -> *mut Object {
+                        let magnification: f64 = unsafe { msg_send![event, magnification] };
+                        let _ = app_for_magnify.emit("native-magnify", magnification);
+                        event
+                    });
+                    let block = block.copy();
+
+                    unsafe {
+                        let _monitor: *mut Object = msg_send![
+                            class!(NSEvent),
+                            addLocalMonitorForEventsMatchingMask: mask
+                            handler: &*block
+                        ];
+                    }
+                    // Intentionally leak block + monitor — lives for app lifetime
+                    std::mem::forget(block);
+                }
             }
 
             // Logging setup
