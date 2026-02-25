@@ -838,8 +838,8 @@ async getCachedSuggestions() : Promise<Result<CachedSuggestions, string>> {
 }
 },
 /**
- * Validate that a path is usable as a data directory.
- * Checks: absolute path, can create dir, is writable.
+ * Tauri command: validate that a path is usable as a data directory.
+ * Called from the frontend before saving the setting.
  */
 async validateDataDir(path: string) : Promise<Result<null, string>> {
     try {

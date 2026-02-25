@@ -106,6 +106,12 @@ export type Settings = SettingsStore & {
 	};
 	/** Custom vocabulary entries for transcription biasing and word replacement */
 	vocabularyWords?: Array<{ word: string; replacement?: string }>;
+	/** Cloud archive: auto-upload and delete data older than retention period */
+	cloudArchiveEnabled?: boolean;
+	/** Days to keep data locally before archiving (default: 7) */
+	cloudArchiveRetentionDays?: number;
+	/** Internal: auto-generated encryption password for archive (opaque to user) */
+	_archiveEncryptionPassword?: string;
 }
 
 export function getEffectiveFilters(settings: Settings) {
@@ -254,6 +260,8 @@ let DEFAULT_SETTINGS: Settings = {
 			showOverlayInScreenRecording: false,
 			videoQuality: "balanced",
 			transcriptionMode: "realtime",
+			cloudArchiveEnabled: false,
+			cloudArchiveRetentionDays: 7,
 		};
 
 export function createDefaultSettingsObject(): Settings {

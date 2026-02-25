@@ -14,6 +14,7 @@ import {
   HardDrive,
   Plug,
   Cloud,
+  CloudUpload,
   Workflow,
   Users,
   Home,
@@ -40,6 +41,7 @@ import { ConnectionsSection } from "@/components/settings/connections-section";
 import { FeedbackSection } from "@/components/settings/feedback-section";
 import { PipesSection } from "@/components/settings/pipes-section";
 import { SyncSettings } from "@/components/settings/sync-settings";
+import { ArchiveSettings } from "@/components/settings/archive-settings";
 import { TeamSection } from "@/components/settings/team-section";
 import { StandaloneChat } from "@/components/standalone-chat";
 import Timeline from "@/components/rewind/timeline";
@@ -66,6 +68,7 @@ type SettingsModalSection =
   | "shortcuts"
   | "connections"
   | "disk-usage"
+  | "cloud-archive"
   | "cloud-sync"
   | "team"
   | "referral";
@@ -74,13 +77,13 @@ type SettingsModalSection =
 const ALL_SECTIONS = [
   "home", "timeline", "pipes", "help",
   "account", "recording", "ai", "general", "shortcuts",
-  "connections", "disk-usage", "cloud-sync", "team", "referral",
+  "connections", "disk-usage", "cloud-archive", "cloud-sync", "team", "referral",
   "feedback", // backwards compat → maps to "help"
 ];
 
 const MODAL_SECTIONS = new Set<string>([
   "account", "recording", "ai", "general", "shortcuts",
-  "connections", "disk-usage", "cloud-sync", "team", "referral",
+  "connections", "disk-usage", "cloud-archive", "cloud-sync", "team", "referral",
 ]);
 
 function SettingsPageContent() {
@@ -226,6 +229,8 @@ function SettingsPageContent() {
         return <DiskUsageSection />;
       case "connections":
         return <ConnectionsSection />;
+      case "cloud-archive":
+        return <ArchiveSettings />;
       case "cloud-sync":
         return showCloudSync ? <SyncSettings /> : <GeneralSettings />;
       case "team":
@@ -250,6 +255,7 @@ function SettingsPageContent() {
     { id: "shortcuts", label: "Shortcuts", icon: <Keyboard className="h-4 w-4" />, group: "settings" },
     { id: "connections", label: "Connections", icon: <Plug className="h-4 w-4" />, group: "settings" },
     { id: "disk-usage", label: "Disk usage", icon: <HardDrive className="h-4 w-4" />, group: "settings" },
+    { id: "cloud-archive" as SettingsModalSection, label: "Cloud archive", icon: <CloudUpload className="h-4 w-4" />, group: "settings" },
     ...(showCloudSync
       ? [{ id: "cloud-sync" as SettingsModalSection, label: "Cloud sync", icon: <Cloud className="h-4 w-4" />, group: "settings" }]
       : []),

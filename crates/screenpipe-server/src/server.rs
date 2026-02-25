@@ -114,6 +114,8 @@ pub struct AppState {
     /// Hot frame cache — in-memory cache for today's frames.
     /// Timeline WS reads from here instead of polling the DB.
     pub hot_frame_cache: Arc<HotFrameCache>,
+    /// Cloud archive state (initialized via /archive/init endpoint)
+    pub archive_state: crate::archive::ArchiveState,
 }
 
 pub struct SCServer {
@@ -368,6 +370,7 @@ impl SCServer {
             // (typical when search results load all thumbnails at once).
             frame_extraction_semaphore: Arc::new(tokio::sync::Semaphore::new(3)),
             hot_frame_cache,
+            archive_state: crate::archive::ArchiveState::new(),
         });
 
         let cors = CorsLayer::new()
@@ -428,6 +431,10 @@ impl SCServer {
                 "/sync/download",
                 axum::routing::post(sync_api::sync_download),
             )
+            // Cloud Archive API routes
+            .route("/archive/init", axum::routing::post(crate::archive::archive_init))
+            .route("/archive/configure", axum::routing::post(crate::archive::archive_configure))
+            .route("/archive/status", get(crate::archive::archive_status))
             // Vision status endpoint (not in OpenAPI spec to avoid oasgen registration issues)
             .route("/vision/status", get(api_vision_status))
             // Vision pipeline metrics (not in OpenAPI spec)

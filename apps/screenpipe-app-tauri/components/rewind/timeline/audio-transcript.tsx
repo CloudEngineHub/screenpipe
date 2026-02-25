@@ -204,10 +204,10 @@ export function AudioTranscript({
 
 	// Compute conversation items (thread view)
 	const conversationData = useMemo(() => {
-		if (!frames.length) return { items: [], participants: [], timeRange: null, totalDuration: 0 };
+		if (!frames.length) return { items: [], participants: [], timeRange: null, totalDuration: 0, firstChunkBySpeaker: new Map() };
 
 		const currentFrame = frames[currentIndex];
-		if (!currentFrame) return { items: [], participants: [], timeRange: null, totalDuration: 0 };
+		if (!currentFrame) return { items: [], participants: [], timeRange: null, totalDuration: 0, firstChunkBySpeaker: new Map() };
 
 		const currentTime = new Date(currentFrame.timestamp);
 		const windowStart = new Date(currentTime.getTime() - groupingWindowMs);
@@ -242,8 +242,9 @@ export function AudioTranscript({
 		let lastTimestamp: Date | null = null;
 
 		dedupedAudio.forEach((audio) => {
-			const { speakerId } = getSpeakerInfo(audio);
-			const isFirstInGroup = speakerId !== lastSpeakerId;
+			const { speakerId, speakerName } = getSpeakerInfo(audio);
+			// Force new group for unnamed speakers so assign popover is always visible
+			const isFirstInGroup = speakerId !== lastSpeakerId || !speakerName;
 
 			// Detect time gaps > 2 minutes
 			let gapMinutesBefore: number | undefined;
@@ -269,8 +270,9 @@ export function AudioTranscript({
 			lastTimestamp = audio.timestamp;
 		});
 
-		// Compute participants
+		// Compute participants and first chunk by speaker (for header assign popovers)
 		const participantMap = new Map<number, { name: string; duration: number }>();
+		const firstChunkBySpeaker = new Map<number, { audioChunkId: number; audioFilePath: string }>();
 		dedupedAudio.forEach((audio) => {
 			const { speakerId, speakerName } = getSpeakerInfo(audio);
 			const id = speakerId ?? -1;
@@ -281,6 +283,12 @@ export function AudioTranscript({
 				participantMap.set(id, {
 					name: speakerName || "",
 					duration: audio.duration_secs,
+				});
+			}
+			if (!firstChunkBySpeaker.has(id)) {
+				firstChunkBySpeaker.set(id, {
+					audioChunkId: audio.audio_chunk_id,
+					audioFilePath: audio.audio_file_path,
 				});
 			}
 		});
@@ -300,7 +308,7 @@ export function AudioTranscript({
 				  }
 				: null;
 
-		return { items, participants, timeRange, totalDuration };
+		return { items, participants, timeRange, totalDuration, firstChunkBySpeaker };
 	}, [frames, currentIndex, groupingWindowMs, getSpeakerInfo]);
 
 	// Auto-scroll to latest bubble during playback
@@ -317,7 +325,7 @@ export function AudioTranscript({
 	// Full meeting conversation data (when a meeting is active)
 	const meetingConversationData = useMemo(() => {
 		if (!activeMeeting)
-			return { items: [], participants: [], timeRange: null, totalDuration: 0 };
+			return { items: [], participants: [], timeRange: null, totalDuration: 0, firstChunkBySpeaker: new Map() };
 
 		const allAudio: AudioItemWithTimestamp[] = activeMeeting.audioEntries.map(
 			(entry) => ({
@@ -335,8 +343,9 @@ export function AudioTranscript({
 		let lastTimestamp: Date | null = null;
 
 		dedupedAudio.forEach((audio) => {
-			const { speakerId } = getSpeakerInfo(audio);
-			const isFirstInGroup = speakerId !== lastSpeakerId;
+			const { speakerId, speakerName } = getSpeakerInfo(audio);
+			// Force new group for unnamed speakers so assign popover is always visible
+			const isFirstInGroup = speakerId !== lastSpeakerId || !speakerName;
 
 			let gapMinutesBefore: number | undefined;
 			if (lastTimestamp) {
@@ -367,12 +376,25 @@ export function AudioTranscript({
 
 		const totalDuration = participants.reduce((sum, p) => sum + p.duration, 0);
 
+		// Build first chunk by speaker for header assign popovers
+		const firstChunkBySpeaker = new Map<number, { audioChunkId: number; audioFilePath: string }>();
+		dedupedAudio.forEach((audio) => {
+			const { speakerId } = getSpeakerInfo(audio);
+			const id = speakerId ?? -1;
+			if (!firstChunkBySpeaker.has(id)) {
+				firstChunkBySpeaker.set(id, {
+					audioChunkId: audio.audio_chunk_id,
+					audioFilePath: audio.audio_file_path,
+				});
+			}
+		});
+
 		const timeRange = {
 			start: activeMeeting.startTime,
 			end: activeMeeting.endTime,
 		};
 
-		return { items, participants, timeRange, totalDuration };
+		return { items, participants, timeRange, totalDuration, firstChunkBySpeaker };
 	}, [activeMeeting, getSpeakerInfo]);
 
 	// Copy full transcript to clipboard (nearby or meeting depending on active tab)
@@ -606,6 +628,8 @@ export function AudioTranscript({
 						participants={activeData.participants}
 						totalDuration={activeData.totalDuration}
 						timeRange={activeData.timeRange}
+						firstChunkBySpeaker={activeData.firstChunkBySpeaker}
+						onSpeakerAssigned={handleSpeakerAssigned}
 					/>
 				) : null;
 			})()}
