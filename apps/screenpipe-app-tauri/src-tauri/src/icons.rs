@@ -135,8 +135,31 @@ fn get_exe_by_reg_key(app_name: &str) -> Option<String> {
     use winreg::enums::*;
     use winreg::RegKey;
 
+    let app_lower = app_name.to_lowercase();
     let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
     let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+
+    // First try App Paths direct lookup (e.g. "wezterm-gui.exe" subkey)
+    let app_paths = [
+        "Software\\Microsoft\\Windows\\CurrentVersion\\App Paths",
+        "Software\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\App Paths",
+    ];
+    for path in &app_paths {
+        for root in [&hklm, &hkcu] {
+            // Try exact exe name as subkey (e.g. "wezterm-gui.exe")
+            let exe_key = format!("{}.exe", app_name);
+            if let Ok(app_key) = root.open_subkey(format!("{}\\{}", path, exe_key)) {
+                if let Ok(exe_path) = app_key.get_value::<String, _>("") {
+                    let cleaned = exe_path.trim_matches('"').to_string();
+                    if !cleaned.is_empty() && std::path::Path::new(&cleaned).exists() {
+                        return Some(cleaned);
+                    }
+                }
+            }
+        }
+    }
+
+    // Then search Uninstall + App Paths for DisplayName match
     let reg_paths = [
         "Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall",
         "Software\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall",
@@ -148,30 +171,53 @@ fn get_exe_by_reg_key(app_name: &str) -> Option<String> {
         let keys = [hklm.open_subkey(path), hkcu.open_subkey(path)];
         for key in keys.iter().filter_map(|k| k.as_ref().ok()) {
             for subkey in key.enum_keys().filter_map(Result::ok) {
+                let subkey_lower = subkey.to_lowercase();
                 if let Ok(app_key) = key.open_subkey(&subkey) {
-                    if let Ok(display_name) = app_key.get_value::<String, _>("DisplayName") {
-                        if display_name
-                            .to_lowercase()
-                            .contains(&app_name.to_lowercase())
-                        {
-                            if let Ok(path) = app_key.get_value::<String, _>("DisplayIcon") {
-                                let cleaned_path = path
-                                    .split(',')
-                                    .next()
-                                    .unwrap_or(&path)
-                                    .to_string()
-                                    .trim_matches('"')
-                                    .to_string();
+                    // Match on DisplayName or subkey name (App Paths uses exe name)
+                    let display_match = app_key
+                        .get_value::<String, _>("DisplayName")
+                        .map(|d| d.to_lowercase().contains(&app_lower))
+                        .unwrap_or(false);
+                    let subkey_match = subkey_lower.contains(&app_lower)
+                        || app_lower.contains(&subkey_lower.trim_end_matches(".exe"));
+
+                    if display_match || subkey_match {
+                        if let Ok(path) = app_key.get_value::<String, _>("DisplayIcon") {
+                            let cleaned_path = path
+                                .split(',')
+                                .next()
+                                .unwrap_or(&path)
+                                .to_string()
+                                .trim_matches('"')
+                                .to_string();
+                            if std::path::Path::new(&cleaned_path).exists() {
                                 return Some(cleaned_path);
-                            } else if let Ok(path) = app_key.get_value::<String, _>("(default)") {
-                                let cleaned_path = path
-                                    .split(',')
-                                    .next()
-                                    .unwrap_or(&path)
-                                    .to_string()
-                                    .trim_matches('"')
-                                    .to_string();
+                            }
+                        }
+                        // App Paths uses default value ""
+                        if let Ok(path) = app_key.get_value::<String, _>("") {
+                            let cleaned_path = path.trim_matches('"').to_string();
+                            if !cleaned_path.is_empty()
+                                && std::path::Path::new(&cleaned_path).exists()
+                            {
                                 return Some(cleaned_path);
+                            }
+                        }
+                        if let Ok(path) = app_key.get_value::<String, _>("InstallLocation") {
+                            let install_dir = std::path::Path::new(path.trim_matches('"'));
+                            if install_dir.is_dir() {
+                                // Look for any exe matching app_name in install dir
+                                if let Ok(entries) = std::fs::read_dir(install_dir) {
+                                    for entry in entries.flatten() {
+                                        let fname = entry.file_name().to_string_lossy().to_lowercase();
+                                        if fname.ends_with(".exe") && fname.contains(&app_lower)
+                                        {
+                                            return Some(
+                                                entry.path().to_string_lossy().to_string(),
+                                            );
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
@@ -197,6 +243,38 @@ fn powershell_exe() -> std::path::PathBuf {
 async fn get_exe_from_potential_path(app_name: &str) -> Option<String> {
     const CREATE_NO_WINDOW: u32 = 0x08000000;
     let app_name = app_name.strip_suffix(".exe").unwrap_or(&app_name);
+
+    // Try direct path in Program Files first (fast, no PowerShell)
+    let program_dirs = [
+        r"C:\Program Files",
+        r"C:\Program Files (x86)",
+    ];
+    let app_lower = app_name.to_lowercase();
+    for dir in &program_dirs {
+        let base = std::path::Path::new(dir);
+        if let Ok(entries) = std::fs::read_dir(base) {
+            for entry in entries.flatten() {
+                let folder_name = entry.file_name().to_string_lossy().to_lowercase();
+                if folder_name.contains(&app_lower) || app_lower.contains(&folder_name) {
+                    // Found matching folder, look for exe inside
+                    if let Ok(sub_entries) = std::fs::read_dir(entry.path()) {
+                        for sub in sub_entries.flatten() {
+                            let fname = sub.file_name().to_string_lossy().to_lowercase();
+                            if fname.ends_with(".exe") && (fname.contains(&app_lower) || fname.contains("gui")) {
+                                return Some(sub.path().to_string_lossy().to_string());
+                            }
+                        }
+                    }
+                    // Also check for direct exe match
+                    let direct_exe = entry.path().join(format!("{}.exe", app_name));
+                    if direct_exe.exists() {
+                        return Some(direct_exe.to_string_lossy().to_string());
+                    }
+                }
+            }
+        }
+    }
+
     let potential_paths = [
         (
             r"C:\ProgramData\Microsoft\Windows\Start Menu\Programs",

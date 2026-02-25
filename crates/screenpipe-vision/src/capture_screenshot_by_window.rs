@@ -821,19 +821,84 @@ fn extract_window_data_xcap(window: XcapWindow) -> Option<WindowData> {
     }
 }
 
+#[cfg(target_os = "windows")]
+fn get_process_exe_name(pid: u32) -> Option<String> {
+    // Use raw FFI to avoid windows-core version conflicts with xcap
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn OpenProcess(dwDesiredAccess: u32, bInheritHandle: i32, dwProcessId: u32) -> isize;
+        fn CloseHandle(hObject: isize) -> i32;
+    }
+    #[link(name = "psapi")]
+    extern "system" {
+        fn GetModuleFileNameExW(
+            hProcess: isize,
+            hModule: isize,
+            lpFilename: *mut u16,
+            nSize: u32,
+        ) -> u32;
+    }
+
+    const PROCESS_QUERY_INFORMATION: u32 = 0x0400;
+    const PROCESS_VM_READ: u32 = 0x0010;
+    const PROCESS_QUERY_LIMITED_INFORMATION: u32 = 0x1000;
+
+    unsafe {
+        // Try full access first, fall back to limited (handles elevated processes)
+        let mut handle =
+            OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, 0, pid);
+        if handle == 0 {
+            handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+        }
+        if handle == 0 {
+            return None;
+        }
+
+        let mut buf = [0u16; 260];
+        let len = GetModuleFileNameExW(handle, 0, buf.as_mut_ptr(), buf.len() as u32);
+        CloseHandle(handle);
+
+        if len == 0 {
+            return None;
+        }
+
+        let path = String::from_utf16_lossy(&buf[..len as usize]);
+
+        // Extract filename without .exe
+        let filename = path.rsplit('\\').next().unwrap_or(&path);
+        let name = filename.strip_suffix(".exe").unwrap_or(filename);
+        if name.is_empty() {
+            return None;
+        }
+        Some(name.to_string())
+    }
+}
+
 #[cfg(not(target_os = "macos"))]
 fn get_all_windows() -> Result<Vec<WindowData>, Box<dyn Error>> {
     let windows = Window::all()?;
     Ok(windows
         .into_iter()
         .filter_map(|window| {
-            let app_name = match window.app_name() {
+            let mut app_name = match window.app_name() {
                 Ok(name) => name.to_string(),
                 Err(e) => {
                     debug!("Failed to get app_name for window: {}", e);
                     return None;
                 }
             };
+
+            // On Windows, xcap returns empty string when OpenProcess fails
+            // (elevated/system processes). Fall back to exe filename.
+            #[cfg(target_os = "windows")]
+            if app_name.is_empty() {
+                if let Some(pid) = window.pid().ok() {
+                    if let Some(exe_name) = get_process_exe_name(pid as u32) {
+                        debug!("app_name was empty, using exe name: {}", exe_name);
+                        app_name = exe_name;
+                    }
+                }
+            }
 
             let title = match window.title() {
                 Ok(title) => title.to_string(),
