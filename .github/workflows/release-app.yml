@@ -738,77 +738,67 @@ jobs:
           echo "MACOSX_DEPLOYMENT_TARGET=10.15" >> $GITHUB_ENV
           echo "Setting MACOSX_DEPLOYMENT_TARGET=10.15 for std::filesystem support"
 
-      - name: Import signing cert into login keychain (macOS)
+      - name: Import signing cert into build keychain (macOS)
         if: matrix.os_type == 'macos'
         shell: bash
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          KEYCHAIN_PASSWORD_MACBOOK: ${{ secrets.KEYCHAIN_PASSWORD_MACBOOK }}
-          KEYCHAIN_PASSWORD_MACMINI: ${{ secrets.KEYCHAIN_PASSWORD_MACMINI }}
         run: |
-          # Import the signing cert directly into the login keychain instead of letting
-          # Tauri create a temp keychain. On self-hosted runners, Tauri's temp keychain
-          # approach fails with errSecInternalComponent because the runner's security
-          # session (created by SessionCreate=true in the LaunchAgent) can't verify
-          # cert chains through the temp keychain.
+          # Use a dedicated build keychain to avoid login keychain permission
+          # issues on self-hosted runners. The login keychain approach fails with
+          # errSecInternalComponent on some runners because the security session
+          # can't update the partition list for the login keychain's private keys.
           #
-          # By importing into login.keychain and NOT passing APPLE_CERTIFICATE to Tauri,
-          # Tauri will find the identity in the existing keychain and skip temp keychain
-          # creation entirely.
+          # A dedicated keychain with a known password avoids all these issues:
+          # we control the password, partition list, and search order.
 
-          # Detect which runner we're on and pick the right keychain password.
-          # MacBook home is /Users/louisbeaumont, Mac Mini is /Users/louis.
-          if [[ "$HOME" == *"/louisbeaumont"* ]]; then
-            KC_PASS="$KEYCHAIN_PASSWORD_MACBOOK"
-            echo "Detected MacBook runner"
-          elif [[ "$HOME" == *"/louis"* ]]; then
-            KC_PASS="$KEYCHAIN_PASSWORD_MACMINI"
-            echo "Detected Mac Mini runner"
-          else
-            KC_PASS=""
-            echo "Unknown runner, trying empty keychain password"
-          fi
+          BUILD_KC="$HOME/Library/Keychains/build.keychain-db"
+          BUILD_KC_PASS="build_password"
 
-          # Unlock login keychain (required on self-hosted runners where
-          # the keychain is locked and UI interaction is not available).
-          security unlock-keychain -p "$KC_PASS" ~/Library/Keychains/login.keychain-db || \
-            security unlock-keychain -p "" ~/Library/Keychains/login.keychain-db 2>/dev/null || true
+          # Remove stale build keychain from previous runs
+          security delete-keychain "$BUILD_KC" 2>/dev/null || true
+
+          # Create fresh build keychain
+          security create-keychain -p "$BUILD_KC_PASS" "$BUILD_KC"
+          security set-keychain-settings -lut 7200 "$BUILD_KC"
+          security unlock-keychain -p "$BUILD_KC_PASS" "$BUILD_KC"
+
+          # Add build keychain to search list (prepend so it's found first)
+          EXISTING=$(security list-keychains -d user | tr -d '"' | tr '\n' ' ')
+          security list-keychains -d user -s "$BUILD_KC" $EXISTING
 
           # Decode and import the p12
           CERT_PATH=$(mktemp /tmp/cert.XXXXXX.p12)
           echo "$APPLE_CERTIFICATE" | base64 --decode > "$CERT_PATH"
 
-          # Import into login keychain
           security import "$CERT_PATH" \
             -P "$APPLE_CERTIFICATE_PASSWORD" \
             -T /usr/bin/codesign \
             -T /usr/bin/pkgbuild \
             -T /usr/bin/productbuild \
-            -k ~/Library/Keychains/login.keychain-db 2>&1 || true
+            -k "$BUILD_KC"
 
-          # Set partition list to allow codesign access without UI prompt.
-          # This MUST use the correct keychain password or codesign gets
-          # errSecInternalComponent at signing time.
+          # Set partition list — we own this keychain so this always works
           security set-key-partition-list \
             -S apple-tool:,apple:,codesign: \
-            -s -k "$KC_PASS" \
-            ~/Library/Keychains/login.keychain-db 2>&1 || true
+            -s -k "$BUILD_KC_PASS" \
+            "$BUILD_KC"
 
           rm -f "$CERT_PATH"
 
-          # Import Developer ID G2 intermediate cert if needed
+          # Import Developer ID G2 intermediate cert
           mkdir -p ~/apple-certs
           if [ ! -f ~/apple-certs/DeveloperIDG2CA.cer ]; then
             curl -sL -o ~/apple-certs/DeveloperIDG2CA.cer \
               "https://www.apple.com/certificateauthority/DeveloperIDG2CA.cer"
           fi
           security import ~/apple-certs/DeveloperIDG2CA.cer \
-            -t cert -k ~/Library/Keychains/login.keychain-db 2>/dev/null || true
+            -t cert -k "$BUILD_KC" 2>/dev/null || true
 
           # Verify signing identity is available
-          IDENTITY_COUNT=$(security find-identity -v -p codesigning ~/Library/Keychains/login.keychain-db 2>/dev/null | grep -c "valid identities" || echo "0")
-          security find-identity -v -p codesigning ~/Library/Keychains/login.keychain-db 2>&1 | tail -3
+          security find-identity -v -p codesigning "$BUILD_KC" 2>&1 | tail -5
+          echo "Build keychain ready at $BUILD_KC"
 
       - name: Compute Tauri build args
         id: tauri-args
@@ -886,8 +876,9 @@ jobs:
         if: matrix.os_type == 'macos' && always()
         shell: bash
         run: |
-          # Remove the imported signing identity to avoid accumulating certs across builds
-          security delete-identity -c "Developer ID Application" ~/Library/Keychains/login.keychain-db 2>/dev/null || true
+          # Remove build keychain to avoid accumulating certs across builds
+          BUILD_KC="$HOME/Library/Keychains/build.keychain-db"
+          security delete-keychain "$BUILD_KC" 2>/dev/null || true
           security list-keychain -d user -s ~/Library/Keychains/login.keychain-db 2>/dev/null || true
 
       - name: Notarize and staple DMGs (macOS)
