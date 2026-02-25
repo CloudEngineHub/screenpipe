@@ -36,10 +36,14 @@
     },
     "windows": {
       "nsis": {
-        "installMode": "perMachine"
+        "installMode": "perMachine",
+        "headerImage": "assets/nsis-header.bmp",
+        "sidebarImage": "assets/nsis-sidebar.bmp",
+        "installerIcon": "icons/icon.ico",
+        "installerHooks": "windows/hooks.nsh"
       },
       "webviewInstallMode": {
-        "type": "offlineInstaller"
+        "type": "skip"
       }
     }
   },
