@@ -757,11 +757,22 @@ jobs:
           # Tauri will find the identity in the existing keychain and skip temp keychain
           # creation entirely.
 
-          # Unlock login keychain first (required on self-hosted runners where
+          # Detect which runner we're on and pick the right keychain password.
+          # MacBook home is /Users/louisbeaumont, Mac Mini is /Users/louis.
+          if [[ "$HOME" == *"/louisbeaumont"* ]]; then
+            KC_PASS="$KEYCHAIN_PASSWORD_MACBOOK"
+            echo "Detected MacBook runner"
+          elif [[ "$HOME" == *"/louis"* ]]; then
+            KC_PASS="$KEYCHAIN_PASSWORD_MACMINI"
+            echo "Detected Mac Mini runner"
+          else
+            KC_PASS=""
+            echo "Unknown runner, trying empty keychain password"
+          fi
+
+          # Unlock login keychain (required on self-hosted runners where
           # the keychain is locked and UI interaction is not available).
-          # Try MacBook password, then Mac Mini password, then empty.
-          security unlock-keychain -p "$KEYCHAIN_PASSWORD_MACBOOK" ~/Library/Keychains/login.keychain-db 2>/dev/null || \
-            security unlock-keychain -p "$KEYCHAIN_PASSWORD_MACMINI" ~/Library/Keychains/login.keychain-db 2>/dev/null || \
+          security unlock-keychain -p "$KC_PASS" ~/Library/Keychains/login.keychain-db || \
             security unlock-keychain -p "" ~/Library/Keychains/login.keychain-db 2>/dev/null || true
 
           # Decode and import the p12
@@ -776,15 +787,13 @@ jobs:
             -T /usr/bin/productbuild \
             -k ~/Library/Keychains/login.keychain-db 2>&1 || true
 
-          # Set partition list to allow codesign access without UI prompt
+          # Set partition list to allow codesign access without UI prompt.
+          # This MUST use the correct keychain password or codesign gets
+          # errSecInternalComponent at signing time.
           security set-key-partition-list \
             -S apple-tool:,apple:,codesign: \
-            -s -k "$KEYCHAIN_PASSWORD_MACBOOK" \
-            ~/Library/Keychains/login.keychain-db 2>/dev/null || \
-          security set-key-partition-list \
-            -S apple-tool:,apple:,codesign: \
-            -s -k "$KEYCHAIN_PASSWORD_MACMINI" \
-            ~/Library/Keychains/login.keychain-db 2>/dev/null || true
+            -s -k "$KC_PASS" \
+            ~/Library/Keychains/login.keychain-db 2>&1 || true
 
           rm -f "$CERT_PATH"
 
