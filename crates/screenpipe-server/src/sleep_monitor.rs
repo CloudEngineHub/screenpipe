@@ -232,8 +232,7 @@ async fn check_recording_health() -> (bool, bool) {
 /// When the interactive desktop is not accessible the screen is locked.
 #[cfg(target_os = "windows")]
 pub fn start_sleep_monitor() {
-    use windows::Win32::System::StationsAndDesktops::OpenInputDesktop;
-    use windows::Win32::Foundation::CloseHandle;
+    use windows::Win32::System::StationsAndDesktops::{OpenInputDesktop, CloseDesktop, DESKTOP_CONTROL_FLAGS, DESKTOP_ACCESS_FLAGS};
 
     info!("Starting Windows screen-lock monitor (OpenInputDesktop polling)");
 
@@ -242,10 +241,10 @@ pub fn start_sleep_monitor() {
             // SAFETY: Win32 call — if the return is invalid the desktop is
             // not accessible (screen locked / screensaver / UAC).
             let locked = unsafe {
-                match OpenInputDesktop(0, false, 0) {
+                match OpenInputDesktop(DESKTOP_CONTROL_FLAGS(0), false, DESKTOP_ACCESS_FLAGS(0)) {
                     Ok(handle) => {
                         // Desktop accessible — close the handle and report unlocked
-                        let _ = CloseHandle(handle);
+                        let _ = CloseDesktop(handle);
                         false
                     }
                     Err(_) => true,
