@@ -379,7 +379,7 @@ fn create_dynamic_menu(
     // Help and quit
     menu_builder = menu_builder
         .item(&PredefinedMenuItem::separator(app)?)
-        .item(&MenuItemBuilder::with_id("feedback", "Help").build(app)?)
+        .item(&MenuItemBuilder::with_id("feedback", "Send feedback").build(app)?)
         .item(&MenuItemBuilder::with_id("book_call", "Book a call with founder").build(app)?)
         .item(&MenuItemBuilder::with_id("onboarding", "Onboarding").build(app)?)
         .item(&PredefinedMenuItem::separator(app)?)
