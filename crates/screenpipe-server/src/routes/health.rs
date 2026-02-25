@@ -179,6 +179,8 @@ pub async fn health_check(State(state): State<Arc<AppState>>) -> JsonResponse<He
 
     let frame_status = if state.vision_disabled {
         "disabled"
+    } else if crate::sleep_monitor::screen_is_locked() {
+        "ok" // screen locked — no captures expected, not a real stall
     } else if last_frame_ts == 0 {
         "not_started"
     } else if now.timestamp() as u64 - last_frame_ts < threshold_secs {
