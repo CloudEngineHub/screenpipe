@@ -326,9 +326,27 @@ export class VertexAIProvider implements AIProvider {
 							}
 						}
 					}
-				} catch (error) {
+				} catch (error: any) {
 					console.error('Streaming error:', error);
-					controller.error(error);
+					const errorMessage = error?.message || 'Unknown streaming error';
+					const errorStatus = error?.status || 500;
+					try {
+						controller.enqueue(
+							new TextEncoder().encode(
+								`data: ${JSON.stringify({
+									error: {
+										message: errorMessage,
+										type: error?.error?.type || 'api_error',
+										code: String(errorStatus),
+									},
+								})}\n\n`
+							)
+						);
+						controller.enqueue(new TextEncoder().encode('data: [DONE]\n\n'));
+						controller.close();
+					} catch {
+						controller.error(error);
+					}
 				}
 			},
 		});

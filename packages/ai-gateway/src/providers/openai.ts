@@ -103,16 +103,26 @@ export class OpenAIProvider implements AIProvider {
 	
 					controller.enqueue(new TextEncoder().encode('data: [DONE]\n\n'));
 					controller.close();
-				} catch (error) {
+				} catch (error: any) {
 					console.error('Streaming error:', error);
-					if (error instanceof Error) {
-						if (error.name === 'APIConnectionTimeoutError' || error.name === 'APIConnectionError') {
-							controller.error(new Error('Connection error or timeout'));
-						} else {
-							controller.error(error);
-						}
-					} else {
-						controller.error(new Error('Unknown error during streaming'));
+					const errorMessage = error?.message || 'Unknown streaming error';
+					const errorStatus = error?.status || 500;
+					try {
+						controller.enqueue(
+							new TextEncoder().encode(
+								`data: ${JSON.stringify({
+									error: {
+										message: errorMessage,
+										type: error?.error?.type || 'api_error',
+										code: String(errorStatus),
+									},
+								})}\n\n`
+							)
+						);
+						controller.enqueue(new TextEncoder().encode('data: [DONE]\n\n'));
+						controller.close();
+					} catch {
+						controller.error(error);
 					}
 				}
 			},

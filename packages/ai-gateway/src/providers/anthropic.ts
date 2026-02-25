@@ -166,8 +166,27 @@ export class AnthropicProvider implements AIProvider {
 					}
 					controller.enqueue(new TextEncoder().encode('data: [DONE]\n\n'));
 					controller.close();
-				} catch (error) {
-					controller.error(error);
+				} catch (error: any) {
+					// Send error as SSE event so the client can parse it instead of a broken stream
+					const errorMessage = error?.message || 'Unknown streaming error';
+					const errorStatus = error?.status || 500;
+					try {
+						controller.enqueue(
+							new TextEncoder().encode(
+								`data: ${JSON.stringify({
+									error: {
+										message: errorMessage,
+										type: error?.error?.type || 'api_error',
+										code: String(errorStatus),
+									},
+								})}\n\n`
+							)
+						);
+						controller.enqueue(new TextEncoder().encode('data: [DONE]\n\n'));
+						controller.close();
+					} catch {
+						controller.error(error);
+					}
 				}
 			},
 		});
