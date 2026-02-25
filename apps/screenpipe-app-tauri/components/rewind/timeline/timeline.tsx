@@ -846,17 +846,17 @@ export const TimelineSlider = ({
 												width: `${frameWidth}px`,
 												marginLeft: `${frameMargin}px`,
 												marginRight: `${frameMargin}px`,
-												backgroundColor: isCurrent ? 'hsl(var(--foreground))' : hasAudio ? 'hsl(var(--foreground))' : group.color,
-												height: isCurrent || isSelected || isInRange ? "75%" : hasAudio ? "60%" : "45%",
+												backgroundColor: isCurrent ? '#ffffff' : hasAudio ? 'hsl(var(--foreground))' : group.color,
+												height: isCurrent || isSelected || isInRange ? "80%" : hasAudio ? "60%" : "45%",
 												opacity: !matchesDevice ? 0.15 : isCurrent || isSelected || isInRange ? 1 : hasAudio ? 0.9 : 0.7,
 												borderBottom: matchesDevice && selectedDeviceId !== "all" ? '2px solid hsl(var(--primary))' : 'none',
 												direction: "ltr",
 												boxShadow: isCurrent
 												? isPlaying
-													? '0 0 12px rgba(255, 255, 255, 0.6), 0 0 24px rgba(255, 255, 255, 0.3)'
-													: '0 0 10px rgba(255, 255, 255, 0.4), 0 0 20px rgba(255, 255, 255, 0.2)'
-												: 'none',
-												transform: isCurrent ? 'scale(1.1)' : 'scale(1)',
+													? '0 0 8px rgba(255, 255, 255, 0.9), 0 0 20px rgba(255, 255, 255, 0.5), 0 0 40px rgba(255, 255, 255, 0.2)'
+													: '0 0 6px rgba(255, 255, 255, 0.8), 0 0 16px rgba(255, 255, 255, 0.4), 0 0 32px rgba(255, 255, 255, 0.15)'
+												: 'inset 0 0 0 0.5px rgba(255, 255, 255, 0.15)',
+												transform: isCurrent ? 'scale(1.15)' : 'scale(1)',
 												transition: 'all 0.2s ease-out',
 												borderRadius: '4px 4px 0 0',
 											}}
