@@ -306,8 +306,8 @@ export const TimelineSlider = ({
 		}, 300);
 	}, []);
 
-	// App dot tooltip state (portal-based to escape overflow clipping)
-	const [hoveredAppDot, setHoveredAppDot] = useState<{ name: string; x: number; y: number } | null>(null);
+	// Filter dot tooltip state (portal-based to escape overflow clipping)
+	const [hoveredFilterDot, setHoveredFilterDot] = useState<{ name: string; x: number; y: number } | null>(null);
 
 	// App context popover state
 	const [activePopoverGroup, setActivePopoverGroup] = useState<number | null>(null);
@@ -689,7 +689,11 @@ export const TimelineSlider = ({
 												? "hsl(var(--foreground) / 0.4)"
 												: "hsl(var(--foreground) / 0.15)",
 									}}
-									title={`${id.replace("monitor_", "monitor ")}${selectedDeviceId === id ? " (click to show all)" : ""}`}
+									onMouseEnter={(e) => {
+										const rect = e.currentTarget.getBoundingClientRect();
+										setHoveredFilterDot({ name: id.replace("monitor_", "Monitor "), x: rect.right + 8, y: rect.top + rect.height / 2 });
+									}}
+									onMouseLeave={() => setHoveredFilterDot(null)}
 								/>
 							))}
 						</div>
@@ -716,9 +720,9 @@ export const TimelineSlider = ({
 									}}
 									onMouseEnter={(e) => {
 										const rect = e.currentTarget.getBoundingClientRect();
-										setHoveredAppDot({ name, x: rect.right + 8, y: rect.top + rect.height / 2 });
+										setHoveredFilterDot({ name, x: rect.right + 8, y: rect.top + rect.height / 2 });
 									}}
-									onMouseLeave={() => setHoveredAppDot(null)}
+									onMouseLeave={() => setHoveredFilterDot(null)}
 								/>
 							))}
 						</div>
@@ -1083,16 +1087,16 @@ export const TimelineSlider = ({
 			)}
 
 			{/* App filter dot tooltip */}
-			{hoveredAppDot && createPortal(
+			{hoveredFilterDot && createPortal(
 				<div
 					className="fixed z-[9999] bg-popover border border-border rounded px-1.5 py-0.5 text-[10px] text-popover-foreground whitespace-nowrap shadow-lg pointer-events-none"
 					style={{
-						left: `${hoveredAppDot.x}px`,
-						top: `${hoveredAppDot.y}px`,
+						left: `${hoveredFilterDot.x}px`,
+						top: `${hoveredFilterDot.y}px`,
 						transform: "translateY(-50%)",
 					}}
 				>
-					{hoveredAppDot.name}
+					{hoveredFilterDot.name}
 				</div>,
 				document.body
 			)}

@@ -146,6 +146,11 @@ pub struct PiManager {
     last_activity: std::time::Instant,
     /// Handle to the idle watchdog task so stop() can abort it
     watchdog_handle: Option<tokio::task::JoinHandle<()>>,
+    /// Shared flag: set by the idle watchdog before stopping Pi, read by the
+    /// stdout reader to decide whether to emit `pi_terminated(0)` (idle) or
+    /// `pi_terminated(pid)` (crash). Each Pi session creates a fresh Arc so
+    /// old reader threads don't interfere with new sessions.
+    idle_stopped: Arc<AtomicBool>,
 }
 
 impl PiManager {
@@ -158,6 +163,7 @@ impl PiManager {
             app_handle,
             last_activity: std::time::Instant::now(),
             watchdog_handle: None,
+            idle_stopped: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -168,17 +174,16 @@ impl PiManager {
 
     /// Check if the child process is actually alive via try_wait().
     /// If the process has exited, cleans up child/stdin and returns false.
+    /// NOTE: does NOT emit `pi_terminated` — the stdout reader thread is the
+    /// single source of truth for termination events (avoids duplicate emissions).
     fn check_alive(&mut self) -> bool {
         if let Some(ref mut child) = self.child {
             match child.try_wait() {
                 Ok(Some(status)) => {
-                    // Process exited — clean up
                     let pid = child.id();
                     info!("Pi process (pid {}) has exited with status: {}", pid, status);
                     self.child = None;
                     self.stdin = None;
-                    // Emit pi_terminated so frontend can auto-restart
-                    let _ = self.app_handle.emit("pi_terminated", pid);
                     false
                 }
                 Ok(None) => true, // Still running
@@ -873,6 +878,7 @@ pub async fn pi_start_inner(
     let stderr = child.stderr.take();
 
     // Update manager
+    let idle_stopped = Arc::new(AtomicBool::new(false));
     if let Some(m) = manager_guard.as_mut() {
         m.child = Some(child);
         m.stdin = Some(stdin);
@@ -880,6 +886,8 @@ pub async fn pi_start_inner(
         // Reset idle timer so the watchdog doesn't use a stale timestamp
         // from a previous session and immediately kill this new process
         m.last_activity = std::time::Instant::now();
+        // Fresh flag for this session — old reader threads keep their own Arc
+        m.idle_stopped = idle_stopped.clone();
     }
 
     // Snapshot the state BEFORE dropping the lock, so we don't hold it during I/O
@@ -892,8 +900,12 @@ pub async fn pi_start_inner(
     // queued pi_start calls from stacking behind a 500ms sleep while holding the lock
     drop(manager_guard);
 
-    // Spawn stdout reader thread
+    // Spawn stdout reader thread — this is the SOLE emitter of `pi_terminated`.
+    // Using idle_stopped (shared with the watchdog) to distinguish idle stops
+    // from crashes: idle → emit pid=0 (frontend skips restart), crash → emit
+    // real pid (frontend auto-restarts).
     let app_handle = app.clone();
+    let idle_stopped_reader = idle_stopped.clone();
     std::thread::spawn(move || {
         let reader = BufReader::new(stdout);
         info!("Pi stdout reader started (pid: {})", pid);
@@ -916,7 +928,9 @@ pub async fn pi_start_inner(
                             }
                         }
                         Err(e) => {
-                            warn!("Pi stdout not JSON: {} (line: {})", e, &line[..line.len().min(100)]);
+                            let end = line.len().min(100);
+                            let end = line.floor_char_boundary(end);
+                            warn!("Pi stdout not JSON: {} (line: {})", e, &line[..end]);
                         }
                     }
                     if let Err(e) = app_handle.emit("pi_output", &line) {
@@ -930,7 +944,8 @@ pub async fn pi_start_inner(
             }
         }
         info!("Pi stdout reader ended (pid: {}), processed {} lines", pid, line_count);
-        let _ = app_handle.emit("pi_terminated", pid);
+        let terminated_pid = if idle_stopped_reader.load(Ordering::Acquire) { 0u32 } else { pid };
+        let _ = app_handle.emit("pi_terminated", terminated_pid);
     });
 
     // Spawn stderr reader thread — Pi may emit JSON events to stderr in some
@@ -969,25 +984,28 @@ pub async fn pi_start_inner(
         });
     }
 
-    // Spawn idle watchdog — auto-stops Pi after PI_IDLE_TIMEOUT of inactivity
+    // Spawn idle watchdog — auto-stops Pi after PI_IDLE_TIMEOUT of inactivity.
+    // The watchdog does NOT emit `pi_terminated` directly. Instead, it sets
+    // `idle_stopped` and calls stop(). The stdout reader thread detects EOF
+    // from the killed process and emits the single authoritative event.
     {
         let state_clone = state.0.clone();
-        let app_handle_wd = app.clone();
         let watchdog = tokio::spawn(async move {
             loop {
                 tokio::time::sleep(PI_WATCHDOG_INTERVAL).await;
                 let mut guard = state_clone.lock().await;
                 if let Some(m) = guard.as_mut() {
                     if !m.check_alive() {
-                        info!("Watchdog: Pi process is dead, emitting pi_terminated");
-                        let _ = app_handle_wd.emit("pi_terminated", 0u32);
+                        // Process already dead — stdout reader will emit pi_terminated
+                        info!("Watchdog: Pi process is dead, reader thread will handle termination");
                         break;
                     }
                     let idle = m.idle_duration();
                     if idle >= PI_IDLE_TIMEOUT {
                         info!("Watchdog: Pi idle for {:?}, stopping to save resources", idle);
+                        m.idle_stopped.store(true, Ordering::Release);
                         m.stop();
-                        let _ = app_handle_wd.emit("pi_terminated", 0u32);
+                        // stdout reader will see EOF and emit pi_terminated(0)
                         break;
                     }
                 } else {
