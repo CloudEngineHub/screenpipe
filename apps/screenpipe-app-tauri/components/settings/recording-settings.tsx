@@ -1335,8 +1335,8 @@ Your screen is a pipe. Everything you see, hear, and type flows through it. Scre
                 replacementInput.value = "";
               }}
             >
-              <Input name="vocab-word" placeholder="e.g. screenpipe" className="h-7 text-xs flex-1" />
-              <Input name="vocab-replacement" placeholder="replacement (optional)" className="h-7 text-xs flex-1" />
+              <Input name="vocab-word" placeholder="e.g. screenpipe" className="h-7 text-xs flex-1" spellCheck={false} autoCorrect="off" autoCapitalize="off" />
+              <Input name="vocab-replacement" placeholder="replacement (optional)" className="h-7 text-xs flex-1" spellCheck={false} autoCorrect="off" autoCapitalize="off" />
               <Button type="submit" size="sm" variant="outline" className="h-7 text-xs px-2">
                 add
               </Button>
