@@ -190,23 +190,39 @@ async function validateSubscriptionWithId(env: Env, token: string): Promise<{ is
     }
   }
 
-  // Clerk user IDs - check actual subscription via Supabase
+  // Clerk user IDs - resolve to UUID first, then check subscription
   if (CLERK_USER_ID_REGEX.test(token)) {
-    console.log('Clerk user ID detected, checking subscription:', token);
+    console.log('Clerk user ID detected, resolving to UUID:', token);
     try {
-      const response = await fetch(`${env.SUPABASE_URL}/rest/v1/rpc/has_active_cloud_subscription`, {
-        method: 'POST',
-        headers: {
-          apikey: env.SUPABASE_ANON_KEY,
-          Authorization: `Bearer ${env.SUPABASE_ANON_KEY}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ input_user_id: token }),
-      });
-      if (response.ok) {
-        const hasSubscription: boolean = await response.json();
-        if (hasSubscription) {
-          return { isValid: true, userId: token };
+      // Resolve clerk_id to Supabase UUID (has_active_cloud_subscription expects uuid)
+      const userResponse = await fetch(
+        `${env.SUPABASE_URL}/rest/v1/users?select=id&clerk_id=eq.${token}&limit=1`,
+        {
+          headers: {
+            apikey: env.SUPABASE_ANON_KEY,
+            Authorization: `Bearer ${env.SUPABASE_ANON_KEY}`,
+          },
+        }
+      );
+      if (userResponse.ok) {
+        const users = await userResponse.json() as Array<{ id: string }>;
+        if (users.length > 0) {
+          const supabaseUserId = users[0].id;
+          const response = await fetch(`${env.SUPABASE_URL}/rest/v1/rpc/has_active_cloud_subscription`, {
+            method: 'POST',
+            headers: {
+              apikey: env.SUPABASE_ANON_KEY,
+              Authorization: `Bearer ${env.SUPABASE_ANON_KEY}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ input_user_id: supabaseUserId }),
+          });
+          if (response.ok) {
+            const hasSubscription: boolean = await response.json();
+            if (hasSubscription) {
+              return { isValid: true, userId: token };
+            }
+          }
         }
       }
     } catch (error) {
