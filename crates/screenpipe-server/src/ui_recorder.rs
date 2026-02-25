@@ -393,15 +393,19 @@ pub async fn start_ui_recording(
             let join_handle = std::thread::Builder::new()
                 .name("tree-walker".to_string())
                 .spawn(move || {
-                    run_tree_walker(
-                        tree_db,
-                        tree_stop,
-                        walk_interval,
-                        rt_handle,
-                        tree_wake,
-                        ignored_windows_clone,
-                        included_windows_clone,
-                    );
+                    if let Err(e) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        run_tree_walker(
+                            tree_db,
+                            tree_stop,
+                            walk_interval,
+                            rt_handle,
+                            tree_wake,
+                            ignored_windows_clone,
+                            included_windows_clone,
+                        );
+                    })) {
+                        error!("tree-walker thread panicked: {:?}", e);
+                    }
                 })
                 .expect("failed to spawn tree-walker thread");
             // Wrap in a JoinHandle<()> compatible with the tokio handle used on other platforms
@@ -575,6 +579,13 @@ fn run_tree_walker(
                 }
 
                 if cache.should_store(&snap) {
+                    // Check stop flag before blocking on the runtime — during shutdown
+                    // the tokio context may be tearing down, causing a panic in block_on.
+                    if stop.load(std::sync::atomic::Ordering::Relaxed) {
+                        debug!("Stop flag set, skipping DB insert for accessibility text");
+                        break;
+                    }
+
                     metrics.total_text_chars += snap.text_content.len() as u64;
 
                     match rt_handle.block_on(db.insert_accessibility_text(

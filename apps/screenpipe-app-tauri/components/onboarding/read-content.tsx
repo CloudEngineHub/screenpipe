@@ -83,7 +83,7 @@ export default function ReadContent({ handleNextSlide }: ReadContentProps) {
   // listen for deep link return
   useEffect(() => {
     let unlisten: (() => void) | undefined;
-    listen("deep-link-received", async (event) => {
+    listen("onboarding-read-complete", async (event) => {
       const url = String(event.payload);
       if (url.includes("onboarding-read-complete")) {
         // restore window before advancing

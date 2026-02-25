@@ -370,10 +370,23 @@ pub fn run_uia_thread(
 
     // Initialize UIA context with retries — COM services may not be ready
     // immediately after system boot or when resuming from sleep.
-    let uia = {
+    // Outer loop retries every 30s if all 4 quick attempts fail, allowing
+    // recovery from prolonged system unavailability (boot, sleep resume).
+    let uia = 'outer: loop {
+        if stop.load(std::sync::atomic::Ordering::Relaxed) {
+            debug!("Stop flag set before UIA init, exiting");
+            unsafe { CoUninitialize() };
+            return;
+        }
+
         let mut last_err = None;
         let mut ctx = None;
         for attempt in 0..4 {
+            if stop.load(std::sync::atomic::Ordering::Relaxed) {
+                debug!("Stop flag set during UIA init attempts, exiting");
+                unsafe { CoUninitialize() };
+                return;
+            }
             match UiaContext::new() {
                 Ok(c) => {
                     ctx = Some(c);
@@ -393,14 +406,21 @@ pub fn run_uia_thread(
             }
         }
         match ctx {
-            Some(c) => c,
+            Some(c) => break 'outer c,
             None => {
-                error!(
-                    "Failed to initialize UI Automation after 4 attempts: {:?}",
+                warn!(
+                    "Failed to initialize UI Automation after 4 attempts: {:?}. Will retry in 30s.",
                     last_err
                 );
-                unsafe { CoUninitialize() };
-                return;
+                // Wait 30s before retrying, checking stop flag periodically
+                for _ in 0..30 {
+                    if stop.load(std::sync::atomic::Ordering::Relaxed) {
+                        debug!("Stop flag set during UIA retry backoff, exiting");
+                        unsafe { CoUninitialize() };
+                        return;
+                    }
+                    std::thread::sleep(std::time::Duration::from_secs(1));
+                }
             }
         }
     };
