@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useCallback } from "react";
+import { commands } from "@/lib/utils/tauri";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -595,10 +596,7 @@ export function ObsidianSyncCard() {
                 variant="outline"
                 size="sm"
                 className="text-xs gap-1.5 h-7 mb-2"
-                onClick={async () => {
-                  const { openUrl } = await import("@tauri-apps/plugin-opener");
-                  await openUrl("https://screenpi.pe/login");
-                }}
+                onClick={() => commands.openLoginWindow()}
               >
                 <AlertCircle className="h-3 w-3" />
                 login to use
@@ -726,8 +724,12 @@ export function ObsidianSyncCard() {
                   size="sm"
                   className="text-xs h-6 gap-1"
                   onClick={async () => {
-                    const { openUrl } = await import("@tauri-apps/plugin-opener");
-                    await openUrl(isLoggedIn ? "https://screenpi.pe/pricing" : "https://screenpi.pe/login");
+                    if (isLoggedIn) {
+                      const { openUrl } = await import("@tauri-apps/plugin-opener");
+                      await openUrl("https://screenpi.pe/pricing");
+                    } else {
+                      await commands.openLoginWindow();
+                    }
                   }}
                 >
                   {isLoggedIn ? "upgrade" : "sign in"}

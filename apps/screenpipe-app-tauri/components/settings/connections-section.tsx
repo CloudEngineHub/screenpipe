@@ -17,6 +17,7 @@ import { join, homeDir } from "@tauri-apps/api/path";
 import { ObsidianSyncCard } from "./obsidian-sync-card";
 import { AppleIntelligenceCard } from "./apple-intelligence-card";
 import { CalendarCard } from "./calendar-card";
+import { GoogleCalendarCard } from "./google-calendar-card";
 
 const GITHUB_RELEASES_API = "https://api.github.com/repos/screenpipe/screenpipe/releases";
 
@@ -617,6 +618,9 @@ export function ConnectionsSection() {
 
         {/* Calendar */}
         <CalendarCard />
+
+        {/* Google Calendar (cloud) */}
+        <GoogleCalendarCard />
 
         {/* Obsidian Sync */}
         <ObsidianSyncCard />

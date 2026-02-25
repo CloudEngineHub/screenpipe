@@ -34,6 +34,7 @@ import { useTeamSync } from "@/lib/hooks/use-team-sync";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { onOpenUrl } from "@tauri-apps/plugin-deep-link";
 import { open as openUrl } from "@tauri-apps/plugin-shell";
+import { commands } from "@/lib/utils/tauri";
 import posthog from "posthog-js";
 
 export function TeamSection() {
@@ -241,7 +242,7 @@ export function TeamSection() {
           <Button
             className="w-full max-w-xs"
             size="lg"
-            onClick={() => openUrl("https://screenpi.pe/login")}
+            onClick={() => commands.openLoginWindow()}
           >
             log in
             <ExternalLink className="w-4 h-4 ml-2" />

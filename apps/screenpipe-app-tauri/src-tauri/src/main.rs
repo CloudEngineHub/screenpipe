@@ -1146,6 +1146,7 @@ async fn main() {
                 commands::update_show_screenpipe_shortcut,
                 commands::show_window,
                 commands::open_login_window,
+                commands::open_google_calendar_auth_window,
                 commands::ensure_webview_focus,
                 commands::close_window,
                 commands::reset_main_window,

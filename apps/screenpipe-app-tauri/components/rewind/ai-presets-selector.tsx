@@ -586,7 +586,7 @@ export function AIProviderConfig({
               onValueChange={async (value) => {
                 if (value === "claude-opus-4-6" && !settings.user?.cloud_subscribed) {
                   if (!settings.user?.token) {
-                    await openUrl("https://screenpi.pe/login");
+                    await commands.openLoginWindow();
                   } else {
                     try {
                       const res = await fetch("https://screenpi.pe/api/cloud-sync/checkout", {

@@ -7,8 +7,8 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { ExternalLinkIcon } from "lucide-react";
-import { open as openUrl } from "@tauri-apps/plugin-shell";
 import { create } from "zustand";
+import { commands } from "@/lib/utils/tauri";
 
 export function LoginDialog() {
   const { isOpen, setIsOpen } = useLoginDialog();
@@ -26,7 +26,7 @@ export function LoginDialog() {
           <Button
             variant="default"
             onClick={() => {
-              openUrl("https://screenpi.pe/login");
+              commands.openLoginWindow();
               setIsOpen(false);
             }}
           >

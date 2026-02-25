@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { toast } from "@/components/ui/use-toast";
 import { open as openUrl } from "@tauri-apps/plugin-shell";
+import { commands } from "@/lib/utils/tauri";
 import { Card } from "../ui/card";
 import { onOpenUrl } from "@tauri-apps/plugin-deep-link";
 import { PricingToggle } from "./pricing-toggle";
@@ -78,7 +79,7 @@ export function AccountSection() {
 
   const handleCheckout = async () => {
     if (!settings.user?.id) {
-      await openUrl("https://screenpi.pe/login");
+      await commands.openLoginWindow();
       return;
     }
     if (!settings.user?.cloud_subscribed) {
@@ -187,7 +188,7 @@ export function AccountSection() {
             <Button
               variant="outline"
               size="sm"
-              onClick={() => openUrl("https://screenpi.pe/login")}
+              onClick={() => commands.openLoginWindow()}
             >
               login <ExternalLinkIcon className="w-3.5 h-3.5 ml-1.5" />
             </Button>
@@ -245,7 +246,7 @@ export function AccountSection() {
             <Button
               className="w-full max-w-xs bg-foreground text-background hover:bg-background hover:text-foreground transition-colors duration-150"
               size="lg"
-              onClick={() => openUrl("https://screenpi.pe/login")}
+              onClick={() => commands.openLoginWindow()}
             >
               log in
               <ExternalLinkIcon className="w-4 h-4 ml-2" />

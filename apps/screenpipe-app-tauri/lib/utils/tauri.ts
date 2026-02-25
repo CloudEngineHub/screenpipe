@@ -156,6 +156,19 @@ async openLoginWindow() : Promise<Result<null, string>> {
 }
 },
 /**
+ * Open Google Calendar OAuth inside an in-app WebView.
+ * Same pattern as `open_login_window` — intercepts the screenpipe:// deep-link
+ * redirect so we don't rely on Safari custom-scheme support.
+ */
+async openGoogleCalendarAuthWindow(authUrl: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("open_google_calendar_auth_window", { authUrl }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Re-assert the WKWebView as first responder for the current key panel.
  * Called from JS on pointer enter / window focus to ensure trackpad pinch
  * gestures (magnifyWithEvent:) reach the WKWebView for zoom handling.

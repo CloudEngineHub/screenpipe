@@ -48,6 +48,7 @@ import { listen } from "@tauri-apps/api/event";
 import { useSettings } from "@/lib/hooks/use-settings";
 import { useTeam } from "@/lib/hooks/use-team";
 import { open as openUrl } from "@tauri-apps/plugin-shell";
+import { commands } from "@/lib/utils/tauri";
 import {
   Tooltip,
   TooltipContent,
@@ -289,7 +290,7 @@ function SettingsPageContent() {
           <TooltipProvider delayDuration={0}>
           <div
             className={cn(
-              "border-r bg-background flex flex-col min-h-0 rounded-tl-lg transition-all duration-200 overflow-hidden flex-shrink-0",
+              "border-r bg-background flex flex-col min-h-0 rounded-tl-lg transition-all duration-200 overflow-x-hidden overflow-y-auto flex-shrink-0",
               sidebarCollapsed ? "w-14" : "w-56",
             )}
           >
@@ -333,7 +334,7 @@ function SettingsPageContent() {
                       )}
                     </button>
                   </TooltipTrigger>
-                  <TooltipContent side="right" className="text-xs">
+                  <TooltipContent side="bottom" className="text-xs">
                     {sidebarCollapsed ? "expand sidebar" : "collapse sidebar"} <kbd className="ml-1 px-1 py-0.5 bg-muted rounded text-[10px]">⌘B</kbd>
                   </TooltipContent>
                 </Tooltip>
@@ -716,7 +717,7 @@ function ReferralSection() {
               sign in to get your referral link
             </p>
             <button
-              onClick={() => openUrl("https://screenpi.pe/login")}
+              onClick={() => commands.openLoginWindow()}
               className="px-4 py-2 text-xs font-medium border border-border bg-background hover:bg-foreground hover:text-background transition-colors duration-150"
             >
               SIGN IN

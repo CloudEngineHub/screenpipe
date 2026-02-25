@@ -47,6 +47,25 @@ export function DeeplinkHandler() {
         }
       }
 
+      // Handle Google Calendar OAuth callback
+      if (
+        parsedUrl.host === "auth" &&
+        parsedUrl.pathname?.includes("google-calendar")
+      ) {
+        const success = parsedUrl.searchParams.get("success") === "true";
+        const error = parsedUrl.searchParams.get("error");
+        await emit("google-calendar-auth-result", { success, error });
+        toast({
+          title: success
+            ? "google calendar connected!"
+            : "google calendar connection failed",
+          description: success
+            ? "your google calendar is now linked"
+            : error || "something went wrong",
+          variant: success ? undefined : "destructive",
+        });
+      }
+
       if (url.includes("settings")) {
         await openSettingsWindow();
       }

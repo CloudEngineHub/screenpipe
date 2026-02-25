@@ -12,6 +12,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { open as openUrl } from "@tauri-apps/plugin-shell";
+import { commands } from "@/lib/utils/tauri";
 import { useSettings } from "@/lib/hooks/use-settings";
 import { Sparkles, Zap, Clock, Star } from "lucide-react";
 import posthog from "posthog-js";
@@ -65,7 +66,7 @@ export function UpgradeDialog({
 
   const handleLogin = async () => {
     trackAction("sign_in");
-    await openUrl("https://screenpi.pe/login");
+    await commands.openLoginWindow();
     onOpenChange(false);
   };
 

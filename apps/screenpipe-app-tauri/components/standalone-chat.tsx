@@ -24,11 +24,11 @@ import remarkGfm from "remark-gfm";
 // OpenAI SDK no longer used directly — all providers route through Pi agent
 import posthog from "posthog-js";
 import { open as openUrl } from "@tauri-apps/plugin-shell";
+import { commands } from "@/lib/utils/tauri";
 import { emit } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { usePlatform } from "@/lib/hooks/use-platform";
 import { useSqlAutocomplete } from "@/lib/hooks/use-sql-autocomplete";
-import { commands } from "@/lib/utils/tauri";
 import { homeDir, join } from "@tauri-apps/api/path";
 import { useTimelineStore } from "@/lib/hooks/use-timeline-store";
 import { UpgradeDialog } from "@/components/upgrade-dialog";
@@ -2310,7 +2310,7 @@ export function StandaloneChat({ className }: { className?: string } = {}) {
               <Button
                 variant="default"
                 size="lg"
-                onClick={() => openUrl("https://screenpi.pe/login")}
+                onClick={() => commands.openLoginWindow()}
                 className="gap-2 font-medium bg-foreground text-background hover:bg-foreground/90 transition-colors duration-150 px-8"
               >
                 Sign in
