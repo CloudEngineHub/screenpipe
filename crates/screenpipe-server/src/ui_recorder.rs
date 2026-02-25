@@ -416,15 +416,19 @@ pub async fn start_ui_recording(
         #[cfg(not(target_os = "windows"))]
         {
             Some(tokio::task::spawn_blocking(move || {
-                run_tree_walker(
-                    tree_db,
-                    tree_stop,
-                    walk_interval,
-                    rt_handle,
-                    tree_wake,
-                    ignored_windows_clone,
-                    included_windows_clone,
-                );
+                if let Err(e) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    run_tree_walker(
+                        tree_db,
+                        tree_stop,
+                        walk_interval,
+                        rt_handle,
+                        tree_wake,
+                        ignored_windows_clone,
+                        included_windows_clone,
+                    );
+                })) {
+                    error!("tree-walker thread panicked: {:?}", e);
+                }
             }))
         }
     } else {

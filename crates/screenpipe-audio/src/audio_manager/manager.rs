@@ -83,6 +83,15 @@ pub struct AudioManager {
     whisper_context: Arc<RwLock<Option<Arc<WhisperContext>>>>,
 }
 
+/// Result of checking / restarting the two central handler tasks.
+#[derive(Debug, Default)]
+pub struct CentralHandlerRestartResult {
+    pub recording_restarted: bool,
+    pub transcription_restarted: bool,
+    pub recording_error: Option<String>,
+    pub transcription_error: Option<String>,
+}
+
 impl AudioManager {
     pub async fn new(options: AudioManagerOptions, db: Arc<DatabaseManager>) -> Result<Self> {
         let device_manager = DeviceManager::new().await?;
@@ -622,6 +631,84 @@ impl AudioManager {
         stale_devices
     }
 
+    /// Check whether the two central handler tasks (audio-receiver and
+    /// transcription-receiver) are still alive. If either has finished
+    /// (crashed / panicked), restart it using the existing `start_*` helpers.
+    ///
+    /// The crossbeam channels are `Arc`-wrapped and survive handler restarts,
+    /// so per-device recording tasks keep sending without interruption.
+    pub async fn check_and_restart_central_handlers(&self) -> CentralHandlerRestartResult {
+        let mut result = CentralHandlerRestartResult::default();
+
+        // --- fast path: read-lock to check liveness ---
+        let recording_dead = {
+            let guard = self.recording_receiver_handle.read().await;
+            match guard.as_ref() {
+                Some(h) => h.is_finished(),
+                None => true,
+            }
+        };
+        let transcription_dead = {
+            let guard = self.transcription_receiver_handle.read().await;
+            match guard.as_ref() {
+                Some(h) => h.is_finished(),
+                None => true,
+            }
+        };
+
+        if !recording_dead && !transcription_dead {
+            return result; // both alive, nothing to do
+        }
+
+        // --- slow path: write-lock and restart dead handlers ---
+        if recording_dead {
+            let mut guard = self.recording_receiver_handle.write().await;
+            // double-check under write lock (another task may have restarted it)
+            let still_dead = match guard.as_ref() {
+                Some(h) => h.is_finished(),
+                None => true,
+            };
+            if still_dead {
+                warn!("central audio-receiver handler is dead, restarting");
+                match self.start_audio_receiver_handler().await {
+                    Ok(handle) => {
+                        *guard = Some(handle);
+                        result.recording_restarted = true;
+                        info!("central audio-receiver handler restarted successfully");
+                    }
+                    Err(e) => {
+                        error!("failed to restart audio-receiver handler: {}", e);
+                        result.recording_error = Some(e.to_string());
+                    }
+                }
+            }
+        }
+
+        if transcription_dead {
+            let mut guard = self.transcription_receiver_handle.write().await;
+            let still_dead = match guard.as_ref() {
+                Some(h) => h.is_finished(),
+                None => true,
+            };
+            if still_dead {
+                warn!("central transcription-receiver handler is dead, restarting");
+                match self.start_transcription_receiver_handler().await {
+                    Ok(handle) => {
+                        *guard = Some(handle);
+                        result.transcription_restarted = true;
+                        info!("central transcription-receiver handler restarted successfully");
+                    }
+                    Err(e) => {
+                        error!("failed to restart transcription-receiver handler: {}", e);
+                        result.transcription_error = Some(e.to_string());
+                    }
+                }
+            }
+        }
+
+        result
+    }
+
     /// Clean up a stale device that had its recording handle crash/timeout
     /// This prepares the device for restart by the device monitor
     pub async fn cleanup_stale_device(&self, device_name: &str) -> anyhow::Result<()> {
@@ -665,5 +752,19 @@ impl Drop for AudioManager {
                 h.value().lock().await.abort();
             }
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_central_handler_restart_result_defaults() {
+        let result = CentralHandlerRestartResult::default();
+        assert!(!result.recording_restarted);
+        assert!(!result.transcription_restarted);
+        assert!(result.recording_error.is_none());
+        assert!(result.transcription_error.is_none());
     }
 }
