@@ -1227,6 +1227,8 @@ async fn main() {
                 voice_training::train_voice,
                 // Suggestions
                 suggestions::get_cached_suggestions,
+                // Config commands
+                config::validate_data_dir,
             ])
             .typ::<SettingsStore>()
             .typ::<OnboardingStore>()
@@ -1441,7 +1443,9 @@ async fn main() {
             // Voice training
             voice_training::train_voice,
             // Suggestions
-            suggestions::get_cached_suggestions
+            suggestions::get_cached_suggestions,
+            // Config commands
+            config::validate_data_dir
         ])
         .setup(move |app| {
             //deep link register_all
@@ -1604,6 +1608,18 @@ async fn main() {
                 store::SettingsStore::default()
             });
             app.manage(store.clone());
+
+            // Resolve data directory from user setting (custom dir or ~/.screenpipe)
+            let (data_dir, data_dir_fell_back) = config::resolve_data_dir(&store.data_dir);
+            info!("Recording data directory: {}", data_dir.display());
+            if data_dir_fell_back {
+                let app_handle_fb = app_handle.clone();
+                tauri::async_runtime::spawn(async move {
+                    // Small delay so the frontend window is ready to receive events
+                    tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+                    let _ = app_handle_fb.emit("data-dir-fallback", ());
+                });
+            }
 
             // Attach non-sensitive settings to all future Sentry events
             if !telemetry_disabled {
@@ -1809,7 +1825,7 @@ async fn main() {
             // Use a dedicated thread with its own tokio runtime to avoid competing with Tauri's UI runtime
             if !use_dev_mode {
                 let store_clone = store.clone();
-                let base_dir_clone = base_dir.clone();
+                let data_dir_clone = data_dir.clone();
                 let recording_state = app_handle.state::<RecordingState>();
                 // Mark as starting BEFORE spawning thread — prevents race with frontend spawn_screenpipe
                 recording_state.is_starting.store(true, std::sync::atomic::Ordering::SeqCst);
@@ -1866,7 +1882,7 @@ async fn main() {
                             }
 
                             info!("Starting embedded screenpipe server on dedicated runtime...");
-                            let config = store_clone.to_recording_config(base_dir_clone);
+                            let config = store_clone.to_recording_config(data_dir_clone);
 
                             match embedded_server::start_embedded_server(config).await {
                                 Ok(handle) => {

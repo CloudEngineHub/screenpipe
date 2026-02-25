@@ -71,9 +71,9 @@ import { platform } from "@tauri-apps/plugin-os";
 import posthog from "posthog-js";
 import { Language } from "@/lib/language";
 import { open } from "@tauri-apps/plugin-dialog";
-import { exists } from "@tauri-apps/plugin-fs";
 import { ToastAction } from "@/components/ui/toast";
 import { open as openUrl } from "@tauri-apps/plugin-shell";
+import { listen } from "@tauri-apps/api/event";
 import { Dialog, DialogContent, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Progress } from "@/components/ui/progress";
 import { Card, CardContent } from "@/components/ui/card";
@@ -195,11 +195,7 @@ const getAudioDeviceIcon = (name: string) => {
 export function RecordingSettings() {
   const { settings, updateSettings, getDataDir, loadUser } = useSettings();
   const [openLanguages, setOpenLanguages] = React.useState(false);
-  const [dataDirInputVisible, setDataDirInputVisible] = React.useState(false);
-  const [clickTimeout, setClickTimeout] = useState<ReturnType<
-    typeof setTimeout
-  > | null>(null);
-  
+
   // Add validation state
   const [validationErrors, setValidationErrors] = useState<Record<string, string>>({});
   const [pendingChanges, setPendingChanges] = useState<Partial<SettingsStore>>({});
@@ -316,6 +312,22 @@ export function RecordingSettings() {
     checkPlatform();
   }, []);
 
+  // Listen for data-dir-fallback event (custom dir unavailable, fell back to default)
+  useEffect(() => {
+    const unlisten = listen("data-dir-fallback", () => {
+      toast({
+        title: "custom data directory unavailable",
+        description:
+          "the configured data directory could not be accessed. recordings are using the default directory (~/.screenpipe).",
+        variant: "destructive",
+        duration: 10000,
+      });
+    });
+    return () => {
+      unlisten.then((fn) => fn());
+    };
+  }, [toast]);
+
   useEffect(() => {
     const loadDevices = async () => {
       try {
@@ -428,14 +440,6 @@ export function RecordingSettings() {
     return { isValid: true };
   }, []);
 
-  const validateDataDirectory = useCallback((path: string): FieldValidationResult => {
-    if (!path.trim()) {
-      return { isValid: false, error: "Data directory path is required" };
-    }
-    // Add more validation as needed
-    return { isValid: true };
-  }, []);
-
   // Enhanced audio chunk duration handler
   const handleAudioChunkDurationChange = useCallback((value: number[]) => {
     const duration = Math.max(5, Math.min(3600, value[0]));
@@ -445,11 +449,6 @@ export function RecordingSettings() {
   // Enhanced Deepgram API key handler
   const handleDeepgramApiKeyChange = useCallback((value: string, isValid: boolean) => {
     handleSettingsChange({ deepgramApiKey: value }, true);
-  }, [handleSettingsChange]);
-
-  // Enhanced data directory change with validation
-  const handleDataDirInputChange = useCallback((value: string, isValid: boolean) => {
-    handleSettingsChange({ dataDir: value }, true);
   }, [handleSettingsChange]);
 
   // Optimized update function with better error handling
@@ -696,78 +695,39 @@ Your screen is a pipe. Everything you see, hear, and type flows through it. Scre
   }, [settings.userName, toast]);
 
   const handleDataDirChange = async () => {
-    if (clickTimeout) {
-      // Double Click
-      clearTimeout(clickTimeout);
-      setClickTimeout(null);
-      setDataDirInputVisible(true);
-    } else {
-      const timeout = setTimeout(() => {
-        // Single Click
-        selectDataDir();
-        setClickTimeout(null);
-      }, 250);
-      setClickTimeout(timeout);
-    }
-
-    async function selectDataDir() {
-      try {
-        const dataDir = await getDataDir();
-
-        const selected = await open({
-          directory: true,
-          multiple: false,
-          defaultPath: dataDir,
-        });
-        // TODO: check permission of selected dir for server to write into
-
-        if (selected) {
-          handleSettingsChange({ dataDir: selected }, true);
-        } else {
-          console.log("canceled");
-        }
-      } catch (error) {
-        console.error("failed to change data directory:", error);
-        toast({
-          title: "error",
-          description: "failed to change data directory.",
-          variant: "destructive",
-          duration: 3000,
-        });
-      }
-    }
-  };
-
-  const handleDataDirInputBlur = () => {
-    console.log("wcw blur");
-    setDataDirInputVisible(false);
-    validateDataDirInput();
-  };
-
-  const handleDataDirInputKeyDown = (
-    e: React.KeyboardEvent<HTMLInputElement>
-  ) => {
-    if (e.key === "Enter") {
-      setDataDirInputVisible(false);
-      validateDataDirInput();
-    }
-  };
-
-  const validateDataDirInput = async () => {
     try {
-      if (await exists(settings.dataDir)) {
+      const dataDir = await getDataDir();
+      const selected = await open({
+        directory: true,
+        multiple: false,
+        defaultPath: dataDir,
+      });
+      if (!selected) return;
+
+      const result = await commands.validateDataDir(selected);
+      if (result.status === "error") {
+        toast({
+          title: "invalid directory",
+          description: String(result.error),
+          variant: "destructive",
+          duration: 5000,
+        });
         return;
       }
-    } catch (err) {}
+      handleSettingsChange({ dataDir: selected }, true);
+    } catch (error) {
+      console.error("failed to change data directory:", error);
+      toast({
+        title: "error",
+        description: "failed to change data directory",
+        variant: "destructive",
+        duration: 5000,
+      });
+    }
+  };
 
-    toast({
-      title: "error",
-      description: "failed to change data directory.",
-      variant: "destructive",
-      duration: 3000,
-    });
-
-    handleSettingsChange({ dataDir: settings.dataDir }, true);
+  const handleDataDirReset = () => {
+    handleSettingsChange({ dataDir: "default" }, true);
   };
 
   const handleIgnoredWindowsChange = (values: string[]) => {
@@ -918,40 +878,53 @@ Your screen is a pipe. Everything you see, hear, and type flows through it. Scre
       </div>
 
 
-      {/* Data Directory - hidden for now (not fully working) */}
-      {/* <div className="space-y-2">
-      <Card className="border-border bg-card">
-        <CardContent className="px-3 py-2.5">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-2.5">
-              <Folder className="h-4 w-4 text-muted-foreground shrink-0" />
-              <div>
-                <h3 className="text-sm font-medium text-foreground">Data directory</h3>
-                <p className="text-xs text-muted-foreground truncate max-w-[200px]">{settings.dataDir || "Default"}</p>
+      {/* Data Directory */}
+      <div className="space-y-2">
+        <Card className="border-border bg-card">
+          <CardContent className="px-3 py-2.5">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-2.5">
+                <Folder className="h-4 w-4 text-muted-foreground shrink-0" />
+                <div>
+                  <h3 className="text-sm font-medium text-foreground">
+                    Data directory
+                  </h3>
+                  <p className="text-xs text-muted-foreground truncate max-w-[250px]">
+                    {!settings.dataDir || settings.dataDir === "default"
+                      ? "~/.screenpipe (default)"
+                      : settings.dataDir}
+                  </p>
+                  <p className="text-[10px] text-muted-foreground/70 mt-0.5">
+                    changing directory starts fresh recordings
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-1.5">
+                {settings.dataDir &&
+                  settings.dataDir !== "default" &&
+                  settings.dataDir !== "" && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={handleDataDirReset}
+                      className="h-7 text-xs shrink-0"
+                    >
+                      Reset
+                    </Button>
+                  )}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleDataDirChange}
+                  className="h-7 text-xs shrink-0"
+                >
+                  Change
+                </Button>
               </div>
             </div>
-            {dataDirInputVisible ? (
-              <ValidatedInput
-                id="dataDir"
-                label=""
-                value={settings.dataDir || ""}
-                onChange={handleDataDirInputChange}
-                validation={validateDataDirectory}
-                onBlur={() => { setDataDirInputVisible(false); validateDataDirInput(); }}
-                onKeyDown={(e) => { if (e.key === "Enter") { setDataDirInputVisible(false); validateDataDirInput(); } }}
-                placeholder="Path"
-                autoFocus={true}
-                required={true}
-              />
-            ) : (
-              <Button variant="outline" size="sm" onClick={handleDataDirChange} className="h-7 text-xs shrink-0">
-                Change
-              </Button>
-            )}
-          </div>
-        </CardContent>
-      </Card>
-      </div> */}
+          </CardContent>
+        </Card>
+      </div>
 
       
 

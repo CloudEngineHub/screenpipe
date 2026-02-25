@@ -836,6 +836,18 @@ async getCachedSuggestions() : Promise<Result<CachedSuggestions, string>> {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
 }
+},
+/**
+ * Validate that a path is usable as a data directory.
+ * Checks: absolute path, can create dir, is writable.
+ */
+async validateDataDir(path: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("validate_data_dir", { path }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
 }
 }
 
