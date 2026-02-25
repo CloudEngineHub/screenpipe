@@ -787,8 +787,26 @@ jobs:
 
           rm -f "$CERT_PATH"
 
-          # Import Developer ID G2 intermediate cert
+          # Import full Apple certificate chain so codesign can verify trust
           mkdir -p ~/apple-certs
+
+          # Apple Root CA
+          if [ ! -f ~/apple-certs/AppleRootCA.cer ]; then
+            curl -sL -o ~/apple-certs/AppleRootCA.cer \
+              "https://www.apple.com/appleca/AppleIncRootCertificate.cer"
+          fi
+          security import ~/apple-certs/AppleRootCA.cer \
+            -t cert -k "$BUILD_KC" 2>/dev/null || true
+
+          # Apple WWDR (Worldwide Developer Relations) G2
+          if [ ! -f ~/apple-certs/AppleWWDRCAG2.cer ]; then
+            curl -sL -o ~/apple-certs/AppleWWDRCAG2.cer \
+              "https://www.apple.com/certificateauthority/AppleWWDRCAG2.cer"
+          fi
+          security import ~/apple-certs/AppleWWDRCAG2.cer \
+            -t cert -k "$BUILD_KC" 2>/dev/null || true
+
+          # Developer ID Certification Authority G2
           if [ ! -f ~/apple-certs/DeveloperIDG2CA.cer ]; then
             curl -sL -o ~/apple-certs/DeveloperIDG2CA.cer \
               "https://www.apple.com/certificateauthority/DeveloperIDG2CA.cer"
@@ -796,7 +814,15 @@ jobs:
           security import ~/apple-certs/DeveloperIDG2CA.cer \
             -t cert -k "$BUILD_KC" 2>/dev/null || true
 
+          # Ensure login keychain + System Roots are in the search list
+          security list-keychains -d user -s "$BUILD_KC" \
+            "$HOME/Library/Keychains/login.keychain-db" \
+            "/Library/Keychains/System.keychain"
+
           # Verify signing identity is available
+          echo "=== Keychain search list ==="
+          security list-keychains -d user
+          echo "=== Signing identities ==="
           security find-identity -v -p codesigning "$BUILD_KC" 2>&1 | tail -5
           echo "Build keychain ready at $BUILD_KC"
 
