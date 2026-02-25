@@ -89,6 +89,11 @@ export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 	const [selectedDeviceId, setSelectedDeviceId] = useState<string>("all");
 	const [selectedAppName, setSelectedAppName] = useState<string>("all");
 
+	const resetFilters = useCallback(() => {
+		setSelectedDeviceId("all");
+		setSelectedAppName("all");
+	}, []);
+
 	const containerRef = useRef<HTMLDivElement | null>(null);
 	// const [searchResults, setSearchResults] = useState<number[]>([]);
 	const [startAndEndDates, setStartAndEndDates] = useState<TimeRange>(() => {

@@ -1164,9 +1164,9 @@ export function SearchModal({ isOpen, onClose, onNavigateToTimestamp, embedded =
                           frameId={result.frame_id}
                           alt={`${result.app_name} - ${result.window_name}`}
                         />
-                        {result.text_positions?.length > 0 && queryTokens.length > 0 && (
+                        {queryTokens.length > 0 && (
                           <ThumbnailHighlightOverlay
-                            textPositions={result.text_positions}
+                            frameId={result.frame_id}
                             highlightTerms={queryTokens}
                           />
                         )}

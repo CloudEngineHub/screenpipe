@@ -595,6 +595,36 @@ export const CurrentFrameTimeline: FC<CurrentFrameTimelineProps> = ({
 		return () => document.removeEventListener("mousedown", handler);
 	}, [contextMenuOpen]);
 
+	// Cmd+C fallback: when no text is selected via the overlay (e.g. accessibility-only
+	// frames without OCR bounding boxes), copy all frame text to clipboard
+	useEffect(() => {
+		const el = containerRef.current;
+		if (!el) return;
+
+		const handleKeyDown = (e: KeyboardEvent) => {
+			const isCopy = (e.metaKey || e.ctrlKey) && e.key === "c";
+			if (!isCopy) return;
+
+			// If the selectable text layer has an active selection, let the browser handle it
+			const sel = window.getSelection()?.toString()?.trim();
+			if (sel) return;
+
+			// No selection — copy all frame text (accessibility or OCR)
+			let text = frameContext?.text;
+			if (!text?.trim() && textPositions.length > 0) {
+				text = textPositions.map((p) => p.text).join("\n");
+			}
+			if (!text?.trim()) return;
+
+			e.preventDefault();
+			navigator.clipboard.writeText(text).catch(() => {});
+			toast({ title: "copied text", description: "all frame text copied to clipboard" });
+		};
+
+		el.addEventListener("keydown", handleKeyDown);
+		return () => el.removeEventListener("keydown", handleKeyDown);
+	}, [frameContext?.text, textPositions]);
+
 	// Update rendered dimensions on resize (needed for TextOverlay positioning)
 	useEffect(() => {
 		const updateDimensions = () => {
@@ -685,8 +715,9 @@ export const CurrentFrameTimeline: FC<CurrentFrameTimelineProps> = ({
 	return (
 		<div
 			ref={containerRef}
-			className="absolute inset-0 w-full h-full bg-black"
+			className="absolute inset-0 w-full h-full bg-black outline-none"
 			onContextMenu={handleContextMenu}
+			tabIndex={0}
 		>
 			{/* Context menu - right-click */}
 			{contextMenuOpen && contextMenuPositionRef.current && debouncedFrame?.frameId && (
