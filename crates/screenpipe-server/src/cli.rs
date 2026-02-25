@@ -3,7 +3,7 @@ use clap::{Parser, Subcommand, ValueHint};
 use screenpipe_audio::{
     audio_manager::builder::TranscriptionMode,
     core::engine::AudioTranscriptionEngine as CoreAudioTranscriptionEngine,
-    vad::{VadEngineEnum, VadSensitivity},
+    vad::VadEngineEnum,
 };
 use screenpipe_core::Language;
 use std::path::PathBuf;
@@ -67,23 +67,6 @@ impl From<CliVadEngine> for VadEngineEnum {
         match cli_engine {
             CliVadEngine::WebRtc => VadEngineEnum::WebRtc,
             CliVadEngine::Silero => VadEngineEnum::Silero,
-        }
-    }
-}
-
-#[derive(Clone, Debug, ValueEnum, PartialEq)]
-pub enum CliVadSensitivity {
-    Low,
-    Medium,
-    High,
-}
-
-impl From<CliVadSensitivity> for VadSensitivity {
-    fn from(cli_sensitivity: CliVadSensitivity) -> Self {
-        match cli_sensitivity {
-            CliVadSensitivity::Low => VadSensitivity::Low,
-            CliVadSensitivity::Medium => VadSensitivity::Medium,
-            CliVadSensitivity::High => VadSensitivity::High,
         }
     }
 }
@@ -192,9 +175,6 @@ pub struct Cli {
 
     #[arg(long, hide = true)]
     pub auto_destruct_pid: Option<u32>,
-
-    #[arg(long, value_enum, default_value_t = CliVadSensitivity::Medium)]
-    pub vad_sensitivity: CliVadSensitivity,
 
     /// Audio transcription scheduling mode
     #[arg(long, value_enum, default_value_t = CliTranscriptionMode::Realtime)]
@@ -391,10 +371,6 @@ pub struct RecordArgs {
     #[arg(long, hide = true)]
     pub auto_destruct_pid: Option<u32>,
 
-    /// Voice activity detection sensitivity level
-    #[arg(long, value_enum, default_value_t = CliVadSensitivity::Medium)]
-    pub vad_sensitivity: CliVadSensitivity,
-
     /// Audio transcription scheduling mode: realtime (default) or smart (defer to idle)
     #[arg(long, value_enum, default_value_t = CliTranscriptionMode::Realtime)]
     pub transcription_mode: CliTranscriptionMode,
@@ -459,7 +435,6 @@ impl RecordArgs {
             ignored_urls: cli.ignored_urls.clone(),
             deepgram_api_key: cli.deepgram_api_key.clone(),
             auto_destruct_pid: cli.auto_destruct_pid,
-            vad_sensitivity: cli.vad_sensitivity.clone(),
             transcription_mode: cli.transcription_mode.clone(),
             disable_telemetry: cli.disable_telemetry,
             video_quality: cli.video_quality.clone(),
@@ -512,7 +487,6 @@ impl RecordArgs {
             enable_input_capture: self.enable_input_capture,
             enable_accessibility: self.enable_accessibility,
             audio_transcription_engine: self.audio_transcription_engine.into(),
-            vad_sensitivity: self.vad_sensitivity.into(),
             transcription_mode: self.transcription_mode.into(),
             audio_devices: self.audio_device,
             use_system_default_audio: self.use_system_default_audio,

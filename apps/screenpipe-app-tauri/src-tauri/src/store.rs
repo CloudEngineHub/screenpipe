@@ -567,8 +567,6 @@ impl SettingsStore {
     pub fn to_recording_config(&self, data_dir: std::path::PathBuf) -> screenpipe_server::RecordingConfig {
         use screenpipe_audio::audio_manager::builder::TranscriptionMode;
         use screenpipe_audio::core::engine::AudioTranscriptionEngine;
-        use screenpipe_audio::vad::VadSensitivity;
-
         let audio_engine_str = self.resolve_audio_engine();
 
         screenpipe_server::RecordingConfig {
@@ -582,8 +580,6 @@ impl SettingsStore {
             enable_accessibility: true, // always enabled, setting removed from UI
             audio_transcription_engine: audio_engine_str.parse()
                 .unwrap_or(AudioTranscriptionEngine::WhisperLargeV3Turbo),
-            vad_sensitivity: self.vad_sensitivity.parse()
-                .unwrap_or(VadSensitivity::High),
             transcription_mode: match self.extra.get("transcriptionMode").and_then(|v| v.as_str()) {
                 Some("smart") => TranscriptionMode::Smart,
                 _ => TranscriptionMode::Realtime,

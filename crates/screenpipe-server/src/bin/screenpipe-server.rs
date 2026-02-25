@@ -323,10 +323,6 @@ async fn main() -> anyhow::Result<()> {
                     map.insert("disable_vision".into(), json!(cli.disable_vision));
                     map.insert("vad_engine".into(), json!(format!("{:?}", cli.vad_engine)));
                     map.insert(
-                        "vad_sensitivity".into(),
-                        json!(format!("{:?}", cli.vad_sensitivity)),
-                    );
-                    map.insert(
                         "enable_input_capture".into(),
                         json!(cli.enable_input_capture),
                     );
@@ -491,7 +487,6 @@ async fn main() -> anyhow::Result<()> {
     cli.ignored_urls = record_args.ignored_urls.clone();
     cli.deepgram_api_key = record_args.deepgram_api_key.clone();
     cli.auto_destruct_pid = record_args.auto_destruct_pid;
-    cli.vad_sensitivity = record_args.vad_sensitivity.clone();
     cli.disable_telemetry = record_args.disable_telemetry;
     cli.video_quality = record_args.video_quality.clone();
     cli.enable_input_capture = record_args.enable_input_capture;
@@ -618,7 +613,6 @@ async fn main() -> anyhow::Result<()> {
 
     let vad_engine = cli.vad_engine.clone();
     let vad_engine_clone = vad_engine.clone();
-    let vad_sensitivity_clone = cli.vad_sensitivity.clone();
     let (shutdown_tx, _) = broadcast::channel::<()>(1);
 
     let vision_handle = Handle::current();
@@ -854,10 +848,6 @@ async fn main() -> anyhow::Result<()> {
     println!(
         "│ vad engine             │ {:<34} │",
         format!("{:?}", vad_engine_clone)
-    );
-    println!(
-        "│ vad sensitivity        │ {:<34} │",
-        format!("{:?}", vad_sensitivity_clone)
     );
     println!(
         "│ data directory         │ {:<34} │",

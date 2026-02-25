@@ -33,7 +33,6 @@ import {
   EyeOff,
   Key,
   Terminal,
-  Asterisk,
   AlertCircle,
   RefreshCw,
   Loader2,
@@ -56,7 +55,6 @@ import { commands, SettingsStore, MonitorDevice, AudioDeviceInfo } from "@/lib/u
 
 import {
   useSettings,
-  VadSensitivity,
   Settings,
 } from "@/lib/hooks/use-settings";
 import { useTeam } from "@/lib/hooks/use-team";
@@ -66,7 +64,6 @@ import { Badge } from "@/components/ui/badge";
 import { HelpTooltip } from "@/components/ui/help-tooltip";
 import { Switch } from "@/components/ui/switch";
 import { Input } from "@/components/ui/input";
-import { Slider } from "@/components/ui/slider";
 import { platform } from "@tauri-apps/plugin-os";
 import posthog from "posthog-js";
 import { Language } from "@/lib/language";
@@ -247,13 +244,6 @@ export function RecordingSettings() {
       const errors: Record<string, string> = {};
       
       // Validate numeric fields
-      if (newSettings.audioChunkDuration !== undefined) {
-        const durationValidation = validateField("audioChunkDuration", newSettings.audioChunkDuration);
-        if (!durationValidation.isValid && durationValidation.error) {
-          errors.audioChunkDuration = durationValidation.error;
-        }
-      }
-      
       if (newSettings.port !== undefined) {
         const portValidation = validateField("port", newSettings.port);
         if (!portValidation.isValid && portValidation.error) {
@@ -440,12 +430,6 @@ export function RecordingSettings() {
     return { isValid: true };
   }, []);
 
-  // Enhanced audio chunk duration handler
-  const handleAudioChunkDurationChange = useCallback((value: number[]) => {
-    const duration = Math.max(5, Math.min(3600, value[0]));
-    handleSettingsChange({ audioChunkDuration: duration }, true);
-  }, [handleSettingsChange]);
-
   // Enhanced Deepgram API key handler
   const handleDeepgramApiKeyChange = useCallback((value: string, isValid: boolean) => {
     handleSettingsChange({ deepgramApiKey: value }, true);
@@ -590,29 +574,6 @@ export function RecordingSettings() {
 
   const handleDisableAudioChange = (checked: boolean) => {
     handleSettingsChange({ disableAudio: checked }, true);
-  };
-
-  const handleVadSensitivityChange = (value: number[]) => {
-    const sensitivityMap: { [key: number]: VadSensitivity } = {
-      2: "high",
-      1: "medium",
-      0: "low",
-    };
-    handleSettingsChange(
-      {
-        vadSensitivity: sensitivityMap[value[0]],
-      },
-      true
-    );
-  };
-
-  const vadSensitivityToNumber = (sensitivity: VadSensitivity): number => {
-    const sensitivityMap: { [key in VadSensitivity]: number } = {
-      high: 2,
-      medium: 1,
-      low: 0,
-    };
-    return sensitivityMap[sensitivity];
   };
 
   const handleAnalyticsToggle = (checked: boolean) => {
@@ -947,25 +908,6 @@ Your screen is a pipe. Everything you see, hear, and type flows through it. Scre
             </div>
           </CardContent>
         </Card>
-
-        {/* Audio Chunk Duration */}
-        {!settings.disableAudio && (
-          <Card className="border-border bg-card">
-            <CardContent className="px-3 py-2.5">
-              <div className="flex items-center space-x-2.5">
-                <Mic className="h-4 w-4 text-muted-foreground shrink-0" />
-                <h3 className="text-sm font-medium text-foreground flex items-center gap-1.5">
-                  Audio chunk duration
-                  <HelpTooltip text="Duration of each audio recording segment. Shorter chunks lower memory spikes. Longer chunks may improve transcription quality." />
-                </h3>
-              </div>
-              <div className="flex items-center space-x-3 mt-2 ml-[26px]">
-                <Slider id="audioChunkDuration" min={5} max={3000} step={1} value={[settings.audioChunkDuration]} onValueChange={handleAudioChunkDurationChange} className="flex-grow" />
-                <span className="text-xs text-muted-foreground w-10 text-right">{settings.audioChunkDuration}s</span>
-              </div>
-            </CardContent>
-          </Card>
-        )}
 
         {/* Your Name + Train Voice */}
         {!settings.disableAudio && (
@@ -1345,24 +1287,6 @@ Your screen is a pipe. Everything you see, hear, and type flows through it. Scre
         </Card>
         )}
 
-        {/* VAD Sensitivity */}
-        {!settings.disableAudio && (
-        <Card className="border-border bg-card">
-          <CardContent className="px-3 py-2.5">
-            <div className="flex items-center space-x-2.5">
-              <Asterisk className="h-4 w-4 text-muted-foreground shrink-0" />
-              <h3 className="text-sm font-medium text-foreground flex items-center gap-1.5">
-                Voice detection sensitivity
-                <HelpTooltip text="How aggressively to filter background noise. Higher = more sensitive (captures quieter speech). Lower = only loud/clear speech." />
-              </h3>
-            </div>
-            <div className="flex items-center space-x-3 mt-2 ml-[26px]">
-              <Slider id="vadSensitivity" min={0} max={2} step={1} value={[vadSensitivityToNumber(settings.vadSensitivity as VadSensitivity)]} onValueChange={handleVadSensitivityChange} className="flex-grow" />
-              <span className="text-xs text-muted-foreground w-12 text-right capitalize">{settings.vadSensitivity}</span>
-            </div>
-          </CardContent>
-        </Card>
-        )}
       </div>
 
       

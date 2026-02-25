@@ -1526,55 +1526,39 @@ async fn main() {
 
                 // Forward native trackpad magnify (pinch) gestures to JS as Tauri events.
                 // WKWebView swallows magnifyWithEvent: and doesn't fire JS gesture events.
-                // We use BOTH local + global NSEvent monitors:
-                // - Local catches magnify when our panel is key window
-                // - Global catches magnify when panel lost key status (e.g. after gesture ends)
-                // The global monitor requires Accessibility permission (already granted).
+                // We use an NSEvent local monitor to intercept magnify events before they
+                // reach the WKWebView. The handler returns nil to CONSUME the event,
+                // preventing WKWebView's built-in magnification from handling it (which
+                // would steal subsequent gesture events after the first pinch).
+                // Note: magnify events are directed at the window under the cursor, so
+                // the local monitor catches them even when the panel is nonactivating.
+                // A global monitor is NOT used — it would incorrectly trigger zoom when
+                // the user pinches in other apps.
                 {
                     use objc::{class, msg_send, sel, sel_impl, runtime::Object};
                     use tauri_nspanel::block::ConcreteBlock;
 
+                    let app_for_magnify = app.handle().clone();
+
                     // NSEventMaskMagnify = 1 << 30
                     let mask: u64 = 1 << 30;
 
-                    // Local monitor — catches events when our app is active.
-                    // Returns nil to CONSUME the event, preventing WKWebView's
-                    // built-in magnification from handling it (which would steal
-                    // subsequent gesture events after the first pinch).
-                    let app_local = app.handle().clone();
-                    let local_block = ConcreteBlock::new(move |event: *mut Object| -> *mut Object {
+                    let block = ConcreteBlock::new(move |event: *mut Object| -> *mut Object {
                         let magnification: f64 = unsafe { msg_send![event, magnification] };
-                        let _ = app_local.emit("native-magnify", magnification);
+                        let _ = app_for_magnify.emit("native-magnify", magnification);
                         std::ptr::null_mut() // consume event — don't let WKWebView handle it
                     });
-                    let local_block = local_block.copy();
+                    let block = block.copy();
                     unsafe {
                         let _: *mut Object = msg_send![
                             class!(NSEvent),
                             addLocalMonitorForEventsMatchingMask: mask
-                            handler: &*local_block
+                            handler: &*block
                         ];
                     }
-                    std::mem::forget(local_block);
+                    std::mem::forget(block);
 
-                    // Global monitor — catches events when another app is active
-                    // but our overlay panel is visible (nonactivating panel scenario)
-                    let app_global = app.handle().clone();
-                    let global_block = ConcreteBlock::new(move |event: *mut Object| {
-                        let magnification: f64 = unsafe { msg_send![event, magnification] };
-                        let _ = app_global.emit("native-magnify", magnification);
-                    });
-                    let global_block = global_block.copy();
-                    unsafe {
-                        let _: *mut Object = msg_send![
-                            class!(NSEvent),
-                            addGlobalMonitorForEventsMatchingMask: mask
-                            handler: &*global_block
-                        ];
-                    }
-                    std::mem::forget(global_block);
-
-                    info!("magnify event monitors installed (local + global)");
+                    info!("magnify event monitor installed");
                 }
             }
 
@@ -1700,7 +1684,6 @@ async fn main() {
                         map.insert("languages".into(), serde_json::json!(store.languages));
                         map.insert("use_pii_removal".into(), serde_json::json!(store.use_pii_removal));
                         map.insert("disable_vision".into(), serde_json::json!(store.disable_vision));
-                        map.insert("vad_sensitivity".into(), serde_json::json!(store.vad_sensitivity));
                         map.insert("enable_input_capture".into(), serde_json::json!(store.enable_input_capture));
                         map.insert("enable_accessibility".into(), serde_json::json!(store.enable_accessibility));
                         map.insert("auto_start_enabled".into(), serde_json::json!(store.auto_start_enabled));

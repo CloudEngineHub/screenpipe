@@ -66,8 +66,6 @@ export const settingsStoreSchema = z.object({
   realtimeAudioTranscriptionEngine: z.string(),
   audioDevices: z.array(z.string()),
   disableAudio: z.boolean(),
-  vadSensitivity: z.enum(["low", "medium", "high"]),
-  audioChunkDuration: z.number().int().min(5, "Must be at least 5 seconds").max(3600, "Cannot exceed 1 hour"),
   languages: z.array(z.string()),
   
   // Video Settings
@@ -173,7 +171,6 @@ export const validateSettings = (settings: Partial<SettingsStore>): ValidationRe
 export const sanitizeValue = (field: ExtendedSettingsKeys, value: any): any => {
   switch (field) {
     case "port":
-    case "audioChunkDuration":
       return Math.max(0, parseInt(String(value)) || 0);
     
     case "fps":

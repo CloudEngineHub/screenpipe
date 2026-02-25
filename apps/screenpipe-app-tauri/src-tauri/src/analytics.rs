@@ -284,7 +284,6 @@ impl AnalyticsManager {
             "setting_audio_device_count": get_arr_len("audioDevices"),
             "setting_audio_transcription_engine": get_str("audioTranscriptionEngine").unwrap_or("unknown"),
             "setting_audio_chunk_duration": get_f64("audioChunkDuration").unwrap_or(30.0),
-            "setting_vad_sensitivity": get_str("vadSensitivity").unwrap_or("high"),
             "setting_use_system_default_audio": get_bool("useSystemDefaultAudio").unwrap_or(true),
 
             // Filters

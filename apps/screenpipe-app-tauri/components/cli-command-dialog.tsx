@@ -131,15 +131,8 @@ export function CliCommandDialog({ settings }: CliCommandDialogProps) {
     if (settings.fps !== 0.2) {
       args.push(`--fps ${settings.fps}`);
     }
-    if (settings.vadSensitivity !== "high") {
-      args.push(`--vad-sensitivity ${settings.vadSensitivity}`);
-    }
-
     if (!settings.analyticsEnabled) {
       args.push("--disable-telemetry");
-    }
-    if (settings.audioChunkDuration !== 30) {
-      args.push(`--audio-chunk-duration ${settings.audioChunkDuration}`);
     }
 
     if (settings.languages.length > 0) {

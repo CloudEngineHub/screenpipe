@@ -6,7 +6,7 @@ use screenpipe_audio::audio_manager::builder::TranscriptionMode;
 use screenpipe_audio::audio_manager::AudioManagerBuilder;
 use screenpipe_audio::core::engine::AudioTranscriptionEngine;
 use screenpipe_audio::transcription::VocabularyEntry;
-use screenpipe_audio::vad::{VadEngineEnum, VadSensitivity};
+use screenpipe_audio::vad::VadEngineEnum;
 use screenpipe_core::Language;
 use screenpipe_vision::PipelineMetrics;
 use std::path::PathBuf;
@@ -33,7 +33,6 @@ pub struct RecordingConfig {
 
     // Engines (typed, not strings)
     pub audio_transcription_engine: AudioTranscriptionEngine,
-    pub vad_sensitivity: VadSensitivity,
     pub transcription_mode: TranscriptionMode,
 
     // Devices & monitors
@@ -96,7 +95,6 @@ impl RecordingConfig {
         AudioManagerBuilder::new()
             .audio_chunk_duration(Duration::from_secs(self.audio_chunk_duration))
             .vad_engine(VadEngineEnum::Silero)
-            .vad_sensitivity(self.vad_sensitivity)
             .languages(self.languages.clone())
             .transcription_engine(self.audio_transcription_engine.clone())
             .enabled_devices(audio_devices)
