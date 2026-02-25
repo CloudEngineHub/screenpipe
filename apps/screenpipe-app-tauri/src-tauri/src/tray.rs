@@ -379,6 +379,7 @@ fn create_dynamic_menu(
     // Help and quit
     menu_builder = menu_builder
         .item(&PredefinedMenuItem::separator(app)?)
+        .item(&MenuItemBuilder::with_id("check_permissions", "Check permissions").build(app)?)
         .item(&MenuItemBuilder::with_id("feedback", "Send feedback").build(app)?)
         .item(&MenuItemBuilder::with_id("book_call", "Book a call with founder").build(app)?)
         .item(&MenuItemBuilder::with_id("onboarding", "Onboarding").build(app)?)
@@ -438,6 +439,12 @@ fn handle_menu_event(app_handle: &AppHandle, event: tauri::menu::MenuEvent) {
             let _ = app_handle.emit("shortcut-stop-recording", ());
         }
         "fix_permissions" => {
+            let app = app_handle.clone();
+            let _ = app_handle.run_on_main_thread(move || {
+                let _ = ShowRewindWindow::PermissionRecovery.show(&app);
+            });
+        }
+        "check_permissions" => {
             let app = app_handle.clone();
             let _ = app_handle.run_on_main_thread(move || {
                 let _ = ShowRewindWindow::PermissionRecovery.show(&app);

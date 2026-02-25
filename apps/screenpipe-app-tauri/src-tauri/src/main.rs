@@ -1130,6 +1130,7 @@ async fn main() {
                 permissions::check_microphone_permission,
                 permissions::check_accessibility_permission_cmd,
                 permissions::check_arc_installed,
+                permissions::check_arc_automation_permission,
                 permissions::request_arc_automation_permission,
                 // Commands from main.rs
                 get_env,
@@ -1344,6 +1345,7 @@ async fn main() {
             permissions::reset_and_request_permission,
             permissions::get_missing_permissions,
             permissions::check_arc_installed,
+            permissions::check_arc_automation_permission,
             permissions::request_arc_automation_permission,
             set_tray_unhealth_icon,
             set_tray_health_icon,

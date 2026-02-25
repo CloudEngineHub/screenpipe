@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useCallback, useRef } from "react";
-import { Monitor, Mic, Keyboard, Check, AlertTriangle, RefreshCw, ExternalLink, X } from "lucide-react";
+import { Monitor, Mic, Keyboard, Globe, Check, AlertTriangle, RefreshCw, ExternalLink, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { commands, type OSPermission } from "@/lib/utils/tauri";
 import { motion, AnimatePresence } from "framer-motion";
@@ -55,6 +55,8 @@ function PermissionRow({ icon, label, description, status, onFix, isAnyFixing }:
 
 export default function PermissionRecoveryPage() {
   const [permissions, setPermissions] = useState<Record<string, string> | null>(null);
+  const [arcInstalled, setArcInstalled] = useState(false);
+  const [arcAutomationOk, setArcAutomationOk] = useState(false);
 
   const { isMac: isMacOS } = usePlatform();
 
@@ -63,6 +65,14 @@ export default function PermissionRecoveryPage() {
     try {
       const perms = await commands.doPermissionsCheck(false);
       setPermissions(perms);
+
+      const installed = await commands.checkArcInstalled().catch(() => false);
+      setArcInstalled(installed);
+      if (installed) {
+        const granted = await commands.checkArcAutomationPermission().catch(() => false);
+        setArcAutomationOk(granted);
+      }
+
       return perms;
     } catch (error) {
       console.error("Failed to check permissions:", error);
@@ -230,6 +240,21 @@ export default function PermissionRecoveryPage() {
                     description="keyboard shortcuts"
                     status={accessibilityStatus}
                     onFix={() => openSettings("accessibility")}
+                    isAnyFixing={false}
+                  />
+                )}
+
+                {isMacOS && arcInstalled && (
+                  <PermissionRow
+                    icon={<Globe className="w-5 h-5" strokeWidth={1.5} />}
+                    label="browser url capture (arc)"
+                    description="capture which page you're viewing"
+                    status={arcAutomationOk ? "granted" : permissions === null ? "checking" : "denied"}
+                    onFix={async () => {
+                      posthog.capture("permission_recovery_arc_automation");
+                      const granted = await commands.requestArcAutomationPermission();
+                      if (granted) setArcAutomationOk(true);
+                    }}
                     isAnyFixing={false}
                   />
                 )}

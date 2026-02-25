@@ -373,6 +373,56 @@ pub fn check_arc_installed() -> bool {
     }
 }
 
+/// Check if Automation permission for Arc is already granted (without triggering a prompt).
+/// Queries the user TCC database for an AppleEvents entry from our bundle to Arc.
+#[tauri::command(async)]
+#[specta::specta]
+pub fn check_arc_automation_permission(app: tauri::AppHandle) -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        use std::process::Command;
+
+        let bundle_id = app.config().identifier.as_str().to_string();
+        let arc_bundle = "company.thebrowser.Browser";
+
+        let home = match std::env::var("HOME") {
+            Ok(h) => h,
+            Err(_) => return false,
+        };
+        let tcc_db = format!(
+            "{}/Library/Application Support/com.apple.TCC/TCC.db",
+            home
+        );
+
+        match Command::new("sqlite3")
+            .args([
+                &tcc_db,
+                &format!(
+                    "SELECT auth_value FROM access WHERE service='kTCCServiceAppleEvents' AND client='{}' AND indirect_object_identifier='{}' LIMIT 1;",
+                    bundle_id, arc_bundle
+                ),
+            ])
+            .output()
+        {
+            Ok(output) => {
+                let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                // auth_value 2 = granted
+                stdout == "2"
+            }
+            Err(e) => {
+                warn!("failed to query TCC.db for arc automation: {}", e);
+                false
+            }
+        }
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = app;
+        false
+    }
+}
+
 /// Request macOS Automation permission for Arc browser by running a harmless AppleScript.
 /// This triggers the "screenpipe wants to control Arc" system prompt if not already granted.
 /// Returns true if the command succeeded (permission granted), false otherwise.
