@@ -13,7 +13,7 @@ pub struct AudioChunkInfo {
     pub transcription: Option<String>,
     pub transcription_engine: Option<String>,
     pub offset_index: Option<i64>,
-    pub timestamp: Option<DateTime<Utc>>,
+    pub timestamp: DateTime<Utc>,
     pub device: Option<String>,
     pub is_input_device: Option<bool>,
 }

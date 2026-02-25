@@ -781,7 +781,8 @@ impl DatabaseManager {
     ) -> Result<Vec<AudioChunkInfo>, sqlx::Error> {
         let rows = sqlx::query_as::<_, AudioChunkInfo>(
             r#"SELECT ac.id, ac.file_path, at.transcription, at.transcription_engine,
-                      at.offset_index, at.timestamp, at.device, at.is_input_device
+                      at.offset_index, COALESCE(at.timestamp, ac.timestamp) as timestamp,
+                      at.device, at.is_input_device
                FROM audio_chunks ac
                LEFT JOIN audio_transcriptions at ON ac.id = at.audio_chunk_id
                WHERE ac.timestamp >= ?1 AND ac.timestamp <= ?2

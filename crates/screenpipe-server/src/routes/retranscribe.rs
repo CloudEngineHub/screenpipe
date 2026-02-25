@@ -190,7 +190,7 @@ pub async fn retranscribe_handler(
         let device_name = chunk.device.as_deref().unwrap_or("unknown");
         let is_input = chunk.is_input_device.unwrap_or(false);
         let engine_name = engine.to_string();
-        let timestamp = chunk.timestamp.unwrap_or_else(chrono::Utc::now);
+        let timestamp = chunk.timestamp;
         if let Err(e) = state
             .db
             .replace_audio_transcription(
