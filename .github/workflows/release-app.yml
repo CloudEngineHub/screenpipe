@@ -744,6 +744,7 @@ jobs:
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
         run: |
           # Import the signing cert directly into the login keychain instead of letting
           # Tauri create a temp keychain. On self-hosted runners, Tauri's temp keychain
@@ -754,6 +755,12 @@ jobs:
           # By importing into login.keychain and NOT passing APPLE_CERTIFICATE to Tauri,
           # Tauri will find the identity in the existing keychain and skip temp keychain
           # creation entirely.
+
+          # Unlock login keychain first (required on self-hosted runners where
+          # the keychain is locked and UI interaction is not available)
+          KC_PASS="${KEYCHAIN_PASSWORD:-}"
+          security unlock-keychain -p "$KC_PASS" ~/Library/Keychains/login.keychain-db 2>/dev/null || \
+            security unlock-keychain -p "" ~/Library/Keychains/login.keychain-db 2>/dev/null || true
 
           # Decode and import the p12
           CERT_PATH=$(mktemp /tmp/cert.XXXXXX.p12)
@@ -770,7 +777,7 @@ jobs:
           # Set partition list to allow codesign access without UI prompt
           security set-key-partition-list \
             -S apple-tool:,apple:,codesign: \
-            -s -k "" \
+            -s -k "$KC_PASS" \
             ~/Library/Keychains/login.keychain-db 2>/dev/null || true
 
           rm -f "$CERT_PATH"
