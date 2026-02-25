@@ -213,14 +213,25 @@ export function AppContextPopover({
 			<div className="flex items-center justify-between px-3 py-2 border-b border-border">
 				<div className="flex items-center gap-2 min-w-0">
 					{allApps.map((name, i) => (
-						// eslint-disable-next-line @next/next/no-img-element
-						<img
+						<span
 							key={i}
-							src={`http://localhost:11435/app-icon?name=${encodeURIComponent(name)}`}
-							className="w-5 h-5 rounded flex-shrink-0 object-contain"
-							alt={name}
-							style={i > 0 ? { marginLeft: -6 } : undefined}
-						/>
+							className="relative w-5 h-5 rounded flex-shrink-0 overflow-hidden inline-flex items-center justify-center"
+							style={{
+								marginLeft: i > 0 ? -6 : undefined,
+								backgroundColor: `hsla(${[...name].reduce((h, c) => c.charCodeAt(0) + ((h << 5) - h), 0) % 360}, 40%, 55%, 0.3)`,
+							}}
+						>
+							{/* eslint-disable-next-line @next/next/no-img-element */}
+							<img
+								src={`http://localhost:11435/app-icon?name=${encodeURIComponent(name)}`}
+								className="w-full h-full rounded object-contain"
+								alt={name}
+								onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+							/>
+							<span className="absolute inset-0 flex items-center justify-center text-[8px] font-bold text-white/90" style={{ zIndex: -1 }}>
+								{name.charAt(0).toUpperCase()}
+							</span>
+						</span>
 					))}
 					<span className="font-medium text-popover-foreground truncate">
 						{allApps.length > 1 ? allApps.join(" + ") : appName}

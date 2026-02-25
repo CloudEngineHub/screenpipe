@@ -173,13 +173,16 @@ function appNameToHue(name: string): number {
 }
 
 // Color for filter dots — identifiable but not loud
-function appNameToColor(name: string): string {
+function appNameToColor(name: string, alpha?: number): string {
+	if (alpha !== undefined) {
+		return `hsla(${appNameToHue(name)}, 40%, 55%, ${alpha})`;
+	}
 	return `hsl(${appNameToHue(name)}, 40%, 55%)`;
 }
 
-// Color for timeline bars — muted tint, fits black/white aesthetic
+// Color for timeline bars — tinted enough to distinguish apps visually
 function appNameToBarColor(name: string): string {
-	return `hsl(${appNameToHue(name)}, 25%, 70%)`;
+	return `hsl(${appNameToHue(name)}, 35%, 65%)`;
 }
 
 export const TimelineSlider = ({
@@ -708,7 +711,7 @@ export const TimelineSlider = ({
 										backgroundColor: selectedAppName === name
 											? appNameToColor(name)
 											: selectedAppName === "all"
-												? appNameToColor(name) + "99"
+												? appNameToColor(name, 0.6)
 												: "hsl(var(--foreground) / 0.15)",
 									}}
 									onMouseEnter={(e) => {
@@ -816,16 +819,17 @@ export const TimelineSlider = ({
 											<motion.div
 												key={`${appName}-${idx}`}
 												className="w-8 h-8 rounded flex-shrink-0 overflow-hidden flex items-center justify-center"
-												style={{ 
+												style={{
 													zIndex: 10 - idx,
-													position: 'relative'
+													position: 'relative',
+													backgroundColor: appNameToColor(appName, 0.3),
 												}}
 												variants={{
-													collapsed: { 
+													collapsed: {
 														marginTop: idx === 0 ? 0 : -10,
 														scale: 1
 													},
-													expanded: { 
+													expanded: {
 														marginTop: idx === 0 ? 0 : 4,
 														scale: 1.1
 													}
@@ -839,7 +843,17 @@ export const TimelineSlider = ({
 													alt={appName}
 													loading="lazy"
 													decoding="async"
+													onError={(e) => {
+														// Hide broken img, let fallback letter show
+														(e.target as HTMLImageElement).style.display = 'none';
+													}}
 												/>
+												<span
+													className="absolute inset-0 flex items-center justify-center text-[10px] font-bold text-white/90 pointer-events-none"
+													style={{ zIndex: -1 }}
+												>
+													{appName.charAt(0).toUpperCase()}
+												</span>
 											</motion.div>
 										))}
 									</motion.div>
