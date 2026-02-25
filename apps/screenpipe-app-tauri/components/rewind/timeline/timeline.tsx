@@ -425,21 +425,27 @@ export const TimelineSlider = ({
 		};
 
 		visibleFrames.forEach((frame) => {
-			const appName = getFrameAppName(frame);
+			let appName = getFrameAppName(frame);
 			const allAppsInFrame = getFrameAppNames(frame);
 			const frameDate = new Date(frame.timestamp);
 			const dayKey = frameDate.toDateString();
+
+			// Carry forward previous app for "Unknown" frames (capture missed metadata)
+			if (appName === "Unknown" && currentApp && currentApp !== "Unknown") {
+				appName = currentApp;
+			}
 
 			// Break group at day boundary OR app change
 			if ((currentDayKey && dayKey !== currentDayKey) || appName !== currentApp) {
 				flushGroup();
 				currentApp = appName;
 				currentGroup = [frame];
-				currentGroupAllApps = new Set(allAppsInFrame);
+				currentGroupAllApps = new Set(allAppsInFrame.filter(n => n !== "Unknown"));
+				if (currentApp !== "Unknown") currentGroupAllApps.add(currentApp);
 				currentDayKey = dayKey;
 			} else {
 				currentGroup.push(frame);
-				allAppsInFrame.forEach(app => currentGroupAllApps.add(app));
+				allAppsInFrame.filter(n => n !== "Unknown").forEach(app => currentGroupAllApps.add(app));
 				if (!currentDayKey) currentDayKey = dayKey;
 			}
 		});

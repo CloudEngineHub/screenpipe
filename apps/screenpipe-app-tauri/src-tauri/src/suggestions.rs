@@ -640,8 +640,9 @@ async fn build_activity_context(
     // 2. Window titles (~400 chars)
     parts.push("Windows:".to_string());
     for w in windows.iter().take(6) {
-        let title = if w.window_name.len() > 50 {
-            format!("{}...", &w.window_name[..47])
+        let title = if w.window_name.chars().count() > 50 {
+            let truncated: String = w.window_name.chars().take(47).collect();
+            format!("{}...", truncated)
         } else {
             w.window_name.clone()
         };

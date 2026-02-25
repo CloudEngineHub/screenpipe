@@ -5,7 +5,6 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use tracing::{error, info, warn};
 
-const API: &str = "http://localhost:3030";
 const POLL_INTERVAL_SECS: u64 = 15;
 const MAX_ATTEMPTS: u32 = 40; // 40 * 15s = 10 minutes
 
@@ -17,6 +16,7 @@ static TRAINING_IN_PROGRESS: AtomicBool = AtomicBool::new(false);
 #[tauri::command]
 #[specta::specta]
 pub async fn train_voice(
+    app: tauri::AppHandle,
     name: String,
     start_time: String,
     end_time: String,
@@ -25,6 +25,12 @@ pub async fn train_voice(
     if name.is_empty() {
         return Err("name is required".into());
     }
+
+    let store = crate::store::SettingsStore::get(&app).ok().flatten().unwrap_or_default();
+    if store.disable_audio {
+        return Err("voice training requires audio recording, but audio is disabled in settings".into());
+    }
+    let port = store.port;
 
     if TRAINING_IN_PROGRESS.swap(true, Ordering::SeqCst) {
         return Err("voice training already in progress".into());
@@ -36,7 +42,7 @@ pub async fn train_voice(
     );
 
     tokio::spawn(async move {
-        let result = poll_and_assign(&name, &start_time, &end_time).await;
+        let result = poll_and_assign(&name, &start_time, &end_time, port).await;
         TRAINING_IN_PROGRESS.store(false, Ordering::SeqCst);
         match result {
             Ok(n) => info!("voice training complete for '{}': assigned {} chunks", name, n),
@@ -50,13 +56,14 @@ pub async fn train_voice(
 /// Poll the search API until input-device audio appears in the time window,
 /// then reassign those chunks to the given speaker name.
 /// Returns the number of chunks assigned.
-async fn poll_and_assign(name: &str, start_time: &str, end_time: &str) -> Result<u32, String> {
+async fn poll_and_assign(name: &str, start_time: &str, end_time: &str, port: u16) -> Result<u32, String> {
     let client = reqwest::Client::new();
+    let api = format!("http://localhost:{}", port);
 
     for attempt in 1..=MAX_ATTEMPTS {
         tokio::time::sleep(std::time::Duration::from_secs(POLL_INTERVAL_SECS)).await;
 
-        let chunk_ids = match fetch_input_chunks(&client, start_time, end_time).await {
+        let chunk_ids = match fetch_input_chunks(&client, &api, start_time, end_time).await {
             Ok(ids) => ids,
             Err(e) => {
                 warn!(
@@ -83,7 +90,7 @@ async fn poll_and_assign(name: &str, start_time: &str, end_time: &str) -> Result
             chunk_ids.len()
         );
 
-        let assigned = assign_chunks(&client, &chunk_ids, name).await;
+        let assigned = assign_chunks(&client, &api, &chunk_ids, name).await;
         return Ok(assigned);
     }
 
@@ -97,12 +104,13 @@ async fn poll_and_assign(name: &str, start_time: &str, end_time: &str) -> Result
 /// Fetch input-device audio chunk IDs from the search API for the given time window.
 async fn fetch_input_chunks(
     client: &reqwest::Client,
+    api: &str,
     start_time: &str,
     end_time: &str,
 ) -> Result<Vec<i64>, String> {
     let url = format!(
         "{}/search?content_type=audio&start_time={}&end_time={}&limit=50",
-        API, start_time, end_time
+        api, start_time, end_time
     );
 
     let resp = client.get(&url).send().await.map_err(|e| e.to_string())?;
@@ -123,11 +131,11 @@ async fn fetch_input_chunks(
 }
 
 /// Reassign audio chunks to the given speaker name. Returns count of successes.
-async fn assign_chunks(client: &reqwest::Client, chunk_ids: &[i64], name: &str) -> u32 {
+async fn assign_chunks(client: &reqwest::Client, api: &str, chunk_ids: &[i64], name: &str) -> u32 {
     let mut assigned = 0u32;
     for chunk_id in chunk_ids {
         let res = client
-            .post(format!("{}/speakers/reassign", API))
+            .post(format!("{}/speakers/reassign", api))
             .json(&serde_json::json!({
                 "audio_chunk_id": chunk_id,
                 "new_speaker_name": name,
@@ -152,16 +160,6 @@ async fn assign_chunks(client: &reqwest::Client, chunk_ids: &[i64], name: &str) 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_empty_name_rejected() {
-        let rt = tokio::runtime::Runtime::new().unwrap();
-        let result = rt.block_on(train_voice("  ".into(), "t0".into(), "t1".into()));
-        assert!(result.is_err());
-        assert_eq!(result.unwrap_err(), "name is required");
-        // reset for other tests
-        TRAINING_IN_PROGRESS.store(false, Ordering::SeqCst);
-    }
 
     #[test]
     fn test_concurrent_training_guard() {

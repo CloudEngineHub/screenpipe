@@ -17,7 +17,7 @@ use tracing::{debug, error, info, warn};
 pub struct RecordingState {
     pub handle: Arc<Mutex<Option<EmbeddedServerHandle>>>,
     /// True while a server start is in progress (prevents race between main.rs boot and frontend)
-    pub is_starting: AtomicBool,
+    pub is_starting: Arc<AtomicBool>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, specta::Type)]
@@ -162,7 +162,24 @@ pub async fn spawn_screenpipe(
             }
             tokio::time::sleep(std::time::Duration::from_millis(500)).await;
         }
-        warn!("In-flight server start didn't produce healthy server after 15s, proceeding with our own start");
+        warn!("In-flight server start didn't produce healthy server after 15s");
+        {
+            let handle_guard = state.handle.lock().await;
+            if handle_guard.is_some() {
+                // Handle exists — server started but health endpoint is slow (e.g., model download).
+                // Do NOT start a duplicate server.
+                info!("Server handle exists after timeout — not starting duplicate");
+                return Ok(());
+            }
+        }
+        // No handle → the in-flight start failed. Reset flag so we can retry.
+        info!("No server handle after 15s — previous start likely failed, retrying");
+        state.is_starting.store(false, Ordering::SeqCst);
+        // Re-acquire flag atomically for our attempt
+        if state.is_starting.swap(true, Ordering::SeqCst) {
+            // Yet another caller snuck in — defer to them
+            return Ok(());
+        }
     }
 
     // Check if we already own a running server

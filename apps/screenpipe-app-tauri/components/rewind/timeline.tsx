@@ -1847,6 +1847,8 @@ export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 											isSameDay(new Date(f.timestamp), targetDate)
 										);
 										if (hasTargetDayFrames) {
+											// Use HTTP JPEG fallback + prevent highlight dismiss during search nav
+											setSearchNavFrame(true);
 											jumpToTime(targetDate);
 											pendingNavigationRef.current = null;
 											setSeekingTimestamp(null);
@@ -1874,6 +1876,8 @@ export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 									isSameDay(new Date(f.timestamp), targetDate)
 								);
 								if (hasTargetDayFrames) {
+									// Use HTTP JPEG fallback + prevent highlight dismiss during search nav
+									setSearchNavFrame(true);
 									jumpToTime(targetDate);
 									pendingNavigationRef.current = null;
 									setSeekingTimestamp(null);

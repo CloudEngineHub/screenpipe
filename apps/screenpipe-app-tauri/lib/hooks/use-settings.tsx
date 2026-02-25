@@ -367,6 +367,18 @@ function createSettingsStore() {
 			needsUpdate = true;
 		}
 
+		// Always override platform with runtime detection — never trust persisted value.
+		// Platform can be "unknown" if it was saved during SSR or before Tauri was ready.
+		try {
+			const detectedPlatform = platform();
+			if (settings.platform !== detectedPlatform) {
+				settings.platform = detectedPlatform;
+				needsUpdate = true;
+			}
+		} catch {
+			// platform() unavailable (SSR/tests) — keep existing value
+		}
+
 		// Migration: Default Pro subscribers to cloud transcription (one-time only)
 		if (settings.user?.cloud_subscribed && !(settings as any)._proCloudMigrationDone) {
 			// Switch audio transcription to cloud if still on local default

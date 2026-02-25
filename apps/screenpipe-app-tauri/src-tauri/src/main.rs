@@ -1255,7 +1255,7 @@ async fn main() {
 
     let recording_state = RecordingState {
         handle: Arc::new(tokio::sync::Mutex::new(None)),
-        is_starting: AtomicBool::new(false),
+        is_starting: Arc::new(AtomicBool::new(false)),
     };
     let pi_state = pi::PiState(Arc::new(tokio::sync::Mutex::new(None)));
     let obsidian_sync_state = obsidian_sync::ObsidianSyncState::new();
@@ -1670,6 +1670,10 @@ async fn main() {
             {
                 let store_for_download = store.clone();
                 tauri::async_runtime::spawn(async move {
+                    if store_for_download.disable_audio {
+                        info!("audio disabled — skipping model pre-downloads");
+                        return;
+                    }
                     // Determine which whisper model the user's config needs
                     let engine = match store_for_download.audio_transcription_engine.as_str() {
                         "deepgram" | "screenpipe-cloud" => None, // Cloud engines don't need local model
@@ -1810,7 +1814,8 @@ async fn main() {
                 // Mark as starting BEFORE spawning thread — prevents race with frontend spawn_screenpipe
                 recording_state.is_starting.store(true, std::sync::atomic::Ordering::SeqCst);
                 let recording_state_inner = recording_state.handle.clone();
-                
+                let is_starting_clone = recording_state.is_starting.clone();
+
                 // Spawn a dedicated thread for the server with its own runtime
                 // This prevents CPU contention between UI and recording workloads
                 std::thread::Builder::new()
@@ -1843,7 +1848,7 @@ async fn main() {
                             
                             if server_running {
                                 info!("Server already running, skipping embedded server start");
-                                return;
+                                return; // is_starting stays true — the running server is fine
                             }
 
                             // Check permissions before starting
@@ -1852,6 +1857,7 @@ async fn main() {
 
                             if !permissions_check.screen_recording.permitted() {
                                 warn!("Screen recording permission not granted: {:?}. Server will not start.", permissions_check.screen_recording);
+                                is_starting_clone.store(false, std::sync::atomic::Ordering::SeqCst);
                                 return;
                             }
 
@@ -1886,6 +1892,7 @@ async fn main() {
                                 }
                                 Err(e) => {
                                     error!("Failed to start embedded server: {}", e);
+                                    is_starting_clone.store(false, std::sync::atomic::Ordering::SeqCst);
                                 }
                             }
                         });
