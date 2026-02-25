@@ -50,12 +50,14 @@ Copy-Item $SetupExe -Destination (Join-Path $packageDir $setupName) -Force
 Write-Host "Package folder: $packageDir (single file: $setupName)"
 
 # Download IntuneWinAppUtil if needed
-$utilZip = Join-Path $env:TEMP "IntuneWinAppUtil.zip"
 $utilExe = Get-ChildItem (Join-Path $toolDir "*.exe") -Recurse -ErrorAction SilentlyContinue | Where-Object { $_.Name -eq "IntuneWinAppUtil.exe" } | Select-Object -First 1
 if (-not $utilExe) {
     Write-Host "Downloading Microsoft Win32 Content Prep Tool..."
     New-Item -ItemType Directory -Force -Path $toolDir | Out-Null
-    Invoke-WebRequest -Uri "https://go.microsoft.com/fwlink/?linkid=2065730" -OutFile $utilZip -UseBasicParsing
+    # Download from official Microsoft GitHub repo (the go.microsoft.com redirect can return non-zip content in CI)
+    $zipUrl = "https://github.com/microsoft/Microsoft-Win32-Content-Prep-Tool/archive/refs/heads/master.zip"
+    $utilZip = Join-Path $env:TEMP "IntuneWinAppUtil.zip"
+    Invoke-WebRequest -Uri $zipUrl -OutFile $utilZip -UseBasicParsing
     Expand-Archive -Path $utilZip -DestinationPath $toolDir -Force
     $utilExe = Get-ChildItem (Join-Path $toolDir "*.exe") -Recurse -ErrorAction SilentlyContinue | Where-Object { $_.Name -eq "IntuneWinAppUtil.exe" } | Select-Object -First 1
     if (-not $utilExe) { Write-Error "IntuneWinAppUtil.exe not found after extract in $toolDir" }
