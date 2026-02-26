@@ -146,6 +146,9 @@ export interface Env {
 	DB: D1Database;
 	// Sentry error tracking
 	SENTRY_DSN: string;
+	// Auto-reload settings
+	WEBSITE_URL: string;
+	AUTO_RELOAD_SECRET: string;
 }
 
 // User tier for rate limiting and model access

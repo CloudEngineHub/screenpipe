@@ -232,6 +232,17 @@ export async function trackUsage(
             const credit = await tryDeductCredit(env, userId, 'ai_query');
             if (credit.success) {
               console.log(`credit deducted for ${userId}, remaining: ${credit.remaining}`);
+              // Trigger auto-reload check when balance is getting low
+              if (credit.remaining <= 10 && env.WEBSITE_URL && env.AUTO_RELOAD_SECRET) {
+                fetch(`${env.WEBSITE_URL}/api/billing/auto-reload-check`, {
+                  method: 'POST',
+                  headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${env.AUTO_RELOAD_SECRET}`,
+                  },
+                  body: JSON.stringify({ clerk_id: await resolveClerkId(env, userId), remaining_balance: credit.remaining }),
+                }).catch(() => {}); // fire-and-forget
+              }
               return {
                 used: existing.daily_count,
                 limit: limits.dailyQueries,

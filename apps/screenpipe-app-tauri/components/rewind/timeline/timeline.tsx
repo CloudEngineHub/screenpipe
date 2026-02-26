@@ -441,9 +441,14 @@ export const TimelineSlider = ({
 		return map;
 	}, [frames]);
 
+	// Whether the user is actively interacting (popover open, dragging, or has selection).
+	// When true we freeze the visible frames to prevent server pushes from
+	// recomputing groups and killing the popover / selection.
+	const isUserInteracting = isDragging || activePopoverGroup !== null || selectionRange !== null;
+
 	// Adjust visible frames based on zoom - zoomed out shows more frames
 	// Use a stable window size to prevent jumpy behavior
-	const visibleFrames = useMemo(() => {
+	const latestVisibleFrames = useMemo(() => {
 		if (!frames || frames.length === 0) return [];
 		// Fixed window centered on current index - zoom affects frame SIZE, not count
 		// This prevents jumpy behavior when zooming
@@ -452,6 +457,14 @@ export const TimelineSlider = ({
 		const end = Math.min(frames.length, currentIndex + visibleCount);
 		return frames.slice(start, end);
 	}, [frames, currentIndex]);
+
+	// Freeze visible frames while user is interacting to prevent
+	// WebSocket pushes from recomputing appGroups and losing popover/selection
+	const frozenFramesRef = useRef(latestVisibleFrames);
+	if (!isUserInteracting) {
+		frozenFramesRef.current = latestVisibleFrames;
+	}
+	const visibleFrames = isUserInteracting ? frozenFramesRef.current : latestVisibleFrames;
 
 	// Dynamically compute app names from the current viewport, sorted by frequency
 	const viewportAppNames = useMemo(() => {
@@ -968,38 +981,35 @@ export const TimelineSlider = ({
 									>
 										{group.topDomains && group.topDomains.length > 0 ? (
 											// Browser group: show website favicons
-											group.topDomains.slice(0, groupWidth > 60 ? 2 : 1).map((domain, idx) => {
-												const iconSize = groupWidth > 60 ? 32 : 20;
-												const wh = groupWidth > 60 ? 'w-8 h-8' : 'w-5 h-5';
-												return (
-													<motion.div
-														key={`fav-${domain}-${idx}`}
-														className={`${wh} rounded flex-shrink-0 overflow-hidden flex items-center justify-center bg-background/60`}
-														style={{
-															zIndex: 10 - idx,
-															position: 'relative',
-														}}
-														variants={{
-															collapsed: {
-																marginTop: idx === 0 ? 0 : -10,
-																scale: 1
-															},
-															expanded: {
-																marginTop: idx === 0 ? 0 : 4,
-																scale: 1.1
-															}
-														}}
-														transition={{ type: "spring", stiffness: 400, damping: 25 }}
-													>
-														<FaviconImg
-															domain={domain}
-															fallbackAppName={group.appName}
-															size={iconSize}
-															className="rounded-sm object-contain"
-														/>
-													</motion.div>
-												);
-											})
+											group.topDomains.slice(0, groupWidth > 60 ? 2 : 1).map((domain, idx) => (
+												<motion.div
+													key={`fav-${domain}-${idx}`}
+													className="w-8 h-8 rounded flex-shrink-0 overflow-hidden flex items-center justify-center"
+													style={{
+														zIndex: 10 - idx,
+														position: 'relative',
+														backgroundColor: appNameToColor(group.appName, 0.3),
+													}}
+													variants={{
+														collapsed: {
+															marginTop: idx === 0 ? 0 : -10,
+															scale: 1
+														},
+														expanded: {
+															marginTop: idx === 0 ? 0 : 4,
+															scale: 1.1
+														}
+													}}
+													transition={{ type: "spring", stiffness: 400, damping: 25 }}
+												>
+													<FaviconImg
+														domain={domain}
+														fallbackAppName={group.appName}
+														size={32}
+														className="w-full h-full rounded-sm object-contain"
+													/>
+												</motion.div>
+											))
 										) : (
 											// Non-browser group (or no URLs): show app icons
 											group.appNames.slice(0, 2).map((appName, idx) => (

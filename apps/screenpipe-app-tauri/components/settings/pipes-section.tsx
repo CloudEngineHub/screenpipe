@@ -723,9 +723,9 @@ export function PipesSection() {
                   variant="outline"
                   size="sm"
                   className="h-6 text-[11px] px-2"
-                  onClick={() => setShowUpgrade(true)}
+                  onClick={() => openUrl("https://screenpi.pe/billing")}
                 >
-                  get more queries →
+                  buy credits →
                 </Button>
               </div>
             );

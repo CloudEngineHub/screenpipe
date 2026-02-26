@@ -1036,11 +1036,14 @@ export function StandaloneChat({ className }: { className?: string } = {}) {
         (async () => {
           if (piInfo?.running) {
             try {
-              // Abort any in-flight message, then reset session
-              if (piMessageIdRef.current) {
-                await commands.piAbort();
-              }
+              // Abort any in-flight processing, then reset session
+              // Always abort — Pi may be processing even if our ref was cleared
+              await commands.piAbort();
+              // Wait for Pi to process the abort before sending new_session
+              await new Promise(r => setTimeout(r, 500));
               await commands.piNewSession();
+              // Wait for Pi to process the session reset before sending prompt
+              await new Promise(r => setTimeout(r, 500));
             } catch (e) {
               console.warn("[Pi] Failed to reset session:", e);
             }
@@ -1064,7 +1067,6 @@ export function StandaloneChat({ className }: { className?: string } = {}) {
               try {
                 const info = await commands.piInfo();
                 if (info.status === "ok" && info.data.running) {
-                  // Update React state so canChat becomes true before we send
                   setPiInfo(info.data);
                   return true;
                 }
@@ -1075,7 +1077,7 @@ export function StandaloneChat({ className }: { className?: string } = {}) {
           };
           const ready = piInfo?.running || await waitForPi(10000);
           if (ready) {
-            // Give React one tick to re-render with updated piInfo so sendMessage's canChat is true
+            // Give React a tick to re-render with updated piInfo so sendMessage's canChat is true
             setTimeout(() => {
               sendMessageRef.current?.(fullMessage);
             }, 300);
@@ -1660,6 +1662,10 @@ export function StandaloneChat({ className }: { className?: string } = {}) {
               setMessages((prev) =>
                 prev.map((m) => m.id === msgId ? { ...m, content: "This model requires an upgrade." } : m)
               );
+            } else if (fullError.includes("already processing")) {
+              // Transient error — Pi was still busy when the prompt arrived.
+              // Don't show it; Pi will process the message once it's free.
+              console.warn("[Pi] Agent busy, waiting for it to finish:", fullError);
             } else {
               setMessages((prev) =>
                 prev.map((m) => m.id === msgId ? { ...m, content: `Error: ${fullError || "Something went wrong"}` } : m)

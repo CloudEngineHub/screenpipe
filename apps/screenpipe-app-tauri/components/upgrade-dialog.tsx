@@ -14,7 +14,7 @@ import { Badge } from "@/components/ui/badge";
 import { open as openUrl } from "@tauri-apps/plugin-shell";
 import { commands } from "@/lib/utils/tauri";
 import { useSettings } from "@/lib/hooks/use-settings";
-import { Sparkles, Zap, Clock, Star } from "lucide-react";
+import { Sparkles, Zap, Clock, Star, CreditCard } from "lucide-react";
 import posthog from "posthog-js";
 
 interface UpgradeDialogProps {
@@ -150,6 +150,24 @@ export function UpgradeDialog({
               </div>
             </Button>
           )}
+
+          <Button
+            variant="outline"
+            className="w-full justify-start gap-2.5 h-auto py-2.5 text-xs"
+            onClick={async () => {
+              trackAction("buy_credits");
+              await openUrl("https://screenpi.pe/billing");
+              onOpenChange(false);
+            }}
+          >
+            <CreditCard className="h-4 w-4 shrink-0" />
+            <div className="text-left flex-1 min-w-0">
+              <div className="font-medium">buy credits</div>
+              <div className="text-[11px] text-muted-foreground mt-0.5">
+                pay per query — no subscription needed
+              </div>
+            </div>
+          </Button>
 
           <Button
             variant="ghost"
