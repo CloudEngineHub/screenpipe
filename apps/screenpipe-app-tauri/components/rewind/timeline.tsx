@@ -20,6 +20,7 @@ import { getStartDate } from "@/lib/actions/get-start-date";
 import { useTimelineData } from "@/lib/hooks/use-timeline-data";
 import { useCurrentFrame } from "@/lib/hooks/use-current-frame";
 import { TimelineSlider, getFrameAppName } from "@/components/rewind/timeline/timeline";
+import { extractDomain } from "@/components/rewind/timeline/favicon-utils";
 import { useMeetings } from "@/lib/hooks/use-meetings";
 import { useTimelineStore } from "@/lib/hooks/use-timeline-store";
 import { findNearestDateWithFrames } from "@/lib/actions/has-frames-date";
@@ -90,10 +91,16 @@ export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 	const [showSearchModal, setShowSearchModal] = useState(false);
 	const [selectedDeviceId, setSelectedDeviceId] = useState<string>("all");
 	const [selectedAppName, setSelectedAppName] = useState<string>("all");
+	const [selectedDomain, setSelectedDomain] = useState<string>("all");
+	const [selectedSpeaker, setSelectedSpeaker] = useState<string>("all");
+	const [selectedTag, setSelectedTag] = useState<string>("all");
 
 	const resetFilters = useCallback(() => {
 		setSelectedDeviceId("all");
 		setSelectedAppName("all");
+		setSelectedDomain("all");
+		setSelectedSpeaker("all");
+		setSelectedTag("all");
 	}, []);
 	// Track filter state in refs so event listeners can read fresh values
 	const selectedDeviceIdRef = useRef(selectedDeviceId);
@@ -182,7 +189,7 @@ export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 	}, [currentIndex, searchNavFrame, hasSearchHighlight, dismissSearchHighlight]);
 
 	// Get timeline selection for chat context
-	const { selectionRange, loadTagsForFrames } = useTimelineSelection();
+	const { selectionRange, loadTagsForFrames, tags } = useTimelineSelection();
 	const { promptPipes } = usePipes();
 
 	// Load tags when a selection is made (lazy-load)
@@ -254,17 +261,31 @@ export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 	const matchingIndices = useMemo(() => {
 		const filterDevice = selectedDeviceId !== "all" && allDeviceIds.length > 1;
 		const filterApp = selectedAppName !== "all";
-		if (!filterDevice && !filterApp) return null;
+		const filterDomain = selectedDomain !== "all";
+		const filterSpeaker = selectedSpeaker !== "all";
+		const filterTag = selectedTag !== "all";
+		if (!filterDevice && !filterApp && !filterDomain && !filterSpeaker && !filterTag) return null;
 		const indices: number[] = [];
 		for (let i = 0; i < frames.length; i++) {
-			const matchesDevice = !filterDevice || frames[i].devices.some((d) => d.device_id === selectedDeviceId);
-			const matchesApp = !filterApp || frames[i].devices.some((d) => d.metadata?.app_name === selectedAppName);
-			if (matchesDevice && matchesApp) {
+			const f = frames[i];
+			const matchesDevice = !filterDevice || f.devices.some((d) => d.device_id === selectedDeviceId);
+			const matchesApp = !filterApp || f.devices.some((d) => d.metadata?.app_name === selectedAppName);
+			const matchesDomain = !filterDomain || f.devices.some((d) => {
+				const url = d.metadata?.browser_url;
+				return url && extractDomain(url) === selectedDomain;
+			});
+			const matchesSpeaker = !filterSpeaker || f.devices.some((d) => d.audio?.some((a) => a.speaker_name === selectedSpeaker));
+			const matchesTag = !filterTag || (() => {
+				const frameId = f.devices?.[0]?.frame_id || '';
+				const frameTags = frameId ? (tags[frameId] || []) : [];
+				return frameTags.includes(selectedTag);
+			})();
+			if (matchesDevice && matchesApp && matchesDomain && matchesSpeaker && matchesTag) {
 				indices.push(i);
 			}
 		}
 		return indices.length > 0 ? indices : null;
-	}, [frames, selectedDeviceId, allDeviceIds.length, selectedAppName]);
+	}, [frames, selectedDeviceId, allDeviceIds.length, selectedAppName, selectedDomain, selectedSpeaker, selectedTag, tags]);
 
 	// When monitor filter changes, snap to nearest matching frame
 	const handleDeviceChange = useCallback((deviceId: string) => {
@@ -301,6 +322,48 @@ export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 			setCurrentFrame(frames[snapped]);
 		}
 	}, [currentIndex, frames, snapToApp, setCurrentFrame]);
+
+	// Generic snap: find nearest frame matching a predicate
+	const snapToMatch = useCallback((idx: number, predicate: (f: typeof frames[0]) => boolean): number => {
+		const clamped = Math.max(0, Math.min(idx, frames.length - 1));
+		if (predicate(frames[clamped])) return clamped;
+		for (let offset = 1; offset < frames.length; offset++) {
+			const lo = clamped - offset;
+			const hi = clamped + offset;
+			if (lo >= 0 && predicate(frames[lo])) return lo;
+			if (hi < frames.length && predicate(frames[hi])) return hi;
+		}
+		return clamped;
+	}, [frames]);
+
+	const handleDomainChange = useCallback((domain: string) => {
+		setSelectedDomain(domain);
+		if (domain === "all") return;
+		const snapped = snapToMatch(currentIndex, (f) =>
+			f.devices.some((d) => { const url = d.metadata?.browser_url; return url && extractDomain(url) === domain; })
+		);
+		if (snapped !== currentIndex) { setCurrentIndex(snapped); setCurrentFrame(frames[snapped]); }
+	}, [currentIndex, frames, snapToMatch, setCurrentFrame]);
+
+	const handleSpeakerChange = useCallback((speaker: string) => {
+		setSelectedSpeaker(speaker);
+		if (speaker === "all") return;
+		const snapped = snapToMatch(currentIndex, (f) =>
+			f.devices.some((d) => d.audio?.some((a) => a.speaker_name === speaker))
+		);
+		if (snapped !== currentIndex) { setCurrentIndex(snapped); setCurrentFrame(frames[snapped]); }
+	}, [currentIndex, frames, snapToMatch, setCurrentFrame]);
+
+	const handleTagChange = useCallback((tag: string) => {
+		setSelectedTag(tag);
+		if (tag === "all") return;
+		const snapped = snapToMatch(currentIndex, (f) => {
+			const frameId = f.devices?.[0]?.frame_id || '';
+			const frameTags = frameId ? (tags[frameId] || []) : [];
+			return frameTags.includes(tag);
+		});
+		if (snapped !== currentIndex) { setCurrentIndex(snapped); setCurrentFrame(frames[snapped]); }
+	}, [currentIndex, frames, tags, snapToMatch, setCurrentFrame]);
 
 	// Audio playback engine
 	const {
@@ -1826,6 +1889,12 @@ export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 							onDeviceChange={handleDeviceChange}
 							selectedAppName={selectedAppName}
 							onAppChange={handleAppChange}
+							selectedDomain={selectedDomain}
+							onDomainChange={handleDomainChange}
+							selectedSpeaker={selectedSpeaker}
+							onSpeakerChange={handleSpeakerChange}
+							selectedTag={selectedTag}
+							onTagChange={handleTagChange}
 						/>
 					) : (
 						<div className="bg-card/80 backdrop-blur-sm p-4 border-t border-border">

@@ -6,7 +6,7 @@ import { useTimelineSelection } from "@/lib/hooks/use-timeline-selection";
 import { getStore, type ChatConversation } from "@/lib/hooks/use-settings";
 import { isAfter, subDays, format } from "date-fns";
 import { motion } from "framer-motion";
-import { ZoomIn, ZoomOut, Mic } from "lucide-react";
+import { ZoomIn, ZoomOut, Mic, Monitor, AppWindow, Globe, Hash } from "lucide-react";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import posthog from "posthog-js";
@@ -126,6 +126,12 @@ interface TimelineSliderProps {
 	onDeviceChange?: (deviceId: string) => void; // Callback when a monitor dot is clicked
 	selectedAppName?: string; // "all" or a specific app_name — dims non-matching bars
 	onAppChange?: (appName: string) => void; // Callback when an app dot is clicked
+	selectedDomain?: string; // "all" or a domain like "github.com"
+	onDomainChange?: (domain: string) => void;
+	selectedSpeaker?: string; // "all" or a speaker name
+	onSpeakerChange?: (speaker: string) => void;
+	selectedTag?: string; // "all" or a tag name
+	onTagChange?: (tag: string) => void;
 }
 
 interface AppGroup {
@@ -270,6 +276,12 @@ export const TimelineSlider = ({
 	onDeviceChange,
 	selectedAppName = "all",
 	onAppChange,
+	selectedDomain = "all",
+	onDomainChange,
+	selectedSpeaker = "all",
+	onSpeakerChange,
+	selectedTag = "all",
+	onTagChange,
 }: TimelineSliderProps) => {
 	const containerRef = useRef<HTMLDivElement>(null);
 	const observerTargetRef = useRef<HTMLDivElement>(null);
@@ -372,6 +384,8 @@ export const TimelineSlider = ({
 
 	// Filter dot tooltip state (portal-based to escape overflow clipping)
 	const [hoveredFilterDot, setHoveredFilterDot] = useState<{ name: string; x: number; y: number } | null>(null);
+	// Which filter section is expanded (icon column design E)
+	const [expandedFilterSection, setExpandedFilterSection] = useState<string | null>(null);
 
 	// App context popover state
 	const [activePopoverGroup, setActivePopoverGroup] = useState<number | null>(null);
@@ -482,15 +496,11 @@ export const TimelineSlider = ({
 			.map(([name]) => name);
 	}, [visibleFrames]);
 
-	const appGroups = useMemo(() => {
-		if (!visibleFrames || visibleFrames.length === 0) return [];
-
-		// Pre-compute per-frame browser URL with bidirectional carry-forward.
-		// Only ~1% of browser frames have browser_url set, so we fill gaps by
-		// propagating the nearest known URL in both directions within consecutive
-		// browser-app runs (including "Unknown" frames which get folded into the
-		// previous app during grouping). This is O(n) over visibleFrames.
-		const frameBrowserUrls = new Array<string>(visibleFrames.length).fill("");
+	// Pre-compute per-frame browser URL with bidirectional carry-forward.
+	// Extracted as a separate memo so domain filtering can access it too.
+	const frameBrowserUrls = useMemo(() => {
+		if (!visibleFrames || visibleFrames.length === 0) return new Array<string>(0);
+		const urls = new Array<string>(visibleFrames.length).fill("");
 		{
 			// Pass 1: forward (in iteration order, which is newest→oldest for descending frames)
 			let carry = "";
@@ -500,18 +510,15 @@ export const TimelineSlider = ({
 				const app = getFrameAppName(frame);
 				const isBrowser = getAppCategory(app) === 'browser';
 				const isUnknown = app === 'Unknown';
-				// "Unknown" frames get folded into the previous app during grouping,
-				// so treat them as continuation of the current browser run
 				if (!isBrowser && !isUnknown) { carry = ""; lastBrowserApp = ""; continue; }
 				if (isBrowser && app !== lastBrowserApp) { carry = ""; lastBrowserApp = app; }
-				// If Unknown but no active browser run, skip
 				if (isUnknown && !lastBrowserApp) continue;
 				let url = "";
 				for (const d of frame.devices) {
 					if (d.metadata?.browser_url?.trim()) { url = d.metadata.browser_url; break; }
 				}
 				if (url) carry = url;
-				if (carry) frameBrowserUrls[i] = carry;
+				if (carry) urls[i] = carry;
 			}
 			// Pass 2: backward (fills newer frames that precede the first URL occurrence)
 			carry = "";
@@ -529,9 +536,67 @@ export const TimelineSlider = ({
 					if (d.metadata?.browser_url?.trim()) { url = d.metadata.browser_url; break; }
 				}
 				if (url) carry = url;
-				if (carry && !frameBrowserUrls[i]) frameBrowserUrls[i] = carry;
+				if (carry && !urls[i]) urls[i] = carry;
 			}
 		}
+		return urls;
+	}, [visibleFrames]);
+
+
+	// Dynamically compute domains from the current viewport, sorted by frequency.
+	// Uses raw browser_url from metadata (NOT carry-forward) to avoid over-classification.
+	const viewportDomains = useMemo(() => {
+		const counts = new Map<string, number>();
+		for (const frame of visibleFrames) {
+			for (const d of frame.devices) {
+				const url = d.metadata?.browser_url?.trim();
+				if (!url) continue;
+				const domain = extractDomain(url);
+				if (domain) counts.set(domain, (counts.get(domain) || 0) + 1);
+			}
+		}
+		return [...counts.entries()]
+			.sort((a, b) => b[1] - a[1])
+			.map(([domain]) => domain);
+	}, [visibleFrames]);
+
+	// Dynamically compute speakers from the current viewport, sorted by frequency
+	const viewportSpeakers = useMemo(() => {
+		const counts = new Map<string, number>();
+		for (const frame of visibleFrames) {
+			for (const d of frame.devices) {
+				if (d.audio) {
+					for (const a of d.audio) {
+						const name = a.speaker_name;
+						if (name && name.trim() !== "") {
+							counts.set(name, (counts.get(name) || 0) + 1);
+						}
+					}
+				}
+			}
+		}
+		return [...counts.entries()]
+			.sort((a, b) => b[1] - a[1])
+			.map(([name]) => name);
+	}, [visibleFrames]);
+
+	// Dynamically compute tags from the current viewport, sorted by frequency
+	const viewportTags = useMemo(() => {
+		const counts = new Map<string, number>();
+		for (const frame of visibleFrames) {
+			const frameId = frame.devices?.[0]?.frame_id || '';
+			const frameTags = frameId ? (tags[frameId] || []) : [];
+			for (const tag of frameTags) {
+				counts.set(tag, (counts.get(tag) || 0) + 1);
+			}
+		}
+		return [...counts.entries()]
+			.sort((a, b) => b[1] - a[1])
+			.map(([tag]) => tag);
+	}, [visibleFrames, tags]);
+
+	const appGroups = useMemo(() => {
+		if (!visibleFrames || visibleFrames.length === 0) return [];
 
 		const groups: AppGroup[] = [];
 		let currentApp = "";
@@ -617,7 +682,7 @@ export const TimelineSlider = ({
 		}
 
 		return groups;
-	}, [visibleFrames]);
+	}, [visibleFrames, frameBrowserUrls]);
 
 	// Preload app icons for all visible groups so they're cached before scroll
 	useEffect(() => {
@@ -829,17 +894,41 @@ export const TimelineSlider = ({
 
 	return (
 		<div className="relative w-full" dir="rtl">
-			{/* Zoom controls + filter dots - floating on left side */}
-			<div className="absolute left-3 bottom-[calc(100%-60px)] z-30 flex flex-col gap-1 items-center bg-background/80 backdrop-blur-sm border border-border rounded-lg p-1">
-				{/* Monitor filter dots — above zoom, only with 2+ monitors */}
+			{/* Filter icon column + inline expand (design E) */}
+			<div
+				className="absolute left-3 bottom-[calc(100%-60px)] z-30 flex flex-col gap-0.5 items-start"
+				dir="ltr"
+				onMouseLeave={() => setExpandedFilterSection(null)}
+			>
+				{/* Monitor row */}
 				{allDeviceIds.length > 1 && onDeviceChange && (
-					<>
-						<div className="flex items-center justify-center gap-1.5 py-0.5" dir="ltr">
+					<div
+						className="flex items-center gap-0 group/filter"
+						onMouseEnter={() => setExpandedFilterSection("monitor")}
+					>
+						<button
+							className={cn(
+								"p-1.5 rounded-l-md transition-colors shrink-0",
+								"bg-background/80 backdrop-blur-sm border border-border border-r-0",
+								expandedFilterSection === "monitor" && "bg-foreground/10",
+								selectedDeviceId !== "all" && "ring-1 ring-primary/50",
+							)}
+							title="Monitors"
+						>
+							<Monitor className="w-3.5 h-3.5 text-foreground/70" />
+						</button>
+						<div
+							className={cn(
+								"flex items-center gap-1.5 overflow-hidden transition-all duration-200 ease-out",
+								"bg-background/80 backdrop-blur-sm border border-border border-l-0 rounded-r-md",
+								expandedFilterSection === "monitor" ? "max-w-[300px] px-2 py-1.5 opacity-100" : "max-w-0 px-0 py-1.5 opacity-0 border-transparent",
+							)}
+						>
 							{allDeviceIds.map((id) => (
 								<button
 									key={id}
 									onClick={() => onDeviceChange(selectedDeviceId === id ? "all" : id)}
-									className="rounded-full transition-all duration-200 hover:scale-125"
+									className="rounded-full transition-all duration-200 hover:scale-125 shrink-0"
 									style={{
 										width: selectedDeviceId === id ? 8 : 6,
 										height: selectedDeviceId === id ? 8 : 6,
@@ -857,18 +946,37 @@ export const TimelineSlider = ({
 								/>
 							))}
 						</div>
-						<div className="h-px w-full bg-border" />
-					</>
+					</div>
 				)}
-				{/* App filter dots — below monitor dots, dynamically from viewport */}
+				{/* App row */}
 				{viewportAppNames.length > 1 && onAppChange && (
-					<>
-						<div className="flex items-center justify-center gap-1 py-0.5 flex-wrap max-w-[60px]" dir="ltr">
+					<div
+						className="flex items-center gap-0 group/filter"
+						onMouseEnter={() => setExpandedFilterSection("app")}
+					>
+						<button
+							className={cn(
+								"p-1.5 rounded-l-md transition-colors shrink-0",
+								"bg-background/80 backdrop-blur-sm border border-border border-r-0",
+								expandedFilterSection === "app" && "bg-foreground/10",
+								selectedAppName !== "all" && "ring-1 ring-primary/50",
+							)}
+							title="Apps"
+						>
+							<AppWindow className="w-3.5 h-3.5 text-foreground/70" />
+						</button>
+						<div
+							className={cn(
+								"flex items-center gap-1.5 overflow-hidden transition-all duration-200 ease-out",
+								"bg-background/80 backdrop-blur-sm border border-border border-l-0 rounded-r-md",
+								expandedFilterSection === "app" ? "max-w-[300px] px-2 py-1.5 opacity-100" : "max-w-0 px-0 py-1.5 opacity-0 border-transparent",
+							)}
+						>
 							{viewportAppNames.map((name) => (
 								<button
 									key={name}
 									onClick={() => onAppChange(selectedAppName === name ? "all" : name)}
-									className="rounded-full transition-all duration-200 hover:scale-125"
+									className="rounded-full transition-all duration-200 hover:scale-125 shrink-0"
 									style={{
 										width: selectedAppName === name ? 8 : 6,
 										height: selectedAppName === name ? 8 : 6,
@@ -886,26 +994,187 @@ export const TimelineSlider = ({
 								/>
 							))}
 						</div>
-						<div className="h-px w-full bg-border" />
-					</>
+					</div>
 				)}
-				<button
-					onClick={() => setTargetZoom((prev) => Math.min(MAX_ZOOM, prev * 1.5))}
-					className="p-1.5 hover:bg-foreground/10 rounded transition-colors"
-					title="Zoom in (or pinch/Cmd+scroll)"
+				{/* Domain row */}
+				{viewportDomains.length > 1 && onDomainChange && (
+					<div
+						className="flex items-center gap-0 group/filter"
+						onMouseEnter={() => setExpandedFilterSection("domain")}
+					>
+						<button
+							className={cn(
+								"p-1.5 rounded-l-md transition-colors shrink-0",
+								"bg-background/80 backdrop-blur-sm border border-border border-r-0",
+								expandedFilterSection === "domain" && "bg-foreground/10",
+								selectedDomain !== "all" && "ring-1 ring-primary/50",
+							)}
+							title="Domains"
+						>
+							<Globe className="w-3.5 h-3.5 text-foreground/70" />
+						</button>
+						<div
+							className={cn(
+								"flex items-center gap-1.5 overflow-hidden transition-all duration-200 ease-out",
+								"bg-background/80 backdrop-blur-sm border border-border border-l-0 rounded-r-md",
+								expandedFilterSection === "domain" ? "max-w-[300px] px-2 py-1.5 opacity-100" : "max-w-0 px-0 py-1.5 opacity-0 border-transparent",
+							)}
+						>
+							{viewportDomains.map((domain) => (
+								<button
+									key={domain}
+									onClick={() => onDomainChange(selectedDomain === domain ? "all" : domain)}
+									className="rounded-full transition-all duration-200 hover:scale-125 shrink-0"
+									style={{
+										width: selectedDomain === domain ? 8 : 6,
+										height: selectedDomain === domain ? 8 : 6,
+										backgroundColor: selectedDomain === domain
+											? appNameToColor(domain)
+											: selectedDomain === "all"
+												? appNameToColor(domain, 0.6)
+												: "hsl(var(--foreground) / 0.15)",
+									}}
+									onMouseEnter={(e) => {
+										const rect = e.currentTarget.getBoundingClientRect();
+										setHoveredFilterDot({ name: domain, x: rect.right + 8, y: rect.top + rect.height / 2 });
+									}}
+									onMouseLeave={() => setHoveredFilterDot(null)}
+								/>
+							))}
+						</div>
+					</div>
+				)}
+				{/* Speaker row */}
+				{viewportSpeakers.length > 0 && onSpeakerChange && (
+					<div
+						className="flex items-center gap-0 group/filter"
+						onMouseEnter={() => setExpandedFilterSection("speaker")}
+					>
+						<button
+							className={cn(
+								"p-1.5 rounded-l-md transition-colors shrink-0",
+								"bg-background/80 backdrop-blur-sm border border-border border-r-0",
+								expandedFilterSection === "speaker" && "bg-foreground/10",
+								selectedSpeaker !== "all" && "ring-1 ring-primary/50",
+							)}
+							title="Speakers"
+						>
+							<Mic className="w-3.5 h-3.5 text-foreground/70" />
+						</button>
+						<div
+							className={cn(
+								"flex items-center gap-1.5 overflow-hidden transition-all duration-200 ease-out",
+								"bg-background/80 backdrop-blur-sm border border-border border-l-0 rounded-r-md",
+								expandedFilterSection === "speaker" ? "max-w-[300px] px-2 py-1.5 opacity-100" : "max-w-0 px-0 py-1.5 opacity-0 border-transparent",
+							)}
+						>
+							{viewportSpeakers.map((speaker) => (
+								<button
+									key={speaker}
+									onClick={() => onSpeakerChange(selectedSpeaker === speaker ? "all" : speaker)}
+									className="rounded-full transition-all duration-200 hover:scale-125 shrink-0"
+									style={{
+										width: selectedSpeaker === speaker ? 8 : 6,
+										height: selectedSpeaker === speaker ? 8 : 6,
+										backgroundColor: selectedSpeaker === speaker
+											? appNameToColor(speaker)
+											: selectedSpeaker === "all"
+												? appNameToColor(speaker, 0.6)
+												: "hsl(var(--foreground) / 0.15)",
+									}}
+									onMouseEnter={(e) => {
+										const rect = e.currentTarget.getBoundingClientRect();
+										setHoveredFilterDot({ name: speaker, x: rect.right + 8, y: rect.top + rect.height / 2 });
+									}}
+									onMouseLeave={() => setHoveredFilterDot(null)}
+								/>
+							))}
+						</div>
+					</div>
+				)}
+				{/* Tag row */}
+				{viewportTags.length > 0 && onTagChange && (
+					<div
+						className="flex items-center gap-0 group/filter"
+						onMouseEnter={() => setExpandedFilterSection("tag")}
+					>
+						<button
+							className={cn(
+								"p-1.5 rounded-l-md transition-colors shrink-0",
+								"bg-background/80 backdrop-blur-sm border border-border border-r-0",
+								expandedFilterSection === "tag" && "bg-foreground/10",
+								selectedTag !== "all" && "ring-1 ring-primary/50",
+							)}
+							title="Tags"
+						>
+							<Hash className="w-3.5 h-3.5 text-foreground/70" />
+						</button>
+						<div
+							className={cn(
+								"flex items-center gap-1.5 overflow-hidden transition-all duration-200 ease-out",
+								"bg-background/80 backdrop-blur-sm border border-border border-l-0 rounded-r-md",
+								expandedFilterSection === "tag" ? "max-w-[300px] px-2 py-1.5 opacity-100" : "max-w-0 px-0 py-1.5 opacity-0 border-transparent",
+							)}
+						>
+							{viewportTags.map((tag) => (
+								<button
+									key={tag}
+									onClick={() => onTagChange(selectedTag === tag ? "all" : tag)}
+									className="rounded-full transition-all duration-200 hover:scale-125 shrink-0"
+									style={{
+										width: selectedTag === tag ? 8 : 6,
+										height: selectedTag === tag ? 8 : 6,
+										backgroundColor: selectedTag === tag
+											? appNameToColor(tag)
+											: selectedTag === "all"
+												? appNameToColor(tag, 0.6)
+												: "hsl(var(--foreground) / 0.15)",
+									}}
+									onMouseEnter={(e) => {
+										const rect = e.currentTarget.getBoundingClientRect();
+										setHoveredFilterDot({ name: `#${tag}`, x: rect.right + 8, y: rect.top + rect.height / 2 });
+									}}
+									onMouseLeave={() => setHoveredFilterDot(null)}
+								/>
+							))}
+						</div>
+					</div>
+				)}
+				{/* Zoom row */}
+				<div
+					className="flex items-center gap-0"
+					onMouseEnter={() => setExpandedFilterSection("zoom")}
 				>
-					<ZoomIn className="w-4 h-4 text-foreground" />
-				</button>
-				<div className="text-[10px] text-center text-muted-foreground font-mono">
-					{Math.round(targetZoom * 100)}%
+					<button
+						className={cn(
+							"p-1.5 rounded-l-md transition-colors shrink-0",
+							"bg-background/80 backdrop-blur-sm border border-border border-r-0",
+							expandedFilterSection === "zoom" && "bg-foreground/10",
+						)}
+						onClick={() => setTargetZoom((prev) => Math.min(MAX_ZOOM, prev * 1.5))}
+						title="Zoom in (or pinch/Cmd+scroll)"
+					>
+						<ZoomIn className="w-3.5 h-3.5 text-foreground/70" />
+					</button>
+					<div
+						className={cn(
+							"flex items-center gap-1 overflow-hidden transition-all duration-200 ease-out",
+							"bg-background/80 backdrop-blur-sm border border-border border-l-0 rounded-r-md",
+							expandedFilterSection === "zoom" ? "max-w-[120px] px-2 py-1.5 opacity-100" : "max-w-0 px-0 py-1.5 opacity-0 border-transparent",
+						)}
+					>
+						<button
+							onClick={() => setTargetZoom((prev) => Math.max(MIN_ZOOM, prev / 1.5))}
+							className="p-0.5 hover:bg-foreground/10 rounded transition-colors shrink-0"
+							title="Zoom out"
+						>
+							<ZoomOut className="w-3.5 h-3.5 text-foreground" />
+						</button>
+						<span className="text-[10px] text-muted-foreground font-mono whitespace-nowrap">
+							{Math.round(targetZoom * 100)}%
+						</span>
+					</div>
 				</div>
-				<button
-					onClick={() => setTargetZoom((prev) => Math.max(MIN_ZOOM, prev / 1.5))}
-					className="p-1.5 hover:bg-foreground/10 rounded transition-colors"
-					title="Zoom out (or pinch/Cmd+scroll)"
-				>
-					<ZoomOut className="w-4 h-4 text-foreground" />
-				</button>
 			</div>
 
 			<div
@@ -962,7 +1231,7 @@ export const TimelineSlider = ({
 								{/* Vertical stacked icons - favicons for browser groups, app icons otherwise */}
 								{groupWidth > 30 && (
 									<motion.div
-										className="absolute top-1/2 -translate-y-1/2 left-1/2 -translate-x-1/2 z-10 flex flex-col items-center cursor-pointer p-1"
+										className="absolute top-1/2 -translate-y-[65%] left-1/2 -translate-x-1/2 z-10 flex flex-col items-center cursor-pointer p-1"
 										style={{
 											direction: 'ltr',
 											pointerEvents: 'auto',
@@ -1092,7 +1361,15 @@ export const TimelineSlider = ({
 									const isCurrent = frameIndex === currentIndex;
 									const matchesDevice = selectedDeviceId === "all" || frame.devices.some((d) => d.device_id === selectedDeviceId);
 									const matchesApp = selectedAppName === "all" || frame.devices.some((d) => d.metadata?.app_name === selectedAppName);
-									const matchesFilter = matchesDevice && matchesApp;
+									const matchesDomain = selectedDomain === "all" || frame.devices.some((d) => {
+										const url = d.metadata?.browser_url?.trim();
+										return url ? extractDomain(url) === selectedDomain : false;
+									});
+									const matchesSpeaker = selectedSpeaker === "all" || frame.devices.some((d) => d.audio?.some((a) => a.speaker_name === selectedSpeaker));
+									const frameIdForTag = frame.devices?.[0]?.frame_id || '';
+									const frameTagsForFilter = frameIdForTag ? (tags[frameIdForTag] || []) : [];
+									const matchesTag = selectedTag === "all" || frameTagsForFilter.includes(selectedTag);
+									const matchesFilter = matchesDevice && matchesApp && matchesDomain && matchesSpeaker && matchesTag;
 
 									// Show time marker on first frame of each hour
 									const showTimeMarker = timeMarkers.some(
