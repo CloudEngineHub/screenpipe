@@ -70,18 +70,18 @@ pub fn init_magnify_handler(app: tauri::AppHandle) {
 #[cfg(not(target_os = "macos"))]
 pub fn init_magnify_handler(_app: tauri::AppHandle) {}
 
-/// Attach an NSMagnificationGestureRecognizer to a panel's content view.
+/// Attach an NSMagnificationGestureRecognizer to the given view.
 /// Safe to call multiple times — skips if already attached.
 #[cfg(target_os = "macos")]
-pub unsafe fn attach_magnify_gesture(panel: &tauri_nspanel::raw_nspanel::RawNSPanel) {
+unsafe fn attach_magnify_gesture_to_view(view: tauri_nspanel::cocoa::base::id) {
     use objc::{class, msg_send, sel, sel_impl};
     use tauri_nspanel::cocoa::base::{id, nil};
     use tauri_nspanel::cocoa::foundation::NSArray;
 
-    let content_view: id = panel.content_view();
+    if view == nil { return; }
 
     // Check if we already added our recognizer (look for ScreenpipeMagnifyHandler target)
-    let recognizers: id = msg_send![content_view, gestureRecognizers];
+    let recognizers: id = msg_send![view, gestureRecognizers];
     if recognizers != nil {
         let count: u64 = NSArray::count(recognizers);
         let handler_class = class!(ScreenpipeMagnifyHandler);
@@ -112,8 +112,8 @@ pub unsafe fn attach_magnify_gesture(panel: &tauri_nspanel::raw_nspanel::RawNSPa
         action: sel!(handleMagnify:)
     ];
 
-    // Add to content view
-    let _: () = msg_send![content_view, addGestureRecognizer: recognizer];
+    // Add to view
+    let _: () = msg_send![view, addGestureRecognizer: recognizer];
 }
 
 /// Run a closure on the main thread, catching any panics so they don't abort
@@ -215,9 +215,6 @@ pub unsafe fn make_webview_first_responder(panel: &tauri_nspanel::raw_nspanel::R
     use tauri_nspanel::cocoa::base::{id, nil};
     use tauri_nspanel::cocoa::foundation::NSArray;
 
-    // Ensure pinch-to-zoom gesture recognizer is attached
-    attach_magnify_gesture(panel);
-
     let content_view: id = panel.content_view();
     let wk_class: *const objc::runtime::Class = class!(WKWebView);
 
@@ -244,6 +241,11 @@ pub unsafe fn make_webview_first_responder(panel: &tauri_nspanel::raw_nspanel::R
     if wk_view == nil {
         wk_view = content_view;
     }
+
+    // Attach pinch-to-zoom gesture recognizer directly to the WKWebView.
+    // Must be on the WKWebView (not content_view) so it intercepts gestures
+    // before WebKit's internal multi-process routing claims them.
+    attach_magnify_gesture_to_view(wk_view);
 
     // Set first responder immediately (handles the common case)
     panel.make_first_responder(Some(wk_view));
