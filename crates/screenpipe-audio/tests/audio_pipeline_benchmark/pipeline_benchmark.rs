@@ -48,7 +48,7 @@ fn simulate_pipeline(
     let mut total_speech_seconds = 0.0f64;
 
     // Count total speech seconds from ground truth
-    for (_t, &is_speech) in labels.iter().enumerate() {
+    for &is_speech in labels.iter() {
         if is_speech {
             total_speech_seconds += 1.0;
         }
@@ -84,8 +84,8 @@ fn simulate_pipeline(
             let chunk_start_sec = chunk_idx as f64 * CHUNK_DURATION_SECS;
             let chunk_end_sec = chunk_start_sec + CHUNK_DURATION_SECS;
 
-            for t in (chunk_start_sec as usize)..(chunk_end_sec as usize).min(labels.len()) {
-                if labels[t] {
+            for &is_speech in &labels[(chunk_start_sec as usize)..(chunk_end_sec as usize).min(labels.len())] {
+                if is_speech {
                     speech_seconds_captured += 1.0;
                 }
             }

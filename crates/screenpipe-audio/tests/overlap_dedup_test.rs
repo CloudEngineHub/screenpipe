@@ -4,7 +4,6 @@
 /// from chunk boundaries and cross-device capture.
 ///
 /// Run with: cargo test --package screenpipe-audio --test overlap_dedup_test -- --nocapture
-
 #[cfg(test)]
 mod tests {
     use screenpipe_audio::transcription::text_utils::longest_common_word_substring;

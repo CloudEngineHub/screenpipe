@@ -4,7 +4,6 @@
 ///
 /// These tests are ignored by default because they require downloading large models.
 /// Run them locally with: cargo test -p screenpipe-audio --test onnx_model_test -- --ignored
-
 #[cfg(test)]
 mod tests {
     use anyhow::Result;

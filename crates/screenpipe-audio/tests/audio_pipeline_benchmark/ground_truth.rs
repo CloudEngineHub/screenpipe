@@ -87,8 +87,8 @@ impl ScenarioManifest {
 
             let start_sec = seg.start_secs.floor() as usize;
             let end_sec = (seg.end_secs.ceil() as usize).min(total_seconds);
-            for t in start_sec..end_sec {
-                labels[t] = true;
+            for label in &mut labels[start_sec..end_sec] {
+                *label = true;
             }
         }
 

@@ -19,14 +19,14 @@ mod tests {
         // Create embeddings with different DIRECTIONS (cosine similarity measures angle)
         // embedding1: positive in first half, zero in second half
         let mut embedding1 = vec![0.0; 512];
-        for i in 0..256 {
-            embedding1[i] = 1.0;
+        for val in &mut embedding1[..256] {
+            *val = 1.0;
         }
 
         // embedding2: zero in first half, positive in second half (orthogonal to embedding1)
         let mut embedding2 = vec![0.0; 512];
-        for i in 256..512 {
-            embedding2[i] = 1.0;
+        for val in &mut embedding2[256..] {
+            *val = 1.0;
         }
 
         // Simulate: first audio chunk creates speaker 1
@@ -79,13 +79,13 @@ mod tests {
 
         // Create embeddings with different DIRECTIONS (cosine similarity measures angle)
         let mut embedding1 = vec![0.0; 512];
-        for i in 0..256 {
-            embedding1[i] = 1.0;
+        for val in &mut embedding1[..256] {
+            *val = 1.0;
         }
 
         let mut embedding2 = vec![0.0; 512];
-        for i in 256..512 {
-            embedding2[i] = 1.0;
+        for val in &mut embedding2[256..] {
+            *val = 1.0;
         }
 
         // Simulate: first audio chunk creates speaker 1

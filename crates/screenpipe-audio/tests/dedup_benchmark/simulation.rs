@@ -346,6 +346,7 @@ pub struct RecordingSession {
     /// Transcription noise generator
     pub noise: TranscriptionNoise,
     /// Random number generator
+    #[allow(dead_code)]
     rng: StdRng,
 }
 
@@ -505,7 +506,7 @@ impl DedupHandler {
             return false;
         }
 
-        if let Some((prev_idx, cur_idx, match_len)) =
+        if let Some((_prev_idx, cur_idx, match_len)) =
             longest_common_word_substring(&self.previous_transcript, transcript)
         {
             let curr_words: Vec<&str> = transcript.split_whitespace().collect();

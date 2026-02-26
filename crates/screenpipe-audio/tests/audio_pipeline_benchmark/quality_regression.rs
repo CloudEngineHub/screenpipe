@@ -45,7 +45,7 @@ async fn whisper_hallucination_on_silence() {
 
     let text = screenpipe_audio::stt(
         &silence,
-        SAMPLE_RATE as u32,
+        SAMPLE_RATE,
         "test-silence",
         engine.clone(),
         None,
@@ -91,7 +91,7 @@ async fn whisper_hallucination_on_noise() {
 
     let text = screenpipe_audio::stt(
         &noise,
-        SAMPLE_RATE as u32,
+        SAMPLE_RATE,
         "test-noise",
         engine.clone(),
         None,
@@ -135,7 +135,7 @@ async fn whisper_hallucination_on_ambient() {
 
     let text = screenpipe_audio::stt(
         &ambient,
-        SAMPLE_RATE as u32,
+        SAMPLE_RATE,
         "test-ambient",
         engine.clone(),
         None,
@@ -240,7 +240,7 @@ async fn whisper_real_speech_still_works() {
 
             let text = screenpipe_audio::stt(
                 chunk,
-                SAMPLE_RATE as u32,
+                SAMPLE_RATE,
                 "benchmark",
                 engine.clone(),
                 None,

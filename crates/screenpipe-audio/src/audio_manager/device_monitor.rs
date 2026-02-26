@@ -401,6 +401,7 @@ pub async fn stop_device_monitor() -> Result<()> {
 
 /// Sliding-window cooldown tracker for central handler restarts.
 /// Extracted for testability.
+#[cfg(test)]
 pub(crate) struct RestartCooldown {
     timestamps: Vec<Instant>,
     max_restarts: usize,
@@ -408,6 +409,7 @@ pub(crate) struct RestartCooldown {
     pub exhausted: bool,
 }
 
+#[cfg(test)]
 impl RestartCooldown {
     pub fn new(max_restarts: usize, window: Duration) -> Self {
         Self {

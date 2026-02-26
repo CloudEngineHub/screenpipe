@@ -377,7 +377,7 @@ async fn vad_debug_single_wav() {
         let t = 4.0 + i as f64 * (512.0 / SAMPLE_RATE as f64);
         if result.prob > 0.3 { speech_count += 1; }
         // Print all frames in speech region and every 10th elsewhere
-        if (t >= 4.9 && t <= 7.5) || i % 10 == 0 {
+        if (4.9..=7.5).contains(&t) || i % 10 == 0 {
             println!("  frame {:>3} (t={:.3}s): prob={:.4} status={:?}",
                 i, t, result.prob, if result.prob > 0.5 { "SPEECH" } else if result.prob < 0.35 { "silence" } else { "unknown" });
         }

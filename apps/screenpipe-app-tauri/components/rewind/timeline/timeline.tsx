@@ -19,6 +19,61 @@ import { AppContextPopover } from "./app-context-popover";
 import { TimelineTagToolbar } from "./timeline-tag-toolbar";
 import { extractDomain, FaviconImg } from "./favicon-utils";
 
+// Global cache: preloads app-icon images so they render instantly on scroll.
+// Maps app name → "loaded" | "error" | Promise (in-flight).
+const appIconCache = new Map<string, "loaded" | "error" | Promise<void>>();
+
+function preloadAppIcon(appName: string): "loaded" | "error" | "loading" {
+	const cached = appIconCache.get(appName);
+	if (cached === "loaded" || cached === "error") return cached;
+	if (cached) return "loading"; // promise in-flight
+	const url = `http://localhost:11435/app-icon?name=${encodeURIComponent(appName)}`;
+	const p = new Promise<void>((resolve) => {
+		const img = new Image();
+		img.onload = () => { appIconCache.set(appName, "loaded"); resolve(); };
+		img.onerror = () => { appIconCache.set(appName, "error"); resolve(); };
+		img.src = url;
+	});
+	appIconCache.set(appName, p);
+	return "loading";
+}
+
+/** App icon with in-memory cache — no flash of fallback letter on fast scroll */
+const CachedAppIcon = React.memo(function CachedAppIcon({ appName, className }: { appName: string; className?: string }) {
+	const [status, setStatus] = useState<"loaded" | "error" | "loading">(() => preloadAppIcon(appName));
+
+	useEffect(() => {
+		const cached = appIconCache.get(appName);
+		if (cached === "loaded" || cached === "error") {
+			setStatus(cached);
+			return;
+		}
+		// Wait for in-flight preload
+		const p = cached || (() => { preloadAppIcon(appName); return appIconCache.get(appName)!; })();
+		if (p instanceof Promise) {
+			p.then(() => {
+				const result = appIconCache.get(appName);
+				if (result === "loaded" || result === "error") setStatus(result);
+			});
+		}
+	}, [appName]);
+
+	if (status === "error") {
+		return null; // let parent's fallback letter show
+	}
+
+	return (
+		// eslint-disable-next-line @next/next/no-img-element
+		<img
+			src={`http://localhost:11435/app-icon?name=${encodeURIComponent(appName)}`}
+			className={className ?? "w-full h-full rounded-sm object-contain scale-110"}
+			alt={appName}
+			decoding="async"
+			style={{ display: status === "loaded" ? undefined : "none" }}
+		/>
+	);
+});
+
 interface UiEventSummary {
 	event_type: string;
 	text_content: string | null;
@@ -550,6 +605,15 @@ export const TimelineSlider = ({
 		return groups;
 	}, [visibleFrames]);
 
+	// Preload app icons for all visible groups so they're cached before scroll
+	useEffect(() => {
+		for (const group of appGroups) {
+			for (const name of group.appNames) {
+				preloadAppIcon(name);
+			}
+		}
+	}, [appGroups]);
+
 	// Compute time markers for the visible range
 	const timeMarkers = useMemo(() => {
 		if (!visibleFrames || visibleFrames.length === 0) return [];
@@ -879,6 +943,8 @@ export const TimelineSlider = ({
 								dir="rtl"
 								style={{
 									// borderLeft removed — caused visible white lines between groups
+									// DEBUG: red outline on groups with topDomains
+									...(group.topDomains?.length ? { outline: '2px solid red' } : {}),
 								}}
 							>
 								{/* Vertical stacked icons - favicons for browser groups, app icons otherwise */}
@@ -958,18 +1024,7 @@ export const TimelineSlider = ({
 													}}
 													transition={{ type: "spring", stiffness: 400, damping: 25 }}
 												>
-													{/* eslint-disable-next-line @next/next/no-img-element */}
-													<img
-														src={`http://localhost:11435/app-icon?name=${encodeURIComponent(appName)}`}
-														className="w-full h-full rounded-sm object-contain scale-110"
-														alt={appName}
-														loading="lazy"
-														decoding="async"
-														onError={(e) => {
-															// Hide broken img, let fallback letter show
-															(e.target as HTMLImageElement).style.display = 'none';
-														}}
-													/>
+													<CachedAppIcon appName={appName} />
 													<span
 														className="absolute inset-0 flex items-center justify-center text-[10px] font-bold text-white/90 pointer-events-none"
 														style={{ zIndex: -1 }}
@@ -1133,14 +1188,7 @@ export const TimelineSlider = ({
 															if (domain) {
 																return <FaviconImg domain={domain} fallbackAppName={group.appName} size={16} className="w-4 h-4 rounded" />;
 															}
-															return (
-																// eslint-disable-next-line @next/next/no-img-element
-																<img
-																	src={`http://localhost:11435/app-icon?name=${encodeURIComponent(group.appName)}`}
-																	className="w-4 h-4 rounded"
-																	alt=""
-																/>
-															);
+															return <CachedAppIcon appName={group.appName} className="w-4 h-4 rounded object-contain" />;
 														})()}
 														<p className="font-medium text-popover-foreground">
 															{(() => {

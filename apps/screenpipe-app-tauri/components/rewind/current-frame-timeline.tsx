@@ -56,8 +56,15 @@ export const SkeletonLoader: FC = () => {
 	);
 };
 
-// Debounce delay for frame loading (ms)
+// Debounce delay for frame loading (ms) — reduced for arrow keys
 const FRAME_LOAD_DEBOUNCE_MS = 80;
+const FRAME_LOAD_DEBOUNCE_ARROW_MS = 0;
+
+// Number of adjacent frames to preload in each direction
+const PRELOAD_ADJACENT = 3;
+
+// Crossfade duration (ms)
+const CROSSFADE_MS = 120;
 
 // Track which chunks have failed with TTL — entries expire so finished chunks can be retried
 const FAILED_CHUNK_TTL_MS = 30_000;

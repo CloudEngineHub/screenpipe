@@ -54,7 +54,7 @@ async fn test_broadcast_channel_lag_recovery() {
     // Try to receive with graceful lag handling
     loop {
         match rx.recv().await {
-            Ok(chunk) => {
+            Ok(_chunk) => {
                 received_count.fetch_add(1, Ordering::Relaxed);
                 // Successfully received a chunk after potential lag
             }
@@ -99,7 +99,7 @@ async fn test_slow_consumer_causes_lag() {
 
     // Producer: simulates fast audio input (~44100 samples/sec in chunks)
     let producer = tokio::spawn(async move {
-        for i in 0..200 {
+        for _i in 0..200 {
             if !is_running_producer.load(Ordering::Relaxed) {
                 break;
             }

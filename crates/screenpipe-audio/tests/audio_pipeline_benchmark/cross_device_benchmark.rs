@@ -187,7 +187,7 @@ async fn cross_device_coverage_synthetic() {
     println!("  Neither: {}", result.neither);
     println!("  Capture rate: {:.1}%", result.capture_rate * 100.0);
 
-    metrics::print_cross_device_table(&[result.clone()]);
+    metrics::print_cross_device_table(std::slice::from_ref(&result));
 
     // Test with lower threshold (0.02)
     let result_low = analyze_cross_device(&mic_audio, &system_audio, &manifest, 0.02, &mut vad);

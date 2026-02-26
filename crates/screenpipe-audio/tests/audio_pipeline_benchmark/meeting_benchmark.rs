@@ -38,8 +38,9 @@ async fn replay_scenario(
     sorted_events.sort_by(|a, b| a.time_secs.partial_cmp(&b.time_secs).unwrap());
 
     // Replay second by second
-    for t in 0..total_seconds {
-        let t_secs = t as f64;
+    #[allow(clippy::needless_range_loop)]
+    for sec in 0..total_seconds {
+        let t_secs = sec as f64;
 
         // Fire events at this second
         for event in &sorted_events {
@@ -106,7 +107,7 @@ async fn replay_scenario(
         detector.check_grace_period().await;
 
         // Sample detection state
-        detected_meeting[t] = detector.is_in_meeting();
+        detected_meeting[sec] = detector.is_in_meeting();
     }
 
     // Compute metrics against ground truth meeting windows
@@ -115,8 +116,8 @@ async fn replay_scenario(
         if w.is_meeting {
             let start = w.start_secs as usize;
             let end = (w.end_secs as usize).min(total_seconds);
-            for t in start..end {
-                gt_meeting[t] = true;
+            for val in &mut gt_meeting[start..end] {
+                *val = true;
             }
         }
     }

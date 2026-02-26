@@ -57,10 +57,8 @@ impl HandleNewTranscriptSimulator {
 
         if let Some((previous, current)) = self.cleanup_overlap(transcription) {
             // BUG: This condition fails when both are empty (exact duplicate)
-            if !previous.is_empty() && !current.is_empty() {
-                if current != transcription {
-                    current_transcript = Some(current);
-                }
+            if !previous.is_empty() && !current.is_empty() && current != transcription {
+                current_transcript = Some(current);
             }
             // When both are empty, current_transcript stays as original = DUPLICATE INSERTED
         }
