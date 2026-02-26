@@ -244,12 +244,64 @@ async fn get_exe_from_potential_path(app_name: &str) -> Option<String> {
     const CREATE_NO_WINDOW: u32 = 0x08000000;
     let app_name = app_name.strip_suffix(".exe").unwrap_or(&app_name);
 
-    // Try direct path in Program Files first (fast, no PowerShell)
+    let app_lower = app_name.to_lowercase();
+
+    // Try %LOCALAPPDATA% first — Electron apps (Slack, Discord, etc.) install here
+    if let Ok(local_app_data) = std::env::var("LOCALAPPDATA") {
+        let local_dir = std::path::Path::new(&local_app_data);
+        if let Ok(entries) = std::fs::read_dir(local_dir) {
+            for entry in entries.flatten() {
+                let folder_name = entry.file_name().to_string_lossy().to_lowercase();
+                if folder_name.contains(&app_lower) || app_lower.contains(&folder_name) {
+                    let entry_path = entry.path();
+                    // Electron pattern: %LOCALAPPDATA%\<app>\app-*\<app>.exe
+                    if let Ok(sub_entries) = std::fs::read_dir(&entry_path) {
+                        for sub in sub_entries.flatten() {
+                            let sub_name = sub.file_name().to_string_lossy().to_lowercase();
+                            // Check versioned "app-X.Y.Z" subdirs (Electron/Squirrel)
+                            if sub_name.starts_with("app-") && sub.path().is_dir() {
+                                if let Ok(app_entries) = std::fs::read_dir(sub.path()) {
+                                    for app_entry in app_entries.flatten() {
+                                        let fname = app_entry.file_name().to_string_lossy().to_lowercase();
+                                        if fname.ends_with(".exe") && fname.contains(&app_lower) {
+                                            return Some(app_entry.path().to_string_lossy().to_string());
+                                        }
+                                    }
+                                }
+                            }
+                            // Direct exe in app folder
+                            if sub_name.ends_with(".exe") && sub_name.contains(&app_lower) {
+                                return Some(sub.path().to_string_lossy().to_string());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        // Also check %LOCALAPPDATA%\Programs (e.g. cursor, VS Code user installs)
+        let programs_dir = local_dir.join("Programs");
+        if let Ok(entries) = std::fs::read_dir(&programs_dir) {
+            for entry in entries.flatten() {
+                let folder_name = entry.file_name().to_string_lossy().to_lowercase();
+                if folder_name.contains(&app_lower) || app_lower.contains(&folder_name) {
+                    if let Ok(sub_entries) = std::fs::read_dir(entry.path()) {
+                        for sub in sub_entries.flatten() {
+                            let fname = sub.file_name().to_string_lossy().to_lowercase();
+                            if fname.ends_with(".exe") && (fname.contains(&app_lower) || fname.contains("gui")) {
+                                return Some(sub.path().to_string_lossy().to_string());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Try direct path in Program Files (fast, no PowerShell)
     let program_dirs = [
         r"C:\Program Files",
         r"C:\Program Files (x86)",
     ];
-    let app_lower = app_name.to_lowercase();
     for dir in &program_dirs {
         let base = std::path::Path::new(dir);
         if let Ok(entries) = std::fs::read_dir(base) {

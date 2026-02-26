@@ -458,36 +458,33 @@ async fn get_app_icon_handler(
     Query(app_name): Query<AppIconQuery>,
 ) -> impl IntoResponse {
     use once_cell::sync::Lazy;
-    use std::collections::HashSet;
+    use std::collections::HashMap;
     use std::sync::Mutex;
+    use std::time::Instant;
 
-    // Cache of app names we already know have no icon, to avoid repeated expensive lookups
-    static NOT_FOUND_CACHE: Lazy<Mutex<HashSet<String>>> =
-        Lazy::new(|| Mutex::new(HashSet::new()));
+    // Cache of app names we already know have no icon, with expiry time.
+    // Entries expire after 5 minutes so new installations are picked up.
+    static NOT_FOUND_CACHE: Lazy<Mutex<HashMap<String, Instant>>> =
+        Lazy::new(|| Mutex::new(HashMap::new()));
 
-    // 1x1 transparent PNG placeholder
-    static PLACEHOLDER_PNG: &[u8] = &[
-        0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48,
-        0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00,
-        0x00, 0x1F, 0x15, 0xC4, 0x89, 0x00, 0x00, 0x00, 0x0A, 0x49, 0x44, 0x41, 0x54, 0x78,
-        0x9C, 0x62, 0x00, 0x00, 0x00, 0x02, 0x00, 0x01, 0xE5, 0x27, 0xDE, 0xFC, 0x00, 0x00,
-        0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82,
-    ];
+    const NOT_FOUND_TTL: std::time::Duration = std::time::Duration::from_secs(300);
 
     info!("received app icon request: {:?}", app_name);
 
     // Check not-found cache first to skip expensive lookups
     let cache_key = format!("{}:{}", app_name.name, app_name.path.as_deref().unwrap_or(""));
     if let Ok(cache) = NOT_FOUND_CACHE.lock() {
-        if cache.contains(&cache_key) {
-            let headers = [
-                (CONTENT_TYPE, HeaderValue::from_static("image/png")),
-                (
-                    http::header::CACHE_CONTROL,
-                    HeaderValue::from_static("public, max-age=604800"),
-                ),
-            ];
-            return (StatusCode::OK, headers, Bytes::from_static(PLACEHOLDER_PNG));
+        if let Some(inserted_at) = cache.get(&cache_key) {
+            if inserted_at.elapsed() < NOT_FOUND_TTL {
+                let headers = [
+                    (CONTENT_TYPE, HeaderValue::from_static("image/png")),
+                    (
+                        http::header::CACHE_CONTROL,
+                        HeaderValue::from_static("public, max-age=60"),
+                    ),
+                ];
+                return (StatusCode::NOT_FOUND, headers, Bytes::new());
+            }
         }
     }
 
@@ -505,18 +502,22 @@ async fn get_app_icon_handler(
                 (StatusCode::OK, headers, Bytes::from(icon.data))
             }
             Ok(None) | Err(_) => {
-                // Cache the miss to avoid repeated expensive lookups
+                // Cache the miss with timestamp for expiry
                 if let Ok(mut cache) = NOT_FOUND_CACHE.lock() {
-                    cache.insert(cache_key);
+                    cache.insert(cache_key, Instant::now());
+                    // Evict expired entries periodically
+                    if cache.len() > 100 {
+                        cache.retain(|_, t| t.elapsed() < NOT_FOUND_TTL);
+                    }
                 }
                 let headers = [
                     (CONTENT_TYPE, HeaderValue::from_static("image/png")),
                     (
                         http::header::CACHE_CONTROL,
-                        HeaderValue::from_static("public, max-age=604800"),
+                        HeaderValue::from_static("public, max-age=60"),
                     ),
                 ];
-                (StatusCode::OK, headers, Bytes::from_static(PLACEHOLDER_PNG))
+                (StatusCode::NOT_FOUND, headers, Bytes::new())
             }
         }
     }
@@ -527,10 +528,10 @@ async fn get_app_icon_handler(
             (CONTENT_TYPE, HeaderValue::from_static("image/png")),
             (
                 http::header::CACHE_CONTROL,
-                HeaderValue::from_static("public, max-age=604800"),
+                HeaderValue::from_static("public, max-age=60"),
             ),
         ];
-        (StatusCode::OK, headers, Bytes::from_static(PLACEHOLDER_PNG))
+        (StatusCode::NOT_FOUND, headers, Bytes::new())
     }
 }
 
