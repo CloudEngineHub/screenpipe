@@ -81,6 +81,12 @@ screenpipe turns your computer into a personal AI that knows everything you've d
 
 [download the desktop app](https://screenpi.pe) — one-time purchase, all features, auto-updates
 
+or run the CLI:
+
+```bash
+npx screenpipe@latest record
+```
+
 ## specs
 
 - 10% cpu usage
