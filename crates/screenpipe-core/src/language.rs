@@ -42,6 +42,7 @@ pub enum Language {
     Indonesian,
     #[clap(name = "hindi")]
     Hindi,
+  #[clap(name = "vietnamese")] Vietnamese,
     #[clap(name = "finnish")]
     Finnish,
     #[clap(name = "hebrew")]
@@ -179,6 +180,7 @@ impl Language {
             Language::Italian => "it",
             Language::Indonesian => "id",
             Language::Hindi => "hi",
+            Language::Vietnamese => "vi",
             Language::Finnish => "fi",
             Language::Hebrew => "he",
             Language::Ukrainian => "uk",
@@ -262,6 +264,7 @@ impl std::str::FromStr for Language {
             "italian" | "it" => Ok(Self::Italian),
             "indonesian" | "id" => Ok(Self::Indonesian),
             "hindi" | "hi" => Ok(Self::Hindi),
+            "vietnamese" | "vi" => Ok(Self::Vietnamese),
             "finnish" | "fi" => Ok(Self::Finnish),
             "hebrew" | "he" => Ok(Self::Hebrew),
             "ukrainian" | "uk" => Ok(Self::Ukrainian),
