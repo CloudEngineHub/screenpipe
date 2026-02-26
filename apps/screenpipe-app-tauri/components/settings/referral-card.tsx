@@ -8,10 +8,9 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { Copy, Check, Gift, Send } from "lucide-react";
+import { Copy, Check, Gift, Send, Loader2 } from "lucide-react";
 import { toast } from "@/components/ui/use-toast";
 import { useSettings } from "@/lib/hooks/use-settings";
-import { open as openUrl } from "@tauri-apps/plugin-shell";
 
 interface ReferralData {
   code: string;
@@ -28,6 +27,7 @@ export function ReferralCard() {
   const [loading, setLoading] = useState(true);
   const [copied, setCopied] = useState(false);
   const [email, setEmail] = useState("");
+  const [sending, setSending] = useState(false);
 
   useEffect(() => {
     if (!settings.user?.email) return;
@@ -74,15 +74,38 @@ export function ReferralCard() {
     }
   };
 
-  const handleSendEmail = () => {
-    if (!email || !referral) return;
-    const subject = encodeURIComponent("try screenpipe — AI that knows everything you've seen, said, or heard");
-    const body = encodeURIComponent(
-      `hey, I've been using screenpipe and thought you'd like it.\n\nsign up with my link and get 10% off:\n${referral.link}\n\nit records your screen & audio locally and lets AI work with everything you've seen or heard.`
-    );
-    openUrl(`mailto:${email}?subject=${subject}&body=${body}`);
-    setEmail("");
-    toast({ title: "opening email client..." });
+  const handleSendEmail = async () => {
+    if (!email || !referral || sending) return;
+    setSending(true);
+    try {
+      const res = await fetch("https://screenpi.pe/api/referral/invite", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${settings.user?.token}`,
+        },
+        body: JSON.stringify({
+          email,
+          referralLink: referral.link,
+          senderName: settings.user?.email,
+        }),
+      });
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || "failed to send invite");
+      }
+
+      setEmail("");
+      toast({ title: "invite sent!" });
+    } catch (e: any) {
+      toast({
+        title: e.message || "failed to send invite",
+        variant: "destructive",
+      });
+    } finally {
+      setSending(false);
+    }
   };
 
   if (loading) {
@@ -172,10 +195,14 @@ export function ReferralCard() {
           variant="outline"
           size="sm"
           onClick={handleSendEmail}
-          disabled={!email}
+          disabled={!email || sending}
         >
-          <Send className="h-4 w-4 mr-1.5" />
-          invite
+          {sending ? (
+            <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />
+          ) : (
+            <Send className="h-4 w-4 mr-1.5" />
+          )}
+          {sending ? "sending..." : "invite"}
         </Button>
       </div>
     </Card>
