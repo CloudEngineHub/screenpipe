@@ -167,9 +167,11 @@ async showWindow(window: ShowRewindWindow) : Promise<Result<null, string>> {
 }
 },
 /**
- * Open the screenpi.pe login page inside an in-app WebView.
- * Intercepts the screenpipe:// deep-link redirect so we don't rely on
- * Safari custom-scheme support (which can silently fail).
+ * Open the screenpi.pe login page.
+ * On Windows, opens in the system browser (WebView2 has issues with some auth
+ * providers; the registered deep-link scheme handles the redirect back).
+ * On macOS/Linux, uses an in-app WebView that intercepts the screenpipe://
+ * deep-link redirect (Safari blocks custom-scheme redirects).
  */
 async openLoginWindow() : Promise<Result<null, string>> {
     try {

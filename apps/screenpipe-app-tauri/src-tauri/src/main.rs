@@ -1538,43 +1538,9 @@ async fn main() {
                 // activateIgnoringOtherApps + activation policy toggling.
                 space_monitor::setup_space_listener(app.handle().clone());
 
-                // Forward native trackpad magnify (pinch) gestures to JS as Tauri events.
-                // WKWebView swallows magnifyWithEvent: and doesn't fire JS gesture events.
-                // We use an NSEvent local monitor to intercept magnify events before they
-                // reach the WKWebView. The handler returns nil to CONSUME the event,
-                // preventing WKWebView's built-in magnification from handling it (which
-                // would steal subsequent gesture events after the first pinch).
-                // Note: magnify events are directed at the window under the cursor, so
-                // the local monitor catches them even when the panel is nonactivating.
-                // A global monitor is NOT used — it would incorrectly trigger zoom when
-                // the user pinches in other apps.
-                {
-                    use objc::{class, msg_send, sel, sel_impl, runtime::Object};
-                    use tauri_nspanel::block::ConcreteBlock;
-
-                    let app_for_magnify = app.handle().clone();
-
-                    // NSEventMaskMagnify = 1 << 30
-                    let mask: u64 = 1 << 30;
-
-                    let block = ConcreteBlock::new(move |event: *mut Object| -> *mut Object {
-                        let magnification: f64 = unsafe { msg_send![event, magnification] };
-                        tracing::debug!("magnify event: {magnification}");
-                        let _ = app_for_magnify.emit("native-magnify", magnification);
-                        event // pass through — returning nil breaks event delivery entirely
-                    });
-                    let block = block.copy();
-                    unsafe {
-                        let _: *mut Object = msg_send![
-                            class!(NSEvent),
-                            addLocalMonitorForEventsMatchingMask: mask
-                            handler: &*block
-                        ];
-                    }
-                    std::mem::forget(block);
-
-                    info!("magnify event monitor installed");
-                }
+                // Set up pinch-to-zoom: store the app handle so the gesture
+                // recognizer callback (in window_api.rs) can emit Tauri events.
+                crate::window_api::init_magnify_handler(app.handle().clone());
             }
 
             // Logging setup

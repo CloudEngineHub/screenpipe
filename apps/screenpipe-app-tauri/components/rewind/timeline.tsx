@@ -1265,9 +1265,9 @@ export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 		return () => target.removeEventListener("wheel", handler);
 	}, [handleScroll, embedded]);
 
-	// Native trackpad pinch-to-zoom via Tauri event.
+	// Native trackpad pinch-to-zoom via Tauri event (macOS).
 	// WKWebView swallows magnifyWithEvent: — no JS gesture/wheel events fire.
-	// The Rust side uses an NSEvent local monitor to catch magnify gestures
+	// The Rust side attaches an NSMagnificationGestureRecognizer to the panel
 	// and emits "native-magnify" with the magnification delta.
 	useEffect(() => {
 		const unlisten = listen<number>("native-magnify", (event) => {
@@ -1277,33 +1277,12 @@ export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 			zoomTimeoutRef.current = setTimeout(() => {
 				isZoomingRef.current = false;
 			}, 150);
-			// Amplify: NSEvent magnification is small (~0.01-0.05 per tick)
 			setTargetZoom((prev) =>
 				Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, prev * (1 + magnification * 5))),
 			);
 		});
 		return () => { unlisten.then((f) => f()); };
 	}, [setTargetZoom]);
-
-	// Ensure WKWebView is first responder so pinch-to-zoom works.
-	// On macOS, magnifyWithEvent: only reaches the WKWebView if it's first responder.
-	// Various panel operations can steal this, so we re-assert on pointer enter
-	// and window focus events.
-	useEffect(() => {
-		const ensureFocus = () => {
-			commands.ensureWebviewFocus();
-		};
-		// Re-assert on any pointer entry into the page
-		document.addEventListener("pointerenter", ensureFocus, true);
-		// Re-assert when the window regains focus
-		const unlistenFocus = listen("window-focused", ensureFocus);
-		// Also assert on mount
-		ensureFocus();
-		return () => {
-			document.removeEventListener("pointerenter", ensureFocus, true);
-			unlistenFocus.then((f) => f());
-		};
-	}, []);
 
 	const handleRefresh = useCallback(() => {
 		// Full page reload - simpler and more reliable than WebSocket reconnection
