@@ -1765,6 +1765,7 @@ export function StandaloneChat({ className }: { className?: string } = {}) {
         const pipeName = payload?.pipeName;
         const execId = payload?.executionId;
         const piEvent = payload?.event;
+        console.log("[Pipe] event received:", pipeName, execId, piEvent?.type);
         if (!piEvent) return;
 
         // If no pipe is being watched yet and we see an event, auto-attach
@@ -1922,13 +1923,10 @@ export function StandaloneChat({ className }: { className?: string } = {}) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Listen for "watch_pipe" events from pipes-section to start watching a running pipe
+  // Watch pipe: set up tracking from either Tauri event or sessionStorage (for cross-page navigation)
   useEffect(() => {
-    let unlisten: (() => void) | null = null;
-    listen<{ pipeName: string; executionId: number }>("watch_pipe", (event) => {
-      const { pipeName, executionId } = event.payload;
+    const initWatch = (pipeName: string, executionId: number) => {
       setActivePipeExecution({ name: pipeName, executionId });
-      // Create a placeholder assistant message for the pipe output
       const msgId = `pipe-${pipeName}-${executionId}`;
       piStreamingTextRef.current = "";
       piContentBlocksRef.current = [];
@@ -1954,6 +1952,25 @@ export function StandaloneChat({ className }: { className?: string } = {}) {
         ];
       });
       setIsStreaming(true);
+    };
+
+    // Check sessionStorage first (set by pipes-section before navigation)
+    const stored = sessionStorage.getItem("watchPipe");
+    if (stored) {
+      sessionStorage.removeItem("watchPipe");
+      try {
+        const { pipeName, executionId } = JSON.parse(stored);
+        if (pipeName && executionId != null) {
+          initWatch(pipeName, executionId);
+        }
+      } catch {}
+    }
+
+    // Also listen for live events (in case chat is already mounted)
+    let unlisten: (() => void) | null = null;
+    listen<{ pipeName: string; executionId: number }>("watch_pipe", (event) => {
+      const { pipeName, executionId } = event.payload;
+      initWatch(pipeName, executionId);
     }).then((fn) => { unlisten = fn; });
     return () => { unlisten?.(); };
   }, []);

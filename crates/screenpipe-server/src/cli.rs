@@ -553,6 +553,21 @@ pub enum PipeCommand {
         /// Pipe name
         name: String,
     },
+    /// Manage AI model presets
+    Models {
+        #[command(subcommand)]
+        subcommand: ModelCommand,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum ModelCommand {
+    /// List available AI presets from settings
+    List {
+        /// Output as JSON
+        #[arg(long, default_value_t = false)]
+        json: bool,
+    },
 }
 
 // =============================================================================

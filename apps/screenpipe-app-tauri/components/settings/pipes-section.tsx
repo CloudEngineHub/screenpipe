@@ -883,6 +883,15 @@ export function PipesSection() {
                                     className="text-[10px] text-primary underline hover:no-underline ml-1"
                                     onClick={(e) => {
                                       e.stopPropagation();
+                                      // Store in sessionStorage so the chat can pick it up on mount
+                                      // (the chat component may not be mounted yet)
+                                      sessionStorage.setItem(
+                                        "watchPipe",
+                                        JSON.stringify({
+                                          pipeName: pipe.config.name,
+                                          executionId: exec.id,
+                                        })
+                                      );
                                       emit("watch_pipe", {
                                         pipeName: pipe.config.name,
                                         executionId: exec.id,

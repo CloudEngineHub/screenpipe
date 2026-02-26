@@ -274,6 +274,7 @@ export const TimelineSlider = ({
 	const containerRef = useRef<HTMLDivElement>(null);
 	const observerTargetRef = useRef<HTMLDivElement>(null);
 	const lastFetchRef = useRef<Date | null>(null);
+
 	const [hoveredTimestamp, setHoveredTimestamp] = useState<string | null>(null);
 	const [hoveredRect, setHoveredRect] = useState<{ x: number; y: number } | null>(null);
 	const [isDragging, setIsDragging] = useState(false);
@@ -943,8 +944,6 @@ export const TimelineSlider = ({
 								dir="rtl"
 								style={{
 									// borderLeft removed — caused visible white lines between groups
-									// DEBUG: red outline on groups with topDomains
-									...(group.topDomains?.length ? { outline: '2px solid red' } : {}),
 								}}
 							>
 								{/* Vertical stacked icons - favicons for browser groups, app icons otherwise */}

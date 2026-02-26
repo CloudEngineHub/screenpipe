@@ -201,6 +201,8 @@ struct ResolvedPreset {
     url: Option<String>,
     /// API key for the provider (custom / openai BYOK).
     api_key: Option<String>,
+    /// System prompt from the preset (injected before the pipe body).
+    prompt: Option<String>,
 }
 
 /// Read `~/.screenpipe/store.bin` and find the preset by id.
@@ -274,11 +276,18 @@ fn resolve_preset(pipes_dir: &Path, preset_id: &str) -> Option<ResolvedPreset> {
         .filter(|s| !s.is_empty())
         .map(|s| s.to_string());
 
+    let prompt = preset
+        .get("prompt")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string());
+
     Some(ResolvedPreset {
         model,
         provider,
         url,
         api_key,
+        prompt,
     })
 }
 
@@ -546,58 +555,90 @@ impl PipeManager {
 
     /// List all pipes with status.
     pub async fn list_pipes(&self) -> Vec<PipeStatus> {
-        let pipes = self.pipes.lock().await;
-        let logs = self.logs.lock().await;
-        let running = self.running.lock().await;
-        let exec_ids = self.running_execution_ids.lock().await;
+        // Pass 1: collect pipe data while holding locks
+        let partial: Vec<(String, PipeStatus)> = {
+            let pipes = self.pipes.lock().await;
+            let logs = self.logs.lock().await;
+            let running = self.running.lock().await;
+            let exec_ids = self.running_execution_ids.lock().await;
 
-        let mut result = Vec::new();
-        for (name, (config, body, raw)) in pipes.iter() {
-            let pipe_logs = logs.get(name);
-            let last_log = pipe_logs.and_then(|l| l.back());
-            let last_error = last_log.filter(|l| !l.success).map(|l| l.stderr.clone());
-            let mut cfg = config.clone();
-            cfg.name = name.clone(); // always use directory name
-            result.push(PipeStatus {
-                config: cfg,
-                last_run: last_log.map(|l| l.finished_at),
-                last_success: last_log.map(|l| l.success),
-                is_running: running.contains_key(name),
-                prompt_body: body.clone(),
-                raw_content: raw.clone(),
-                last_error,
-                current_execution_id: exec_ids.get(name).copied(),
-                consecutive_failures: 0,
-            });
+            pipes
+                .iter()
+                .map(|(name, (config, body, raw))| {
+                    let pipe_logs = logs.get(name);
+                    let last_log = pipe_logs.and_then(|l| l.back());
+                    let last_error =
+                        last_log.filter(|l| !l.success).map(|l| l.stderr.clone());
+                    let mut cfg = config.clone();
+                    cfg.name = name.clone();
+                    let status = PipeStatus {
+                        config: cfg,
+                        last_run: last_log.map(|l| l.finished_at),
+                        last_success: last_log.map(|l| l.success),
+                        is_running: running.contains_key(name),
+                        prompt_body: body.clone(),
+                        raw_content: raw.clone(),
+                        last_error,
+                        current_execution_id: exec_ids.get(name).copied(),
+                        consecutive_failures: 0,
+                    };
+                    (name.clone(), status)
+                })
+                .collect()
+        };
+        // locks released
+
+        // Pass 2: query DB for scheduler state (consecutive_failures)
+        let mut result = Vec::with_capacity(partial.len());
+        for (name, mut status) in partial {
+            if let Some(ref store) = self.store {
+                if let Ok(Some(state)) = store.get_scheduler_state(&name).await {
+                    status.consecutive_failures = state.consecutive_failures;
+                }
+            }
+            result.push(status);
         }
         result
     }
 
     /// Get a single pipe's status.
     pub async fn get_pipe(&self, name: &str) -> Option<PipeStatus> {
-        let pipes = self.pipes.lock().await;
-        let logs = self.logs.lock().await;
-        let running = self.running.lock().await;
-        let exec_ids = self.running_execution_ids.lock().await;
+        // Pass 1: collect pipe data while holding locks
+        let mut status = {
+            let pipes = self.pipes.lock().await;
+            let logs = self.logs.lock().await;
+            let running = self.running.lock().await;
+            let exec_ids = self.running_execution_ids.lock().await;
 
-        pipes.get(name).map(|(config, body, raw)| {
-            let pipe_logs = logs.get(name);
-            let last_log = pipe_logs.and_then(|l| l.back());
-            let last_error = last_log.filter(|l| !l.success).map(|l| l.stderr.clone());
-            let mut cfg = config.clone();
-            cfg.name = name.to_string(); // always use directory name
-            PipeStatus {
-                config: cfg,
-                last_run: last_log.map(|l| l.finished_at),
-                last_success: last_log.map(|l| l.success),
-                is_running: running.contains_key(name),
-                prompt_body: body.clone(),
-                raw_content: raw.clone(),
-                last_error,
-                current_execution_id: exec_ids.get(name).copied(),
-                consecutive_failures: 0,
+            pipes.get(name).map(|(config, body, raw)| {
+                let pipe_logs = logs.get(name);
+                let last_log = pipe_logs.and_then(|l| l.back());
+                let last_error =
+                    last_log.filter(|l| !l.success).map(|l| l.stderr.clone());
+                let mut cfg = config.clone();
+                cfg.name = name.to_string();
+                PipeStatus {
+                    config: cfg,
+                    last_run: last_log.map(|l| l.finished_at),
+                    last_success: last_log.map(|l| l.success),
+                    is_running: running.contains_key(name),
+                    prompt_body: body.clone(),
+                    raw_content: raw.clone(),
+                    last_error,
+                    current_execution_id: exec_ids.get(name).copied(),
+                    consecutive_failures: 0,
+                }
+            })
+        }?;
+        // locks released
+
+        // Pass 2: query DB for scheduler state
+        if let Some(ref store) = self.store {
+            if let Ok(Some(state)) = store.get_scheduler_state(name).await {
+                status.consecutive_failures = state.consecutive_failures;
             }
-        })
+        }
+        Some(status)
     }
 
     /// Get recent logs for a pipe.
@@ -678,7 +719,7 @@ impl PipeManager {
         }
 
         // Resolve preset
-        let (run_model, run_provider, run_provider_url, run_api_key) =
+        let (run_model, run_provider, run_provider_url, run_api_key, preset_prompt) =
             if let Some(ref preset_id) = config.preset {
                 match resolve_preset(&self.pipes_dir, preset_id) {
                     Some(resolved) => (
@@ -686,11 +727,12 @@ impl PipeManager {
                         resolved.provider,
                         resolved.url,
                         resolved.api_key,
+                        resolved.prompt,
                     ),
-                    None => (config.model.clone(), config.provider.clone(), None, None),
+                    None => (config.model.clone(), config.provider.clone(), None, None, None),
                 }
             } else {
-                (config.model.clone(), config.provider.clone(), None, None)
+                (config.model.clone(), config.provider.clone(), None, None, None)
             };
 
         // Create DB execution row
@@ -713,7 +755,7 @@ impl PipeManager {
             None
         };
 
-        let prompt = self.render_prompt(&config, &body);
+        let prompt = self.render_prompt(&config, &body, preset_prompt.as_deref());
         let pipe_dir = self.pipes_dir.clone().join(name);
         let pipe_name = name.to_string();
 
@@ -986,34 +1028,34 @@ impl PipeManager {
         let pipe_dir = self.pipes_dir.join(name);
 
         // Resolve preset → model/provider overrides
-        let (run_model, run_provider, run_provider_url, run_api_key) = if let Some(ref preset_id) =
-            config.preset
-        {
-            match resolve_preset(&self.pipes_dir, preset_id) {
-                Some(resolved) => {
-                    info!(
-                        "pipe '{}': using preset '{}' → model={}, provider={:?}",
-                        name, preset_id, resolved.model, resolved.provider
-                    );
-                    (
-                        resolved.model,
-                        resolved.provider,
-                        resolved.url,
-                        resolved.api_key,
-                    )
+        let (run_model, run_provider, run_provider_url, run_api_key, preset_prompt) =
+            if let Some(ref preset_id) = config.preset {
+                match resolve_preset(&self.pipes_dir, preset_id) {
+                    Some(resolved) => {
+                        info!(
+                            "pipe '{}': using preset '{}' → model={}, provider={:?}",
+                            name, preset_id, resolved.model, resolved.provider
+                        );
+                        (
+                            resolved.model,
+                            resolved.provider,
+                            resolved.url,
+                            resolved.api_key,
+                            resolved.prompt,
+                        )
+                    }
+                    None => {
+                        return Err(anyhow!(
+                            "pipe '{}': preset '{}' not found in settings — \
+                             create the preset in Settings → AI or remove the \
+                             'preset: {}' line from the pipe config",
+                            name, preset_id, preset_id
+                        ));
+                    }
                 }
-                None => {
-                    return Err(anyhow!(
-                        "pipe '{}': preset '{}' not found in settings — \
-                         create the preset in Settings → AI or remove the \
-                         'preset: {}' line from the pipe config",
-                        name, preset_id, preset_id
-                    ));
-                }
-            }
-        } else {
-            (config.model.clone(), config.provider.clone(), None, None)
-        };
+            } else {
+                (config.model.clone(), config.provider.clone(), None, None, None)
+            };
 
         // Create DB execution row
         let exec_id = if let Some(ref store) = self.store {
@@ -1037,7 +1079,7 @@ impl PipeManager {
         };
 
         // Build prompt with context header
-        let prompt = self.render_prompt(&config, &body);
+        let prompt = self.render_prompt(&config, &body, preset_prompt.as_deref());
 
         // Create a channel so the executor can report PID immediately
         let (pid_tx, pid_rx) = tokio::sync::oneshot::channel::<u32>();
@@ -1606,25 +1648,25 @@ impl PipeManager {
                     }
 
                     // Resolve preset → model/provider overrides (same as run_pipe)
-                    let (model, provider, provider_url, api_key) = if let Some(ref preset_id) =
-                        config.preset
-                    {
-                        match resolve_preset(&pipes_dir, preset_id) {
-                            Some(resolved) => {
-                                info!("scheduler: pipe '{}' using preset '{}' → model={}, provider={:?}",
-                                    name, preset_id, resolved.model, resolved.provider);
-                                (
-                                    resolved.model,
-                                    resolved.provider,
-                                    resolved.url,
-                                    resolved.api_key,
-                                )
+                    let (model, provider, provider_url, api_key, preset_prompt) =
+                        if let Some(ref preset_id) = config.preset {
+                            match resolve_preset(&pipes_dir, preset_id) {
+                                Some(resolved) => {
+                                    info!("scheduler: pipe '{}' using preset '{}' → model={}, provider={:?}",
+                                        name, preset_id, resolved.model, resolved.provider);
+                                    (
+                                        resolved.model,
+                                        resolved.provider,
+                                        resolved.url,
+                                        resolved.api_key,
+                                        resolved.prompt,
+                                    )
+                                }
+                                None => (config.model.clone(), config.provider.clone(), None, None, None),
                             }
-                            None => (config.model.clone(), config.provider.clone(), None, None),
-                        }
-                    } else {
-                        (config.model.clone(), config.provider.clone(), None, None)
-                    };
+                        } else {
+                            (config.model.clone(), config.provider.clone(), None, None, None)
+                        };
 
                     // Pre-configure pi with the pipe's provider
                     if config.agent == "pi" {
@@ -1639,7 +1681,7 @@ impl PipeManager {
                         }
                     }
 
-                    let prompt = render_prompt_with_port(config, body, api_port);
+                    let prompt = render_prompt_with_port(config, body, api_port, preset_prompt.as_deref());
                     let pipe_dir = pipes_dir.join(name);
                     let pipe_name = name.clone();
                     let logs_ref = logs.clone();
@@ -1992,8 +2034,13 @@ impl PipeManager {
     // -----------------------------------------------------------------------
 
     /// Build the full prompt by prepending context header to the pipe body.
-    fn render_prompt(&self, config: &PipeConfig, body: &str) -> String {
-        render_prompt_with_port(config, body, self.api_port)
+    fn render_prompt(
+        &self,
+        config: &PipeConfig,
+        body: &str,
+        system_prompt: Option<&str>,
+    ) -> String {
+        render_prompt_with_port(config, body, self.api_port, system_prompt)
     }
 
     async fn append_log(&self, name: &str, log: &PipeRunLog) {
@@ -2055,7 +2102,12 @@ pub fn serialize_pipe(config: &PipeConfig, body: &str) -> Result<String> {
 ///
 /// The header gives the LLM all the context it needs (time range, date,
 /// timezone). No template variables needed in the prompt body.
-fn render_prompt_with_port(config: &PipeConfig, body: &str, api_port: u16) -> String {
+fn render_prompt_with_port(
+    config: &PipeConfig,
+    body: &str,
+    api_port: u16,
+    system_prompt: Option<&str>,
+) -> String {
     let now = Local::now();
     let date = now.format("%Y-%m-%d").to_string();
     let timezone = now.format("%Z").to_string();
@@ -2072,6 +2124,15 @@ fn render_prompt_with_port(config: &PipeConfig, body: &str, api_port: u16) -> St
     .to_string();
     let end_time = now.to_utc().format("%Y-%m-%dT%H:%M:%SZ").to_string();
 
+    let mut prompt = String::new();
+
+    // Prepend preset system prompt if present
+    if let Some(sp) = system_prompt {
+        prompt.push_str("System prompt:\n");
+        prompt.push_str(sp);
+        prompt.push_str("\n\n");
+    }
+
     let header = format!(
         r#"Time range: {start_time} to {end_time}
 Date: {date}
@@ -2081,7 +2142,10 @@ Screenpipe API: http://localhost:{api_port}
 "#
     );
 
-    format!("{}\n{}", header, body)
+    prompt.push_str(&header);
+    prompt.push('\n');
+    prompt.push_str(body);
+    prompt
 }
 
 // ---------------------------------------------------------------------------
@@ -2415,7 +2479,7 @@ mod tests {
             preset: None,
             config: HashMap::new(),
         };
-        let prompt = render_prompt_with_port(&config, "body text", 3031);
+        let prompt = render_prompt_with_port(&config, "body text", 3031, None);
         assert!(prompt.contains("http://localhost:3031"));
         assert!(!prompt.contains("http://localhost:3030"));
         assert!(prompt.contains("body text"));
@@ -2433,8 +2497,48 @@ mod tests {
             preset: None,
             config: HashMap::new(),
         };
-        let prompt = render_prompt_with_port(&config, "hello", 3030);
+        let prompt = render_prompt_with_port(&config, "hello", 3030, None);
         assert!(prompt.contains("http://localhost:3030"));
+    }
+
+    #[test]
+    fn test_render_prompt_with_system_prompt() {
+        let config = PipeConfig {
+            name: "test".to_string(),
+            schedule: "every 1h".to_string(),
+            enabled: true,
+            agent: "pi".to_string(),
+            model: "test-model".to_string(),
+            provider: None,
+            preset: None,
+            config: HashMap::new(),
+        };
+        let prompt = render_prompt_with_port(
+            &config,
+            "body text",
+            3030,
+            Some("You are a helpful assistant"),
+        );
+        assert!(prompt.starts_with("System prompt:\nYou are a helpful assistant\n\n"));
+        assert!(prompt.contains("body text"));
+        assert!(prompt.contains("http://localhost:3030"));
+    }
+
+    #[test]
+    fn test_render_prompt_without_system_prompt() {
+        let config = PipeConfig {
+            name: "test".to_string(),
+            schedule: "every 1h".to_string(),
+            enabled: true,
+            agent: "pi".to_string(),
+            model: "test-model".to_string(),
+            provider: None,
+            preset: None,
+            config: HashMap::new(),
+        };
+        let prompt = render_prompt_with_port(&config, "body text", 3030, None);
+        assert!(!prompt.contains("System prompt:"));
+        assert!(prompt.contains("body text"));
     }
 
     // -- PipeExecution / SchedulerState serde roundtrip ----------------------

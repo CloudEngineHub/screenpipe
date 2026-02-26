@@ -21,9 +21,10 @@ export function extractDomain(url: string): string | null {
 
 /**
  * Google Favicon API URL — uses gstatic directly to avoid 301 redirect.
+ * Always fetches 64px for crisp rendering on retina displays.
  */
-export function getFaviconUrl(domain: string, size = 32): string {
-	return `https://t2.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE,URL&url=http://${encodeURIComponent(domain)}&size=${size}`;
+export function getFaviconUrl(domain: string): string {
+	return `https://t2.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE,URL&url=http://${encodeURIComponent(domain)}&size=64`;
 }
 
 interface FaviconImgProps {
@@ -58,7 +59,7 @@ export function FaviconImg({ domain, fallbackAppName, size = 20, className }: Fa
 	return (
 		// eslint-disable-next-line @next/next/no-img-element
 		<img
-			src={getFaviconUrl(domain, size >= 32 ? 64 : 32)}
+			src={getFaviconUrl(domain)}
 			width={size}
 			height={size}
 			className={className ?? "rounded-sm object-contain"}
