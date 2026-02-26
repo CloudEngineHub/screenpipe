@@ -367,6 +367,7 @@ fn ensure_screenpipe_skill(project_dir: &str) -> Result<(), String> {
     let skills: &[(&str, &str)] = &[
         ("screenpipe-search", include_str!("../assets/skills/screenpipe-search/SKILL.md")),
         ("screenpipe-pipe-creator", include_str!("../assets/skills/screenpipe-pipe-creator/SKILL.md")),
+        ("screenpipe-media", include_str!("../assets/skills/screenpipe-media/SKILL.md")),
     ];
 
     for (name, content) in skills {

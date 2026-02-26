@@ -12,7 +12,8 @@ import { SelectableTextLayer, getSelectableLayerText, clearSelectableLayerSelect
 import { RegionOcrOverlay } from "@/components/rewind/region-ocr-overlay";
 import { useSearchHighlight } from "@/lib/hooks/use-search-highlight";
 import { useSettings } from "@/lib/hooks/use-settings";
-import { ImageOff, ChevronLeft, ChevronRight, Copy, ImageIcon, Link2, MessageCircle, ExternalLink, Type, Lock, Globe } from "lucide-react";
+import { ImageOff, ChevronLeft, ChevronRight, Copy, ImageIcon, Link2, MessageCircle, ExternalLink, Type, Lock, Globe, Zap } from "lucide-react";
+import { usePipes, type TemplatePipe } from "@/lib/hooks/use-pipes";
 import posthog from "posthog-js";
 import { toast } from "@/components/ui/use-toast";
 import { commands } from "@/lib/utils/tauri";
@@ -97,6 +98,7 @@ export const CurrentFrameTimeline: FC<CurrentFrameTimelineProps> = ({
 }) => {
 	const { isMac } = usePlatform();
 	const { settings } = useSettings();
+	const { templatePipes } = usePipes();
 	const { highlightTerms, dismissed: highlightDismissed, clear: clearHighlight } = useSearchHighlight();
 	const [isLoading, setIsLoading] = useState(true);
 	const [contextMenuOpen, setContextMenuOpen] = useState(false);
@@ -601,6 +603,17 @@ export const CurrentFrameTimeline: FC<CurrentFrameTimelineProps> = ({
 		toast({ title: "ask about this frame", description: "chat opened with frame context" });
 	}, [debouncedFrame, device, frameContext?.text, textPositions, currentFrame]);
 
+	const runPipeWithContext = useCallback(async (pipe: TemplatePipe) => {
+		if (!debouncedFrame?.frameId || !device) return;
+		const rawText = frameContext?.text || textPositions.map((p) => p.text).join(" ");
+		const textSnippet = rawText.slice(0, 300);
+		const context = `Context from timeline frame:\n${device.metadata?.app_name || "?"} - ${device.metadata?.window_name || "?"}\nTime: ${currentFrame?.timestamp || "?"}\n\nText:\n${textSnippet}${textSnippet.length >= 300 ? "…" : ""}`;
+		await commands.showWindow("Chat");
+		await new Promise((r) => setTimeout(r, 150));
+		await emit("chat-prefill", { context, prompt: pipe.prompt, autoSend: true });
+		toast({ title: `${pipe.icon} ${pipe.title}`, description: "running pipe with frame context" });
+	}, [debouncedFrame, device, frameContext?.text, textPositions, currentFrame]);
+
 	// Context menu: close on outside click
 	useEffect(() => {
 		if (!contextMenuOpen) return;
@@ -818,6 +831,28 @@ export const CurrentFrameTimeline: FC<CurrentFrameTimelineProps> = ({
 						<MessageCircle className="w-4 h-4 shrink-0" />
 						ask about this frame
 					</button>
+					{templatePipes.length > 0 && (
+						<>
+							<div className="h-px bg-border/30 my-0.5" />
+							<div className="px-3 py-1 text-[10px] text-muted-foreground uppercase tracking-wider">
+								run pipe
+							</div>
+							{templatePipes.map((pipe) => (
+								<button
+									key={pipe.name}
+									type="button"
+									className="block w-full text-left px-3 py-1.5 -my-px border-0 outline-none ring-0 bg-transparent hover:bg-foreground hover:text-background text-foreground flex items-center gap-2 cursor-pointer transition-colors duration-150"
+									onClick={() => {
+										runPipeWithContext(pipe);
+										setContextMenuOpen(false);
+									}}
+								>
+									<span className="w-4 h-4 shrink-0 text-center text-xs leading-4">{pipe.icon}</span>
+									<span className="truncate">{pipe.title}</span>
+								</button>
+							))}
+						</>
+					)}
 				</div>
 			)}
 

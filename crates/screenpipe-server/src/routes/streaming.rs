@@ -10,6 +10,7 @@ use axum::{
     },
     http::StatusCode,
     response::{IntoResponse, Response},
+    Json,
 };
 
 use chrono::{DateTime, Utc};
@@ -920,6 +921,205 @@ async fn handle_video_export(
 }
 
 use crate::video_utils::extract_high_quality_frame;
+
+// --- POST /frames/export ---
+
+#[derive(Debug, Deserialize)]
+pub struct VideoExportPostRequest {
+    frame_ids: Option<Vec<i64>>,
+    start_time: Option<DateTime<Utc>>,
+    end_time: Option<DateTime<Utc>>,
+    #[serde(default = "default_post_fps")]
+    fps: f64,
+}
+
+fn default_post_fps() -> f64 {
+    1.0
+}
+
+#[derive(Debug, Serialize)]
+pub struct VideoExportPostResponse {
+    pub file_path: String,
+    pub frame_count: usize,
+    pub duration_secs: f64,
+    pub file_size_bytes: u64,
+}
+
+const MAX_EXPORT_FRAMES: usize = 10_000;
+
+pub async fn handle_video_export_post(
+    State(state): State<Arc<AppState>>,
+    Json(payload): Json<VideoExportPostRequest>,
+) -> Response {
+    // Resolve frame IDs: either from payload or by querying the time range
+    let frame_ids = match (payload.frame_ids, payload.start_time, payload.end_time) {
+        (Some(ids), _, _) if !ids.is_empty() => ids,
+        (_, Some(start), Some(end)) => {
+            match state.db.get_frame_ids_in_range(start, end).await {
+                Ok(ids) => ids,
+                Err(e) => {
+                    return (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(serde_json::json!({ "error": format!("DB error: {}", e) })),
+                    )
+                        .into_response();
+                }
+            }
+        }
+        _ => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({
+                    "error": "Provide either frame_ids or both start_time and end_time"
+                })),
+            )
+                .into_response();
+        }
+    };
+
+    if frame_ids.is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({ "error": "No frames found in the given range" })),
+        )
+            .into_response();
+    }
+
+    if frame_ids.len() > MAX_EXPORT_FRAMES {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({
+                "error": format!(
+                    "Too many frames ({}). Maximum is {}. Use a shorter time range or lower fps.",
+                    frame_ids.len(),
+                    MAX_EXPORT_FRAMES
+                )
+            })),
+        )
+            .into_response();
+    }
+
+    // Create exports directory
+    let exports_dir = dirs::home_dir()
+        .unwrap_or_default()
+        .join(".screenpipe")
+        .join("exports");
+    if let Err(e) = tokio::fs::create_dir_all(&exports_dir).await {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": format!("Failed to create exports dir: {}", e) })),
+        )
+            .into_response();
+    }
+
+    let temp_dir = match tempfile::tempdir() {
+        Ok(d) => d,
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": format!("Failed to create temp dir: {}", e) })),
+            )
+                .into_response();
+        }
+    };
+    let frames_dir = temp_dir.path().join("frames");
+    if let Err(e) = tokio::fs::create_dir_all(&frames_dir).await {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": format!("Failed to create frames dir: {}", e) })),
+        )
+            .into_response();
+    }
+
+    // Extract frames
+    let mut frames = Vec::new();
+    for frame_id in &frame_ids {
+        match state.db.get_frame(*frame_id).await {
+            Ok(Some((file_path, offset_index, is_snapshot))) => {
+                if is_snapshot {
+                    frames.push(FrameContent {
+                        file_path,
+                        timestamp: Some(chrono::Utc::now()),
+                        window_name: None,
+                        app_name: None,
+                        ocr_results: None,
+                        tags: None,
+                    });
+                } else {
+                    match extract_high_quality_frame(&file_path, offset_index, &frames_dir).await {
+                        Ok(frame_path) => {
+                            frames.push(FrameContent {
+                                file_path: frame_path,
+                                timestamp: Some(chrono::Utc::now()),
+                                window_name: None,
+                                app_name: None,
+                                ocr_results: None,
+                                tags: None,
+                            });
+                        }
+                        Err(e) => {
+                            warn!("Skipping frame {}: {}", frame_id, e);
+                        }
+                    }
+                }
+            }
+            Ok(None) => {
+                warn!("Frame {} not found", frame_id);
+            }
+            Err(e) => {
+                warn!("DB error for frame {}: {}", frame_id, e);
+            }
+        }
+    }
+
+    if frames.is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({ "error": "No valid frames could be extracted" })),
+        )
+            .into_response();
+    }
+
+    let output_filename = format!(
+        "screenpipe_export_{}.mp4",
+        chrono::Utc::now().format("%Y%m%d_%H%M%S")
+    );
+    let output_path = exports_dir.join(&output_filename);
+
+    let frame_count = frames.len();
+    let duration_secs = frame_count as f64 / payload.fps;
+
+    match write_frames_to_video(&frames, output_path.to_str().unwrap(), payload.fps).await {
+        Ok(_) => {
+            let file_size_bytes = tokio::fs::metadata(&output_path)
+                .await
+                .map(|m| m.len())
+                .unwrap_or(0);
+
+            // Clean up temp dir
+            let _ = tokio::fs::remove_dir_all(temp_dir.path()).await;
+
+            (
+                StatusCode::OK,
+                Json(serde_json::json!(VideoExportPostResponse {
+                    file_path: output_path.to_string_lossy().to_string(),
+                    frame_count,
+                    duration_secs,
+                    file_size_bytes,
+                })),
+            )
+                .into_response()
+        }
+        Err(e) => {
+            let _ = tokio::fs::remove_dir_all(temp_dir.path()).await;
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": format!("Failed to create video: {}", e) })),
+            )
+                .into_response()
+        }
+    }
+}
 
 #[cfg(test)]
 mod tests {

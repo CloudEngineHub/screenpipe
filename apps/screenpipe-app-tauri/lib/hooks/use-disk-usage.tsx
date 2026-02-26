@@ -3,10 +3,17 @@
 import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 
+export interface MonitorUsage {
+  name: string;
+  size: string;
+  size_bytes: number;
+}
+
 export interface DiskUsedByMedia {
   videos_size: string;
   audios_size: string;
   total_media_size: string;
+  monitors: MonitorUsage[];
 }
 
 export interface DiskUsedByOther {
@@ -20,6 +27,9 @@ export interface DiskUsage {
   total_data_size: string;
   total_cache_size: string;
   available_space: string;
+  recording_since: string | null;
+  total_data_bytes: number;
+  available_space_bytes: number;
 }
 
 export function useDiskUsage() {

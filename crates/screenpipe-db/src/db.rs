@@ -2075,6 +2075,22 @@ impl DatabaseManager {
         .flatten())
     }
 
+    /// Get frame IDs within a time range. Lightweight query for video export.
+    pub async fn get_frame_ids_in_range(
+        &self,
+        start: DateTime<Utc>,
+        end: DateTime<Utc>,
+    ) -> Result<Vec<i64>, SqlxError> {
+        let ids = sqlx::query_scalar::<_, i64>(
+            "SELECT id FROM frames WHERE timestamp >= ?1 AND timestamp <= ?2 ORDER BY timestamp ASC",
+        )
+        .bind(start)
+        .bind(end)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(ids)
+    }
+
     /// Get frames near a given frame_id for validation/fallback.
     /// Returns `(frame_id, file_path, offset_index, timestamp, is_snapshot)`.
     /// Handles both snapshot frames (direct JPEG) and legacy video-chunk frames.

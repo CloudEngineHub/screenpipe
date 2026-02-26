@@ -43,6 +43,7 @@ import {
 import { useAutoSuggestions } from "@/lib/hooks/use-auto-suggestions";
 import { SummaryCards } from "@/components/chat/summary-cards";
 import { type CustomTemplate } from "@/lib/summary-templates";
+import { usePipes } from "@/lib/hooks/use-pipes";
 
 const SCREENPIPE_API = "http://localhost:3030";
 
@@ -594,6 +595,7 @@ export function StandaloneChat({ className }: { className?: string } = {}) {
   const { isMac } = usePlatform();
   const { items: appItems } = useSqlAutocomplete("app");
   const { suggestions: autoSuggestions } = useAutoSuggestions();
+  const { templatePipes, loading: pipesLoading } = usePipes();
 
   // Custom summary templates (persisted in settings)
   const [customTemplates, setCustomTemplates] = useState<CustomTemplate[]>([]);
@@ -2477,6 +2479,8 @@ export function StandaloneChat({ className }: { className?: string } = {}) {
             onSaveCustomTemplate={saveCustomTemplate}
             onDeleteCustomTemplate={deleteCustomTemplate}
             userName={settings.userName}
+            templatePipes={templatePipes}
+            pipesLoading={pipesLoading}
           />
         )}
         <AnimatePresence mode="popLayout">

@@ -1545,8 +1545,9 @@ async fn main() {
 
                     let block = ConcreteBlock::new(move |event: *mut Object| -> *mut Object {
                         let magnification: f64 = unsafe { msg_send![event, magnification] };
+                        tracing::debug!("magnify event: {magnification}");
                         let _ = app_for_magnify.emit("native-magnify", magnification);
-                        std::ptr::null_mut() // consume event — don't let WKWebView handle it
+                        event // pass through — returning nil breaks event delivery entirely
                     });
                     let block = block.copy();
                     unsafe {

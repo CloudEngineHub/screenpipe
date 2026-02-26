@@ -14,6 +14,19 @@ pub struct DiskUsage {
     pub total_data_size: String,
     pub total_cache_size: String,
     pub available_space: String,
+    /// Oldest file date in data dir (ISO 8601), for "recording since" display.
+    pub recording_since: Option<String>,
+    /// Raw total data bytes for frontend calculations.
+    pub total_data_bytes: u64,
+    /// Raw available space bytes for frontend calculations.
+    pub available_space_bytes: u64,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct MonitorUsage {
+    pub name: String,
+    pub size: String,
+    pub size_bytes: u64,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -21,6 +34,7 @@ pub struct DiskUsedByMedia {
     pub videos_size: String,
     pub audios_size: String,
     pub total_media_size: String,
+    pub monitors: Vec<MonitorUsage>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -125,15 +139,15 @@ pub async fn disk_usage(
         "Calculating total data size for: {}",
         screenpipe_dir.display()
     );
-    let total_data_size = match directory_size(screenpipe_dir).map_err(|e| e.to_string())? {
-        Some(size) => {
-            info!("Total data size: {} bytes", size);
-            readable(size)
-        }
-        None => {
-            warn!("Could not calculate total data size");
-            "---".to_string()
-        }
+    let total_data_size_bytes = directory_size(screenpipe_dir)
+        .map_err(|e| e.to_string())?
+        .unwrap_or(0);
+    let total_data_size = if total_data_size_bytes > 0 {
+        info!("Total data size: {} bytes", total_data_size_bytes);
+        readable(total_data_size_bytes)
+    } else {
+        warn!("Could not calculate total data size");
+        "---".to_string()
     };
 
     // Calculate cache size
@@ -149,34 +163,38 @@ pub async fn disk_usage(
         }
     };
 
-    // Calculate individual media file sizes recursively
+    // Calculate individual media file sizes recursively, tracking per-monitor usage
+    let mut monitor_sizes: std::collections::HashMap<String, u64> = std::collections::HashMap::new();
+
     if data_dir.exists() {
         info!("Scanning data directory recursively for media files");
         fn scan_media_files(
             dir: &Path,
             video_size: &mut u64,
             audio_size: &mut u64,
+            monitor_sizes: &mut std::collections::HashMap<String, u64>,
         ) -> io::Result<()> {
+            // Regex to extract monitor name prefix before the timestamp
+            // Matches: "monitor_1_2026-..." or "Display 3 (output)_2026-..."
+            let monitor_re = regex::Regex::new(
+                r"^(.+?)_\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}\.\w+$"
+            ).ok();
+
             for entry in fs::read_dir(dir)? {
                 let entry = entry?;
                 let path = entry.path();
                 if path.is_dir() {
-                    // Recursively scan subdirectories
-                    scan_media_files(&path, video_size, audio_size)?;
+                    scan_media_files(&path, video_size, audio_size, monitor_sizes)?;
                 } else if path.is_file() {
                     let size = entry.metadata()?.len();
                     let file_name = path.file_name().unwrap().to_string_lossy().to_string();
 
-                    // Classify files based on extension and name patterns
                     let extension = path
                         .extension()
                         .and_then(|ext| ext.to_str())
                         .unwrap_or("")
                         .to_lowercase();
 
-                    // For .mp4 files, check filename to determine if audio or video
-                    // Audio devices (microphones) save as "DeviceName (input)_timestamp.mp4"
-                    // Screen recordings save as "monitor_N_timestamp.mp4"
                     if extension == "mp4" {
                         if file_name.contains("(input)")
                             || file_name.contains("(output)")
@@ -186,18 +204,22 @@ pub async fn disk_usage(
                             *audio_size += size;
                         } else {
                             *video_size += size;
+                            // Track per-monitor
+                            if let Some(ref re) = monitor_re {
+                                if let Some(caps) = re.captures(&file_name) {
+                                    let name = caps[1].to_string();
+                                    *monitor_sizes.entry(name).or_insert(0) += size;
+                                }
+                            }
                         }
                     } else {
                         match extension.as_str() {
-                            // Audio file extensions
                             "mp3" | "wav" | "flac" | "aac" | "ogg" | "m4a" | "wma" => {
                                 *audio_size += size;
                             }
-                            // Video file extensions
                             "avi" | "mkv" | "mov" | "wmv" | "flv" | "webm" | "m4v" => {
                                 *video_size += size;
                             }
-                            // Ignore non-media files (db, json, log, etc.)
                             _ => {}
                         }
                     }
@@ -206,13 +228,13 @@ pub async fn disk_usage(
             Ok(())
         }
 
-        if let Err(e) = scan_media_files(&data_dir, &mut total_video_size, &mut total_audio_size) {
+        if let Err(e) = scan_media_files(&data_dir, &mut total_video_size, &mut total_audio_size, &mut monitor_sizes) {
             warn!("Error scanning media files: {}", e);
         }
 
         info!(
-            "Video files total: {} bytes, Audio files total: {} bytes",
-            total_video_size, total_audio_size
+            "Video files total: {} bytes, Audio files total: {} bytes, monitors: {:?}",
+            total_video_size, total_audio_size, monitor_sizes.keys().collect::<Vec<_>>()
         );
     } else {
         warn!("Data directory does not exist: {}", data_dir.display());
@@ -270,11 +292,45 @@ pub async fn disk_usage(
         available
     };
 
+    // Find oldest recording date by parsing filenames (*_YYYY-MM-DD_HH-MM-SS.mp4)
+    // More reliable than filesystem timestamps which can reflect copy/move time.
+    let recording_since = if data_dir.exists() {
+        let date_re = regex::Regex::new(r"(\d{4}-\d{2}-\d{2})_\d{2}-\d{2}-\d{2}\.\w+$").ok();
+        let mut oldest: Option<String> = None;
+        if let (Some(re), Ok(entries)) = (&date_re, fs::read_dir(&data_dir)) {
+            for entry in entries.flatten() {
+                let name = entry.file_name().to_string_lossy().to_string();
+                if let Some(caps) = re.captures(&name) {
+                    let date = caps[1].to_string();
+                    oldest = Some(match oldest {
+                        Some(prev) if date < prev => date,
+                        Some(prev) => prev,
+                        None => date,
+                    });
+                }
+            }
+        }
+        oldest
+    } else {
+        None
+    };
+
+    let mut monitors: Vec<MonitorUsage> = monitor_sizes
+        .into_iter()
+        .map(|(name, bytes)| MonitorUsage {
+            name,
+            size: readable(bytes),
+            size_bytes: bytes,
+        })
+        .collect();
+    monitors.sort_by(|a, b| b.size_bytes.cmp(&a.size_bytes));
+
     let disk_usage = DiskUsage {
         media: DiskUsedByMedia {
             videos_size: videos_size_str,
             audios_size: audios_size_str,
             total_media_size: total_media_size_str,
+            monitors,
         },
         other: DiskUsedByOther {
             database_size: readable(database_size),
@@ -283,6 +339,9 @@ pub async fn disk_usage(
         total_data_size,
         total_cache_size,
         available_space: readable(available_space),
+        recording_since,
+        total_data_bytes: total_data_size_bytes,
+        available_space_bytes: available_space,
     };
 
     info!("Disk usage calculation completed: {:?}", disk_usage);

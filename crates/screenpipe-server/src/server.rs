@@ -39,7 +39,7 @@ use crate::{
             mark_as_hallucination_handler, merge_speakers_handler, reassign_speaker_handler,
             search_speakers_handler, undo_speaker_reassign_handler, update_speaker_handler,
         },
-        streaming::{handle_video_export_ws, stream_frames_handler},
+        streaming::{handle_video_export_post, handle_video_export_ws, stream_frames_handler},
         websocket::{ws_events_handler, ws_health_handler, ws_metrics_handler},
     },
     sync_api::{self, SyncState},
@@ -505,7 +505,7 @@ impl SCServer {
             .route("/ws/events", get(ws_events_handler))
             .route("/ws/health", get(ws_health_handler))
             .route("/ws/metrics", get(ws_metrics_handler))
-            .route("/frames/export", get(handle_video_export_ws))
+            .route("/frames/export", get(handle_video_export_ws).post(handle_video_export_post))
             .with_state(app_state.clone())
             .layer(axum::middleware::from_fn(
                 move |req: axum::extract::Request, next: axum::middleware::Next| {

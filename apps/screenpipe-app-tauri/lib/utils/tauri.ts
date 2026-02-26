@@ -48,18 +48,18 @@ async checkArcInstalled() : Promise<boolean> {
 },
 /**
  * Check if Automation permission for Arc is already granted.
- * If Arc is running, tests the actual automation via osascript (TCC.db can have
- * stale entries from previous builds with different code-signing identities).
- * Falls back to TCC.db query when Arc is not running.
+ * In production (.app bundle): uses direct FFI check against the app's own TCC entry.
+ * In dev mode: always returns true — dev builds inherit Terminal's permissions and
+ * the modal cannot manage Arc automation for a non-bundled binary.
  */
 async checkArcAutomationPermission() : Promise<boolean> {
     return await TAURI_INVOKE("check_arc_automation_permission");
 },
 /**
- * Request macOS Automation permission for Arc browser by running a harmless AppleScript.
- * This triggers the "screenpipe wants to control Arc" system prompt if not already granted.
- * Clears stale TCC entries first so macOS will show a fresh prompt.
- * Returns true if the command succeeded (permission granted), false otherwise.
+ * Request macOS Automation permission for Arc browser.
+ * In production: triggers "screenpipe wants to control Arc" prompt via direct FFI.
+ * In dev mode: submits a detached helper to trigger the prompt outside Terminal's tree.
+ * Also opens System Settings > Automation as a fallback.
  */
 async requestArcAutomationPermission() : Promise<boolean> {
     return await TAURI_INVOKE("request_arc_automation_permission");
@@ -903,7 +903,7 @@ export type EmbeddedLLM = { enabled: boolean; model: string; port: number }
 export type JsonValue = null | boolean | number | string | JsonValue[] | { [key in string]: JsonValue }
 export type LogFile = { name: string; path: string; modified_at: bigint }
 export type MonitorDevice = { id: number; stableId: string; name: string; isDefault: boolean; width: number; height: number }
-export type OSPermission = "screenRecording" | "microphone" | "accessibility"
+export type OSPermission = "screenRecording" | "microphone" | "accessibility" | "automation"
 export type OSPermissionStatus = "notNeeded" | "empty" | "granted" | "denied"
 export type OSPermissionsCheck = { screenRecording: OSPermissionStatus; microphone: OSPermissionStatus; accessibility: OSPermissionStatus }
 /**

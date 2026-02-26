@@ -18,6 +18,7 @@ import {
 import { cn } from "@/lib/utils";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Meeting, deduplicateAudioItems } from "@/lib/hooks/use-meetings";
+import { usePipes } from "@/lib/hooks/use-pipes";
 
 interface AudioGroup {
 	deviceName: string;
@@ -92,6 +93,7 @@ export function AudioTranscript({
 	const [playing, setPlaying] = useState<string | null>(null);
 	const [viewMode, setViewMode] = useState<ViewMode>("thread"); // Default to thread view
 	const [tabMode, setTabMode] = useState<TabMode>("nearby");
+	const { templatePipes } = usePipes();
 	const meetingScrollRef = useRef<HTMLDivElement | null>(null);
 
 	// Pagination for full meeting view
@@ -465,31 +467,86 @@ export function AudioTranscript({
 		await emit("chat-prefill", { context, prompt: "" });
 	}, [tabMode, meetingConversationData, conversationData, getSpeakerInfo]);
 
-	const handleSummarizeMeeting = useCallback(async () => {
-		const data = meetingConversationData;
-		if (!data.items.length) return;
+	// Summarize: works for meeting (preferred) or nearby audio (fallback)
+	const summarizeInfo = useMemo(() => {
+		const hasMeeting = activeMeeting != null && meetingConversationData.items.length > 0;
+		const data = hasMeeting ? meetingConversationData : conversationData;
 
-		const lines = data.items.map((item) => {
-			const { speakerName } = getSpeakerInfo(item.audio);
-			const time = item.audio.timestamp.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
-			const name = speakerName || (item.audio.is_input ? "me" : "speaker");
-			return `[${time}] ${name}: ${item.audio.transcription || "(no transcription)"}`;
-		});
+		// Count items with actual transcription text
+		const meaningfulItems = data.items.filter(
+			(item) => item.audio.transcription && item.audio.transcription.trim().length > 0
+		);
+
+		const canSummarize = meaningfulItems.length > 0;
+
+		// Detect if meeting is still ongoing (endTime within 2 min of now)
+		const isOngoing = hasMeeting && activeMeeting
+			? (Date.now() - activeMeeting.endTime.getTime()) < 2 * 60 * 1000
+			: false;
+
+		let tooltip = "summarize";
+		if (!canSummarize) {
+			tooltip = "no transcription to summarize";
+		} else if (hasMeeting && isOngoing) {
+			tooltip = "summarize meeting so far";
+		} else if (hasMeeting) {
+			tooltip = "summarize meeting";
+		} else {
+			tooltip = "summarize nearby audio";
+		}
+
+		return { canSummarize, hasMeeting, isOngoing, tooltip, data, meaningfulCount: meaningfulItems.length };
+	}, [activeMeeting, meetingConversationData, conversationData]);
+
+	const handleSummarize = useCallback(async () => {
+		const { data, hasMeeting, isOngoing, canSummarize } = summarizeInfo;
+		if (!canSummarize) return;
+
+		// Build transcript lines, skip empty transcriptions
+		const lines = data.items
+			.filter((item) => item.audio.transcription && item.audio.transcription.trim().length > 0)
+			.map((item) => {
+				const { speakerName } = getSpeakerInfo(item.audio);
+				const time = item.audio.timestamp.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+				const name = speakerName || (item.audio.is_input ? "me" : "speaker");
+				return `[${time}] ${name}: ${item.audio.transcription}`;
+			});
+
+		// Truncate very long transcripts (cap at 500 lines)
+		const MAX_LINES = 500;
+		let truncated = false;
+		let transcriptLines = lines;
+		if (lines.length > MAX_LINES) {
+			transcriptLines = lines.slice(-MAX_LINES);
+			truncated = true;
+		}
 
 		const timeRange = data.timeRange
 			? `${data.timeRange.start.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} – ${data.timeRange.end.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`
 			: "";
 
-		const context = `here is my meeting transcript (${timeRange}):\n\n${lines.join("\n")}`;
+		const label = hasMeeting
+			? `meeting transcript (${timeRange})`
+			: `nearby audio transcript (${timeRange})`;
+
+		const truncationNote = truncated
+			? `\n\n(note: transcript was truncated to the most recent ${MAX_LINES} segments out of ${lines.length} total)`
+			: "";
+
+		const ongoingNote = isOngoing ? " (meeting still in progress)" : "";
+
+		const context = `here is my ${label}${ongoingNote}:\n\n${transcriptLines.join("\n")}${truncationNote}`;
+
+		const meetingPipe = templatePipes.find((p) => p.name === "meeting-summary");
+		const fallbackPrompt = isOngoing
+			? "summarize this meeting so far with key takeaways and action items identified to this point"
+			: "summarize this meeting with key takeaways and action items";
+		const prompt = meetingPipe?.prompt || fallbackPrompt;
 
 		await commands.showWindow("Chat");
 		await new Promise((r) => setTimeout(r, 200));
-		await emit("chat-prefill", {
-			context,
-			prompt: "summarize this meeting with key takeaways and action items",
-			autoSend: true,
-		});
-	}, [meetingConversationData, getSpeakerInfo]);
+		await emit("chat-prefill", { context, prompt, autoSend: true });
+	}, [summarizeInfo, getSpeakerInfo, templatePipes]);
 
 	// Auto-switch to thread view if multiple speakers detected
 	const hasMultipleSpeakers = conversationData.participants.length > 1;
@@ -637,16 +694,20 @@ export function AudioTranscript({
 						)}
 
 						<div className="w-px h-4 bg-border mx-0.5" />
-						{(tabMode === "meeting" && activeMeeting) && (
-							<Tooltip>
-								<TooltipTrigger asChild>
-									<Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={handleSummarizeMeeting}>
-										<Sparkles className="h-3 w-3" />
-									</Button>
-								</TooltipTrigger>
-								<TooltipContent side="bottom"><p>summarize meeting</p></TooltipContent>
-							</Tooltip>
-						)}
+						<Tooltip>
+							<TooltipTrigger asChild>
+								<Button
+									variant="ghost"
+									size="sm"
+									className="h-6 w-6 p-0"
+									disabled={!summarizeInfo.canSummarize}
+									onClick={handleSummarize}
+								>
+									<Sparkles className={cn("h-3 w-3", !summarizeInfo.canSummarize && "opacity-30")} />
+								</Button>
+							</TooltipTrigger>
+							<TooltipContent side="bottom"><p>{summarizeInfo.tooltip}</p></TooltipContent>
+						</Tooltip>
 						<Tooltip>
 							<TooltipTrigger asChild>
 								<Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={handleSendToChat}>

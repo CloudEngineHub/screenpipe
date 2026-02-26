@@ -262,8 +262,7 @@ export default function PermissionRecoveryPage() {
                     status={arcAutomationOk ? "granted" : permissions === null ? "checking" : "denied"}
                     onFix={async () => {
                       posthog.capture("permission_recovery_arc_automation");
-                      const granted = await commands.requestArcAutomationPermission();
-                      if (granted) setArcAutomationOk(true);
+                      await commands.requestArcAutomationPermission();
                     }}
                     isAnyFixing={false}
                   />

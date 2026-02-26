@@ -7,7 +7,8 @@ import { useState } from "react";
 import { motion } from "framer-motion";
 import { ChevronDown, ChevronUp, Plus } from "lucide-react";
 import { PipeAIIconLarge } from "@/components/pipe-ai-icon";
-import { SUMMARY_TEMPLATES, type SummaryTemplate, type CustomTemplate } from "@/lib/summary-templates";
+import { type TemplatePipe } from "@/lib/hooks/use-pipes";
+import { FALLBACK_TEMPLATES, type CustomTemplate } from "@/lib/summary-templates";
 import { type Suggestion } from "@/lib/hooks/use-auto-suggestions";
 import { CustomSummaryBuilder } from "./custom-summary-builder";
 
@@ -18,6 +19,8 @@ interface SummaryCardsProps {
   onSaveCustomTemplate: (template: CustomTemplate) => void;
   onDeleteCustomTemplate: (id: string) => void;
   userName?: string;
+  templatePipes?: TemplatePipe[];
+  pipesLoading?: boolean;
 }
 
 export function SummaryCards({
@@ -27,23 +30,22 @@ export function SummaryCards({
   onSaveCustomTemplate,
   onDeleteCustomTemplate,
   userName,
+  templatePipes = [],
+  pipesLoading = false,
 }: SummaryCardsProps) {
   const [showAll, setShowAll] = useState(false);
   const [showBuilder, setShowBuilder] = useState(false);
 
-  const featured = SUMMARY_TEMPLATES.filter((t) => t.featured && t.id !== "custom-summary");
-  const discover = SUMMARY_TEMPLATES.filter((t) => !t.featured);
+  const templates = templatePipes.length > 0 ? templatePipes : FALLBACK_TEMPLATES;
+  const featured = templates.filter((t) => t.featured);
+  const discover = templates.filter((t) => !t.featured);
 
-  const handleCardClick = (template: SummaryTemplate) => {
-    if (template.id === "custom-summary") {
-      setShowBuilder(true);
-      return;
-    }
-    onSendMessage(template.prompt, `${template.icon} ${template.title}`);
+  const handleCardClick = (pipe: TemplatePipe) => {
+    onSendMessage(pipe.prompt, `${pipe.icon} ${pipe.title}`);
   };
 
   const handleCustomTemplateClick = (template: CustomTemplate) => {
-    onSendMessage(template.prompt, `📌 ${template.title}`);
+    onSendMessage(template.prompt, `\u{1F4CC} ${template.title}`);
   };
 
   return (
@@ -63,18 +65,18 @@ export function SummaryCards({
 
       {/* Featured template cards */}
       <div className="grid grid-cols-3 gap-1.5 w-full max-w-lg mb-2">
-        {featured.map((template) => (
+        {featured.map((pipe) => (
           <button
-            key={template.id}
-            onClick={() => handleCardClick(template)}
+            key={pipe.name}
+            onClick={() => handleCardClick(pipe)}
             className="group text-left p-2 rounded-lg border border-border/40 bg-muted/20 hover:bg-muted/50 hover:border-border/70 transition-all duration-150 cursor-pointer"
           >
-            <div className="text-sm mb-0.5">{template.icon}</div>
+            <div className="text-sm mb-0.5">{pipe.icon}</div>
             <div className="text-[11px] font-medium text-foreground group-hover:text-foreground mb-0.5 leading-tight">
-              {template.title}
+              {pipe.title}
             </div>
             <div className="text-[10px] text-muted-foreground leading-tight line-clamp-1">
-              {template.description}
+              {pipe.description}
             </div>
           </button>
         ))}
@@ -83,7 +85,7 @@ export function SummaryCards({
           onClick={() => setShowBuilder(true)}
           className="group text-left p-2 rounded-lg border border-dashed border-primary/30 bg-primary/5 hover:bg-primary/10 hover:border-primary/50 transition-all duration-150 cursor-pointer"
         >
-          <div className="text-sm mb-0.5">✨</div>
+          <div className="text-sm mb-0.5">{"\u2728"}</div>
           <div className="text-[11px] font-medium text-foreground group-hover:text-foreground mb-0.5 leading-tight">
             Custom Summary
           </div>
@@ -92,22 +94,24 @@ export function SummaryCards({
           </div>
         </button>
         {/* Discover / Show More card */}
-        <button
-          onClick={() => setShowAll(!showAll)}
-          className="group text-left p-2 rounded-lg border border-border/40 bg-muted/10 hover:bg-muted/30 hover:border-border/60 transition-all duration-150 cursor-pointer"
-        >
-          <div className="text-sm mb-0.5">🔍</div>
-          <div className="text-[11px] font-medium text-foreground group-hover:text-foreground mb-0.5 leading-tight">
-            {showAll ? "Show Less" : "Discover"}
-          </div>
-          <div className="text-[10px] text-muted-foreground leading-tight line-clamp-1 flex items-center gap-1">
-            {showAll ? (
-              <>Collapse <ChevronUp className="w-3 h-3 inline" /></>
-            ) : (
-              <>{discover.length} more <ChevronDown className="w-3 h-3 inline" /></>
-            )}
-          </div>
-        </button>
+        {discover.length > 0 && (
+          <button
+            onClick={() => setShowAll(!showAll)}
+            className="group text-left p-2 rounded-lg border border-border/40 bg-muted/10 hover:bg-muted/30 hover:border-border/60 transition-all duration-150 cursor-pointer"
+          >
+            <div className="text-sm mb-0.5">{"\u{1F50D}"}</div>
+            <div className="text-[11px] font-medium text-foreground group-hover:text-foreground mb-0.5 leading-tight">
+              {showAll ? "Show Less" : "Discover"}
+            </div>
+            <div className="text-[10px] text-muted-foreground leading-tight line-clamp-1 flex items-center gap-1">
+              {showAll ? (
+                <>Collapse <ChevronUp className="w-3 h-3 inline" /></>
+              ) : (
+                <>{discover.length} more <ChevronDown className="w-3 h-3 inline" /></>
+              )}
+            </div>
+          </button>
+        )}
       </div>
 
       {/* Expanded: more templates */}
@@ -118,18 +122,18 @@ export function SummaryCards({
           exit={{ opacity: 0, height: 0 }}
           className="grid grid-cols-3 gap-1.5 w-full max-w-lg mb-2"
         >
-          {discover.map((template) => (
+          {discover.map((pipe) => (
             <button
-              key={template.id}
-              onClick={() => handleCardClick(template)}
+              key={pipe.name}
+              onClick={() => handleCardClick(pipe)}
               className="group text-left p-2 rounded-lg border border-border/30 bg-muted/10 hover:bg-muted/40 hover:border-border/60 transition-all duration-150 cursor-pointer"
             >
-              <div className="text-sm mb-0.5">{template.icon}</div>
+              <div className="text-sm mb-0.5">{pipe.icon}</div>
               <div className="text-[11px] font-medium text-foreground group-hover:text-foreground mb-0.5 leading-tight">
-                {template.title}
+                {pipe.title}
               </div>
               <div className="text-[10px] text-muted-foreground leading-tight line-clamp-1">
-                {template.description}
+                {pipe.description}
               </div>
             </button>
           ))}
@@ -152,7 +156,7 @@ export function SummaryCards({
                 onKeyDown={(e) => e.key === "Enter" && handleCustomTemplateClick(ct)}
                 className="group text-left p-2 rounded-lg border border-border/30 bg-muted/10 hover:bg-muted/40 hover:border-border/60 transition-all duration-150 cursor-pointer relative"
               >
-                <div className="text-sm mb-0.5">📌</div>
+                <div className="text-sm mb-0.5">{"\u{1F4CC}"}</div>
                 <div className="text-[11px] font-medium text-foreground group-hover:text-foreground mb-0.5 leading-tight">
                   {ct.title}
                 </div>
@@ -203,7 +207,7 @@ export function SummaryCards({
           onClose={() => setShowBuilder(false)}
           onGenerate={(prompt, timeRange) => {
             setShowBuilder(false);
-            onSendMessage(prompt, `✨ Custom Summary — ${timeRange}`);
+            onSendMessage(prompt, `\u2728 Custom Summary \u2014 ${timeRange}`);
           }}
           onSaveTemplate={onSaveCustomTemplate}
         />

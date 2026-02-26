@@ -384,7 +384,7 @@ impl RewindWindowId {
             RewindWindowId::Search => (1200.0, 850.0),
             RewindWindowId::Onboarding => (450.0, 500.0),
             RewindWindowId::Chat => (600.0, 750.0),
-            RewindWindowId::PermissionRecovery => (500.0, 400.0),
+            RewindWindowId::PermissionRecovery => (500.0, 580.0),
         })
     }
 
@@ -1420,8 +1420,8 @@ impl ShowRewindWindow {
             }
             ShowRewindWindow::PermissionRecovery => {
                 let builder = self.window_builder(app, "/permission-recovery")
-                    .inner_size(500.0, 450.0)
-                    .min_inner_size(450.0, 400.0)
+                    .inner_size(500.0, 580.0)
+                    .min_inner_size(450.0, 500.0)
                     .resizable(false)
                     .focused(true)
                     .always_on_top(true)

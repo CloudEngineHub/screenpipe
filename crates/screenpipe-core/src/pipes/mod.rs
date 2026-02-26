@@ -1834,6 +1834,42 @@ impl PipeManager {
                 "idea-tracker",
                 include_str!("../../assets/pipes/idea-tracker/pipe.md"),
             ),
+            (
+                "day-recap",
+                include_str!("../../assets/pipes/day-recap/pipe.md"),
+            ),
+            (
+                "standup-update",
+                include_str!("../../assets/pipes/standup-update/pipe.md"),
+            ),
+            (
+                "top-of-mind",
+                include_str!("../../assets/pipes/top-of-mind/pipe.md"),
+            ),
+            (
+                "ai-habits",
+                include_str!("../../assets/pipes/ai-habits/pipe.md"),
+            ),
+            (
+                "morning-brief",
+                include_str!("../../assets/pipes/morning-brief/pipe.md"),
+            ),
+            (
+                "time-breakdown",
+                include_str!("../../assets/pipes/time-breakdown/pipe.md"),
+            ),
+            (
+                "collaboration-patterns",
+                include_str!("../../assets/pipes/collaboration-patterns/pipe.md"),
+            ),
+            (
+                "video-export",
+                include_str!("../../assets/pipes/video-export/pipe.md"),
+            ),
+            (
+                "meeting-summary",
+                include_str!("../../assets/pipes/meeting-summary/pipe.md"),
+            ),
         ];
 
         // reminders pipe uses Apple Reminders via osascript — macOS only

@@ -72,6 +72,28 @@ export function DiskUsageSection() {
         </div>
       )}
 
+      {/* Memory summary */}
+      {!isLoading && diskUsage?.recording_since && (() => {
+        const since = new Date(diskUsage.recording_since);
+        const months = Math.max(1, Math.round((Date.now() - since.getTime()) / (1000 * 60 * 60 * 24 * 30)));
+        const dataGb = (diskUsage.total_data_bytes / (1024 ** 3)).toFixed(1);
+        const totalBytes = diskUsage.total_data_bytes + diskUsage.available_space_bytes;
+        const usedPct = totalBytes > 0 ? Math.round((diskUsage.total_data_bytes / totalBytes) * 100) : 0;
+        const ratePerMonth = diskUsage.total_data_bytes / months;
+        const remainingMonths = ratePerMonth > 0 ? Math.round(diskUsage.available_space_bytes / ratePerMonth) : 0;
+        return (
+          <div className="rounded-md border border-border bg-card px-3 py-2.5 space-y-1.5">
+            <p className="text-sm font-medium">
+              {months} {months === 1 ? "month" : "months"} of memory in {dataGb} GB
+            </p>
+            <Progress value={usedPct} className="h-1.5" />
+            <p className="text-xs text-muted-foreground">
+              ~{remainingMonths} {remainingMonths === 1 ? "month" : "months"} of space remaining
+            </p>
+          </div>
+        );
+      })()}
+
       {/* Overview Cards */}
       <div className="grid grid-cols-3 gap-2">
         <Card className={cn("border-border bg-card", isLoading && "opacity-75")}>
@@ -122,10 +144,23 @@ export function DiskUsageSection() {
             <div className="space-y-1.5 ml-[26px]"><Skeleton className="h-4 w-32" /><Skeleton className="h-4 w-28" /></div>
           ) : (
             <div className="space-y-1.5 ml-[26px]">
-              <div className="flex items-center justify-between text-xs">
-                <span className="text-muted-foreground">Video</span>
-                <span className="font-medium">{diskUsage?.media.videos_size || "0 KB"}</span>
-              </div>
+              {diskUsage?.media.monitors && diskUsage.media.monitors.length > 0 && (() => {
+                const since = diskUsage?.recording_since ? new Date(diskUsage.recording_since) : null;
+                const months = since ? Math.max(1, (Date.now() - since.getTime()) / (1000 * 60 * 60 * 24 * 30)) : null;
+                return diskUsage.media.monitors.map((m) => (
+                  <div key={m.name} className="flex items-center justify-between text-xs">
+                    <span className="text-muted-foreground truncate mr-2">{m.name}</span>
+                    <span className="font-medium shrink-0">
+                      {m.size}
+                      {months && (
+                        <span className="text-muted-foreground font-normal ml-1">
+                          (~{(m.size_bytes / months / (1024 ** 3)).toFixed(1)} GB/mo)
+                        </span>
+                      )}
+                    </span>
+                  </div>
+                ));
+              })()}
               <div className="flex items-center justify-between text-xs">
                 <span className="text-muted-foreground">Audio</span>
                 <span className="font-medium">{diskUsage?.media.audios_size || "0 KB"}</span>

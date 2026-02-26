@@ -13,6 +13,7 @@ pub enum OSPermission {
     ScreenRecording,
     Microphone,
     Accessibility,
+    Automation,
 }
 
 #[tauri::command(async)]
@@ -40,6 +41,12 @@ pub fn open_permission_settings(permission: OSPermission) {
                 )
                 .spawn()
                 .expect("Failed to open Accessibility settings"),
+            OSPermission::Automation => Command::new("open")
+                .arg(
+                    "x-apple.systempreferences:com.apple.preference.security?Privacy_Automation",
+                )
+                .spawn()
+                .expect("Failed to open Automation settings"),
         };
     }
 }
@@ -89,6 +96,10 @@ pub async fn request_permission(permission: OSPermission) {
                 // AXIsProcessTrustedWithOptions with kAXTrustedCheckOptionPrompt
                 // handles both NotDetermined and Denied cases on macOS
                 request_accessibility_permission();
+            }
+            OSPermission::Automation => {
+                // Open Automation settings — user must toggle manually
+                open_permission_settings(OSPermission::Automation);
             }
         }
     }
@@ -246,6 +257,11 @@ pub async fn reset_and_request_permission(
             OSPermission::ScreenRecording => "ScreenCapture",
             OSPermission::Microphone => "Microphone",
             OSPermission::Accessibility => "Accessibility",
+            OSPermission::Automation => {
+                // Automation doesn't use tccutil reset flow — just open settings
+                open_permission_settings(OSPermission::Automation);
+                return Ok(());
+            }
         };
 
         // Get bundle identifier from Tauri config (handles dev/beta/prod automatically)
@@ -374,130 +390,293 @@ pub fn check_arc_installed() -> bool {
 }
 
 /// Check if Automation permission for Arc is already granted.
-/// If Arc is running, tests the actual automation via osascript (TCC.db can have
-/// stale entries from previous builds with different code-signing identities).
-/// Falls back to TCC.db query when Arc is not running.
+/// In production (.app bundle): uses direct FFI check against the app's own TCC entry.
+/// In dev mode: always returns true — dev builds inherit Terminal's permissions and
+/// the modal cannot manage Arc automation for a non-bundled binary.
 #[tauri::command(async)]
 #[specta::specta]
-pub fn check_arc_automation_permission(app: tauri::AppHandle) -> bool {
+pub fn check_arc_automation_permission(_app: tauri::AppHandle) -> bool {
     #[cfg(target_os = "macos")]
     {
-        use std::process::Command;
-
-        // Check if Arc is actually running — we can only test automation when it is
-        let arc_running = Command::new("pgrep")
-            .args(["-x", "Arc"])
-            .output()
-            .map(|o| o.status.success())
-            .unwrap_or(false);
-
-        if arc_running {
-            // Arc is running — test actual automation (most reliable, avoids stale TCC entries)
-            match Command::new("osascript")
-                .args(["-e", "tell application \"Arc\" to return \"ok\""])
-                .output()
-            {
-                Ok(output) => {
-                    let success = output.status.success();
-                    if !success {
-                        let stderr = String::from_utf8_lossy(&output.stderr);
-                        info!("arc automation check failed (permission likely not granted): {}", stderr.trim());
-                    }
-                    success
-                }
-                Err(e) => {
-                    warn!("failed to run osascript for arc automation check: {}", e);
-                    false
-                }
-            }
-        } else {
-            // Arc not running — fall back to TCC.db query
-            let bundle_id = app.config().identifier.as_str().to_string();
-            let arc_bundle = "company.thebrowser.Browser";
-
-            let home = match std::env::var("HOME") {
-                Ok(h) => h,
-                Err(_) => return false,
-            };
-            let tcc_db = format!(
-                "{}/Library/Application Support/com.apple.TCC/TCC.db",
-                home
-            );
-
-            match Command::new("sqlite3")
-                .args([
-                    &tcc_db,
-                    &format!(
-                        "SELECT auth_value FROM access WHERE service='kTCCServiceAppleEvents' AND client='{}' AND indirect_object_identifier='{}' LIMIT 1;",
-                        bundle_id, arc_bundle
-                    ),
-                ])
-                .output()
-            {
-                Ok(output) => {
-                    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
-                    stdout == "2"
-                }
-                Err(e) => {
-                    warn!("failed to query TCC.db for arc automation: {}", e);
-                    false
-                }
-            }
+        if !is_app_bundle() {
+            // Dev mode: can't manage Arc automation (Terminal inheritance).
+            // Return true to skip showing the Arc row in the modal.
+            return true;
         }
+        let target = "company.thebrowser.Browser";
+        let result = ae_check_automation_direct(target, false);
+        if result != 0 {
+            info!("arc automation check: result={} (0=granted, -1744=denied, -1745=not_asked)", result);
+        }
+        result == 0
     }
 
     #[cfg(not(target_os = "macos"))]
     {
-        let _ = app;
         false
     }
 }
 
-/// Request macOS Automation permission for Arc browser by running a harmless AppleScript.
-/// This triggers the "screenpipe wants to control Arc" system prompt if not already granted.
-/// Clears stale TCC entries first so macOS will show a fresh prompt.
-/// Returns true if the command succeeded (permission granted), false otherwise.
-#[tauri::command(async)]
-#[specta::specta]
-pub async fn request_arc_automation_permission(app: tauri::AppHandle) -> bool {
-    #[cfg(target_os = "macos")]
-    {
-        use std::process::Command;
+/// Detect whether we're running as a .app bundle (production) or standalone binary (dev mode).
+#[cfg(target_os = "macos")]
+fn is_app_bundle() -> bool {
+    std::env::current_exe()
+        .map(|p| p.to_string_lossy().contains(".app/"))
+        .unwrap_or(false)
+}
 
-        // Clear stale TCC entries first — after rebuilds with different code-signing
-        // identities, macOS may have a stale entry that silently denies without
-        // prompting the user again. tccutil reset clears these.
-        let bundle_id = app.config().identifier.as_str();
-        info!("resetting stale AppleEvents TCC entries for {}", bundle_id);
-        let _ = Command::new("tccutil")
-            .args(["reset", "AppleEvents", bundle_id])
+/// Call AEDeterminePermissionToAutomateTarget directly from the current process via FFI.
+/// Returns the raw OSStatus: 0 = granted, -1744 = denied, -1745 = not yet asked.
+/// When `ask_user` is true AND permission was not yet asked, macOS shows a system prompt.
+#[cfg(target_os = "macos")]
+fn ae_check_automation_direct(target_bundle_id: &str, ask_user: bool) -> i32 {
+    use std::ffi::c_void;
+
+    #[repr(C)]
+    struct AEDesc {
+        descriptor_type: u32,
+        data_handle: *mut c_void,
+    }
+
+    #[link(name = "Carbon", kind = "framework")]
+    extern "C" {
+        fn AECreateDesc(
+            type_code: u32,
+            data_ptr: *const u8,
+            data_size: isize,
+            result: *mut AEDesc,
+        ) -> i16;
+        fn AEDeterminePermissionToAutomateTarget(
+            target: *const AEDesc,
+            the_ae_event_class: u32,
+            the_ae_event_id: u32,
+            ask_user_if_needed: u8,
+        ) -> i32;
+        fn AEDisposeDesc(the_ae_desc: *mut AEDesc) -> i16;
+    }
+
+    // 'bund' = typeApplicationBundleID
+    const TYPE_BUND: u32 = u32::from_be_bytes(*b"bund");
+    // '****' = typeWildCard
+    const TYPE_WILD: u32 = u32::from_be_bytes(*b"****");
+
+    unsafe {
+        let mut desc = AEDesc {
+            descriptor_type: 0,
+            data_handle: std::ptr::null_mut(),
+        };
+        let data = target_bundle_id.as_bytes();
+        let err = AECreateDesc(TYPE_BUND, data.as_ptr(), data.len() as isize, &mut desc);
+        if err != 0 {
+            warn!("AECreateDesc failed: {}", err);
+            return -1;
+        }
+        let result = AEDeterminePermissionToAutomateTarget(
+            &desc,
+            TYPE_WILD,
+            TYPE_WILD,
+            if ask_user { 1 } else { 0 },
+        );
+        AEDisposeDesc(&mut desc);
+        result
+    }
+}
+
+/// Generate Swift source for the AE helper binary.
+/// Supports a `request` CLI argument to trigger the permission prompt.
+#[cfg(target_os = "macos")]
+fn ae_helper_swift_source(target_bundle_id: &str) -> String {
+    format!(
+        r#"import Foundation; import Carbon
+let b = "{target}"
+let ask = CommandLine.arguments.count > 1 && CommandLine.arguments[1] == "request"
+var a = AEDesc(descriptorType: 0, dataHandle: nil)
+let d = b.data(using: .utf8)!
+let e: OSErr = d.withUnsafeBytes {{ p in AECreateDesc(UInt32(typeApplicationBundleID), p.baseAddress!, p.count, &a) }}
+if e != noErr {{ print("error"); Foundation.exit(1) }}
+let r = AEDeterminePermissionToAutomateTarget(&a, typeWildCard, typeWildCard, ask)
+AEDisposeDesc(&a)
+switch r {{ case 0: print("granted"); case -1744: print("denied"); case -1745: print("not_asked"); default: print("error") }}
+"#,
+        target = target_bundle_id
+    )
+}
+
+/// Ensure the AE helper binary is compiled and up-to-date.
+/// Returns true on success.
+#[cfg(target_os = "macos")]
+fn ensure_ae_helper(target_bundle_id: &str) -> bool {
+    use std::process::Command;
+
+    let checker = "/tmp/screenpipe_ae_check";
+    let src_path = format!("{}.swift", checker);
+    let new_source = ae_helper_swift_source(target_bundle_id);
+
+    // Check if source changed (force recompile if so)
+    let source_changed = std::fs::read_to_string(&src_path)
+        .map(|existing| existing != new_source)
+        .unwrap_or(true);
+
+    if source_changed {
+        if std::fs::write(&src_path, &new_source).is_err() {
+            warn!("failed to write ae helper source");
+            return false;
+        }
+        let _ = std::fs::remove_file(checker);
+    }
+
+    if !std::path::Path::new(checker).exists() {
+        let compile = Command::new("swiftc")
+            .args([&src_path, "-o", checker, "-framework", "Carbon", "-O"])
             .output();
-
-        info!("requesting arc automation permission via osascript");
-        match Command::new("osascript")
-            .args(["-e", "tell application \"Arc\" to return \"ok\""])
-            .output()
-        {
-            Ok(output) => {
-                let success = output.status.success();
-                if success {
-                    info!("arc automation permission granted");
-                } else {
-                    let stderr = String::from_utf8_lossy(&output.stderr);
-                    warn!("arc automation permission denied or failed: {}", stderr);
-                }
-                success
+        match compile {
+            Ok(out) if out.status.success() => {}
+            Ok(out) => {
+                warn!("swiftc failed: {}", String::from_utf8_lossy(&out.stderr));
+                return false;
             }
             Err(e) => {
-                error!("failed to run osascript for arc automation: {}", e);
-                false
+                warn!("failed to run swiftc: {}", e);
+                return false;
             }
+        }
+    }
+
+    true
+}
+
+/// Run the AE helper via launchctl (detached from Terminal) and return stdout content.
+/// Pass extra_args to the helper binary (e.g. &["request"] for prompt mode).
+#[cfg(target_os = "macos")]
+fn run_ae_helper_detached(target_bundle_id: &str, extra_args: &[&str], timeout_iters: u32) -> Option<String> {
+    use std::process::Command;
+    use std::time::Duration;
+
+    if !ensure_ae_helper(target_bundle_id) {
+        return None;
+    }
+
+    let checker = "/tmp/screenpipe_ae_check";
+    let result_path = "/tmp/screenpipe_ae_check_result";
+    let _ = std::fs::remove_file(result_path);
+    let _ = Command::new("launchctl")
+        .args(["remove", "pe.screenpi.ae-check"])
+        .output();
+
+    let mut args = vec![
+        "submit", "-l", "pe.screenpi.ae-check",
+        "-o", result_path, "--", checker,
+    ];
+    args.extend_from_slice(extra_args);
+
+    let submit = Command::new("launchctl").args(&args).output();
+    if submit.is_err() {
+        warn!("failed to submit ae helper via launchctl");
+        return None;
+    }
+
+    for _ in 0..timeout_iters {
+        std::thread::sleep(Duration::from_millis(200));
+        if std::path::Path::new(result_path).exists() {
+            if let Ok(content) = std::fs::read_to_string(result_path) {
+                if !content.is_empty() {
+                    let _ = Command::new("launchctl")
+                        .args(["remove", "pe.screenpi.ae-check"])
+                        .output();
+                    return Some(content.trim().to_string());
+                }
+            }
+        }
+    }
+
+    let _ = Command::new("launchctl")
+        .args(["remove", "pe.screenpi.ae-check"])
+        .output();
+    warn!("ae helper timed out");
+    None
+}
+
+/// Check AppleEvents automation permission by running a detached helper
+/// process via launchctl. This avoids inheriting Terminal's permissions.
+#[cfg(target_os = "macos")]
+fn ae_automation_check_detached(target_bundle_id: &str) -> bool {
+    match run_ae_helper_detached(target_bundle_id, &[], 10) {
+        Some(result) => {
+            if result != "granted" {
+                info!("arc automation check (detached): {}", result);
+            }
+            result == "granted"
+        }
+        None => false,
+    }
+}
+
+/// Submit a detached AE helper in "request" mode to trigger the macOS permission prompt.
+/// Non-blocking: returns immediately after submitting the launchctl job.
+/// The prompt will appear from the detached process; polling check detects the grant.
+#[cfg(target_os = "macos")]
+fn ae_automation_submit_request(target_bundle_id: &str) {
+    use std::process::Command;
+
+    if !ensure_ae_helper(target_bundle_id) {
+        return;
+    }
+
+    let checker = "/tmp/screenpipe_ae_check";
+    let result_path = "/tmp/screenpipe_ae_request_result";
+    let _ = std::fs::remove_file(result_path);
+    let _ = Command::new("launchctl")
+        .args(["remove", "pe.screenpi.ae-request"])
+        .output();
+
+    let submit = Command::new("launchctl")
+        .args([
+            "submit", "-l", "pe.screenpi.ae-request",
+            "-o", result_path, "--", checker, "request",
+        ])
+        .output();
+
+    if submit.is_err() {
+        warn!("failed to submit ae request via launchctl");
+    } else {
+        info!("submitted detached ae automation request — macOS prompt should appear");
+    }
+}
+
+/// Request macOS Automation permission for Arc browser.
+/// In production: triggers "screenpipe wants to control Arc" prompt via direct FFI.
+/// In dev mode: submits a detached helper to trigger the prompt outside Terminal's tree.
+/// Also opens System Settings > Automation as a fallback.
+#[tauri::command(async)]
+#[specta::specta]
+pub fn request_arc_automation_permission(_app: tauri::AppHandle) -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        let target = "company.thebrowser.Browser";
+
+        if is_app_bundle() {
+            // Production: trigger prompt directly from the app process.
+            // Shows "screenpipe wants to control Arc" system dialog.
+            info!("requesting arc automation permission via direct FFI");
+            let result = ae_check_automation_direct(target, true);
+            info!("arc automation request (direct): result={}", result);
+            if result != 0 {
+                // User denied or already denied before — open settings as fallback
+                open_permission_settings(OSPermission::Automation);
+            }
+            result == 0
+        } else {
+            // Dev mode: submit detached request (non-blocking) to trigger prompt
+            // outside Terminal's process tree, then open settings as fallback.
+            info!("requesting arc automation permission via detached helper");
+            ae_automation_submit_request(target);
+            open_permission_settings(OSPermission::Automation);
+            false // Polling check will detect when granted
         }
     }
 
     #[cfg(not(target_os = "macos"))]
     {
-        let _ = app;
         false
     }
 }
