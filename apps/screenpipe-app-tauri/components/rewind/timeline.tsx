@@ -387,6 +387,10 @@ export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 		togglePlayPause,
 		cycleSpeed,
 		pause: pausePlayback,
+		activeDevices,
+		mutedDevices,
+		toggleDeviceMute,
+		seekTo: seekPlayback,
 	} = useAudioPlayback({
 		frames,
 		currentIndex,
@@ -1015,7 +1019,7 @@ export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 
 			if (e.key === "ArrowLeft") {
 				e.preventDefault();
-				pausePlayback();
+				if (!isPlaying) pausePlayback();
 				if (isAlt) {
 					// Alt+ArrowLeft = prev app boundary
 					setCurrentIndex((prev) => {
@@ -1023,7 +1027,10 @@ export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 						let i = prev + 1;
 						while (i < frames.length) {
 							if (getFrameAppName(frames[i]) !== currentApp) {
-								if (frames[i]) setCurrentFrame(frames[i]);
+								if (frames[i]) {
+									setCurrentFrame(frames[i]);
+									if (isPlaying) seekPlayback(new Date(frames[i].timestamp).getTime());
+								}
 								return i;
 							}
 							i++;
@@ -1034,13 +1041,16 @@ export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 					// ArrowLeft = prev frame (older = higher index)
 					setCurrentIndex((prev) => {
 						const next = findNextDevice(prev, 1);
-						if (frames[next]) setCurrentFrame(frames[next]);
+						if (frames[next]) {
+							setCurrentFrame(frames[next]);
+							if (isPlaying) seekPlayback(new Date(frames[next].timestamp).getTime());
+						}
 						return next;
 					});
 				}
 			} else if (e.key === "ArrowRight") {
 				e.preventDefault();
-				pausePlayback();
+				if (!isPlaying) pausePlayback();
 				if (isAlt) {
 					// Alt+ArrowRight = next app boundary
 					setCurrentIndex((prev) => {
@@ -1048,7 +1058,10 @@ export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 						let i = prev - 1;
 						while (i >= 0) {
 							if (getFrameAppName(frames[i]) !== currentApp) {
-								if (frames[i]) setCurrentFrame(frames[i]);
+								if (frames[i]) {
+									setCurrentFrame(frames[i]);
+									if (isPlaying) seekPlayback(new Date(frames[i].timestamp).getTime());
+								}
 								return i;
 							}
 							i--;
@@ -1059,7 +1072,10 @@ export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 					// ArrowRight = next frame (newer = lower index)
 					setCurrentIndex((prev) => {
 						const next = findNextDevice(prev, -1);
-						if (frames[next]) setCurrentFrame(frames[next]);
+						if (frames[next]) {
+							setCurrentFrame(frames[next]);
+							if (isPlaying) seekPlayback(new Date(frames[next].timestamp).getTime());
+						}
 						return next;
 					});
 				}
@@ -1068,7 +1084,7 @@ export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 
 		window.addEventListener("keydown", handleArrowKeys);
 		return () => window.removeEventListener("keydown", handleArrowKeys);
-	}, [frames, setCurrentFrame, showSearchModal]);
+	}, [frames, setCurrentFrame, showSearchModal, isPlaying, seekPlayback, pausePlayback]);
 
 	useEffect(() => {
 		const getStartDateAndSet = async () => {
@@ -1717,6 +1733,9 @@ export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 						onTogglePlayPause={togglePlayPause}
 						onCycleSpeed={cycleSpeed}
 						isNavigating={isNavigating}
+						activeDevices={activeDevices}
+						mutedDevices={mutedDevices}
+						onToggleDeviceMute={toggleDeviceMute}
 					/>
 					{/* Top right buttons */}
 					<div className={`absolute ${embedded ? "top-2" : "top-[calc(env(safe-area-inset-top)+16px)]"} right-4 flex items-center gap-2`}>
