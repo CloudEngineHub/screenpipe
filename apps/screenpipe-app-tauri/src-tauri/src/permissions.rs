@@ -84,9 +84,6 @@ pub async fn request_permission(permission: OSPermission) {
                         request_av_permission(AVMediaType::Audio);
                     }
                     _ => {
-                        // Denied or restricted — system won't show prompt again,
-                        // open System Settings directly so user can toggle it on
-                        info!("microphone permission denied/restricted, opening system settings");
                         open_permission_settings(OSPermission::Microphone);
                     }
                 }
@@ -267,8 +264,6 @@ pub async fn reset_and_request_permission(
         // Get bundle identifier from Tauri config (handles dev/beta/prod automatically)
         let bundle_id = app.config().identifier.as_str();
 
-        info!("resetting permission for service: {} (bundle: {})", service, bundle_id);
-
         // Reset permission using tccutil - ONLY for this app's bundle ID
         let output = Command::new("tccutil")
             .args(["reset", service, bundle_id])
@@ -281,7 +276,6 @@ pub async fn reset_and_request_permission(
             // Don't fail - tccutil might return non-zero even when it works
         }
 
-        info!("tccutil reset completed for {} (bundle: {}), waiting before re-request", service, bundle_id);
 
         // Wait for TCC database to update
         sleep(Duration::from_millis(500)).await;
@@ -400,12 +394,7 @@ pub fn check_arc_automation_permission(_app: tauri::AppHandle) -> bool {
     {
         let target = "company.thebrowser.Browser";
         if is_app_bundle() {
-            // Production: direct FFI check (no Terminal inheritance)
-            let result = ae_check_automation_direct(target, false);
-            if result != 0 {
-                info!("arc automation check (direct): result={}", result);
-            }
-            result == 0
+            ae_check_automation_direct(target, false) == 0
         } else {
             // Dev mode: run self via launchctl to check without Terminal inheritance
             run_self_detached("--check-arc-automation")
@@ -524,11 +513,7 @@ fn run_self_detached(flag: &str) -> bool {
             if let Ok(content) = std::fs::read_to_string(&result_path) {
                 if !content.is_empty() {
                     let _ = Command::new("launchctl").args(["remove", &label]).output();
-                    let result = content.trim();
-                    if result != "granted" {
-                        info!("self detached {}: {}", flag, result);
-                    }
-                    return result == "granted";
+                    return content.trim() == "granted";
                 }
             }
         }
@@ -564,9 +549,8 @@ fn run_self_detached_fire_and_forget(flag: &str) {
         .args(["submit", "-l", &label, "-o", &result_path, "--", &exe_str, flag])
         .output();
 
-    match submit {
-        Ok(_) => info!("submitted self via launchctl with {} — prompt should appear", flag),
-        Err(e) => warn!("failed to submit self via launchctl: {}", e),
+    if let Err(e) = submit {
+        warn!("failed to submit self via launchctl: {}", e);
     }
 }
 
@@ -580,22 +564,15 @@ pub fn request_arc_automation_permission(_app: tauri::AppHandle) -> bool {
     #[cfg(target_os = "macos")]
     {
         if is_app_bundle() {
-            // Production: trigger prompt directly from the app process.
-            info!("requesting arc automation permission via direct FFI");
             let result = ae_check_automation_direct("company.thebrowser.Browser", true);
-            info!("arc automation request (direct): result={}", result);
             if result != 0 {
                 open_permission_settings(OSPermission::Automation);
             }
             result == 0
         } else {
-            // Dev mode: run self via launchctl with --trigger-arc-automation.
-            // This triggers the macOS prompt with the binary's own identity
-            // so "screenpipe dev" appears in Automation settings.
-            info!("requesting arc automation permission via detached self");
             open_permission_settings(OSPermission::Automation);
             run_self_detached_fire_and_forget("--trigger-arc-automation");
-            false // Polling check will detect when granted
+            false
         }
     }
 
@@ -618,10 +595,7 @@ pub async fn start_permission_monitor(app: tauri::AppHandle) {
     loop {
         tokio::time::sleep(Duration::from_secs(5)).await;
         match OnboardingStore::get(&app) {
-            Ok(Some(store)) if store.is_completed => {
-                info!("onboarding completed, starting permission monitor");
-                break;
-            }
+            Ok(Some(store)) if store.is_completed => break,
             _ => continue,
         }
     }
@@ -645,8 +619,6 @@ pub async fn start_permission_monitor(app: tauri::AppHandle) {
     let mut accessibility_fail_count = 0u32;
     let mut arc_fail_count = 0u32;
     const REQUIRED_CONSECUTIVE_FAILURES: u32 = 2; // Require 2 consecutive failures (~20 seconds)
-
-    info!("permission monitor started (arc_installed: {})", arc_installed);
 
     loop {
         check_interval.tick().await;
@@ -699,16 +671,6 @@ pub async fn start_permission_monitor(app: tauri::AppHandle) {
             // Double-check: only emit if at least one permission is actually lost right now
             // This prevents phantom events from transient TCC flickers
             if !screen_ok || !mic_ok || !accessibility_ok || !arc_ok {
-                warn!(
-                    "permission confirmed lost after {} consecutive failures - screen: {} (fails: {}), mic: {} (fails: {}), accessibility: {} (fails: {}), arc: {} (fails: {})",
-                    REQUIRED_CONSECUTIVE_FAILURES,
-                    screen_ok, screen_fail_count,
-                    mic_ok, mic_fail_count,
-                    accessibility_ok, accessibility_fail_count,
-                    arc_ok, arc_fail_count
-                );
-
-                // Emit event to frontend
                 if let Err(e) = app.emit("permission-lost", serde_json::json!({
                     "screen_recording": !screen_ok,
                     "microphone": !mic_ok,

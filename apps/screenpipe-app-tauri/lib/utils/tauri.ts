@@ -48,9 +48,9 @@ async checkArcInstalled() : Promise<boolean> {
 },
 /**
  * Check if Automation permission for Arc is already granted.
- * In production (.app bundle): uses direct FFI check against the app's own TCC entry.
- * In dev mode: always returns true — dev builds inherit Terminal's permissions and
- * the modal cannot manage Arc automation for a non-bundled binary.
+ * In production (.app bundle): uses direct FFI check (correct identity, no Terminal).
+ * In dev mode: runs the binary itself via launchctl (detached from Terminal) so
+ * macOS TCC checks the binary's own identity, not Terminal's.
  */
 async checkArcAutomationPermission() : Promise<boolean> {
     return await TAURI_INVOKE("check_arc_automation_permission");
@@ -58,8 +58,8 @@ async checkArcAutomationPermission() : Promise<boolean> {
 /**
  * Request macOS Automation permission for Arc browser.
  * In production: triggers "screenpipe wants to control Arc" prompt via direct FFI.
- * In dev mode: submits a detached helper to trigger the prompt outside Terminal's tree.
- * Also opens System Settings > Automation as a fallback.
+ * In dev mode: runs the binary itself via launchctl to trigger the prompt with
+ * the correct binary identity (not Terminal's). Also opens System Settings as fallback.
  */
 async requestArcAutomationPermission() : Promise<boolean> {
     return await TAURI_INVOKE("request_arc_automation_permission");

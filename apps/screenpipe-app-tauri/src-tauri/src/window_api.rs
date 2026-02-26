@@ -1420,8 +1420,8 @@ impl ShowRewindWindow {
             }
             ShowRewindWindow::PermissionRecovery => {
                 let builder = self.window_builder(app, "/permission-recovery")
-                    .inner_size(500.0, 580.0)
-                    .min_inner_size(450.0, 500.0)
+                    .inner_size(420.0, 420.0)
+                    .min_inner_size(400.0, 350.0)
                     .resizable(false)
                     .focused(true)
                     .always_on_top(true)

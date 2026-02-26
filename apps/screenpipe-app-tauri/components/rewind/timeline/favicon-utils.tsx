@@ -6,10 +6,13 @@ import React, { useState } from "react";
 
 /**
  * Extract the domain from a URL, stripping "www." prefix.
+ * Handles URLs with or without protocol (e.g. "github.com/foo" or "https://github.com/foo").
  */
 export function extractDomain(url: string): string | null {
 	try {
-		const hostname = new URL(url).hostname;
+		// Add protocol if missing — browser_url from screenpipe often lacks it
+		const normalized = url.includes("://") ? url : `https://${url}`;
+		const hostname = new URL(normalized).hostname;
 		return hostname.replace(/^www\./, "") || null;
 	} catch {
 		return null;
