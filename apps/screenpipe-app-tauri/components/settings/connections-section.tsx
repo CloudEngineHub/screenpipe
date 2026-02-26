@@ -14,7 +14,6 @@ import { writeFile, readTextFile } from "@tauri-apps/plugin-fs";
 import { fetch as tauriFetch } from "@tauri-apps/plugin-http";
 import { platform } from "@tauri-apps/plugin-os";
 import { join, homeDir } from "@tauri-apps/api/path";
-import { ObsidianSyncCard } from "./obsidian-sync-card";
 import { AppleIntelligenceCard } from "./apple-intelligence-card";
 import { CalendarCard } from "./calendar-card";
 import { GoogleCalendarCard } from "./google-calendar-card";
@@ -621,9 +620,6 @@ export function ConnectionsSection() {
 
         {/* Google Calendar (cloud) */}
         <GoogleCalendarCard />
-
-        {/* Obsidian Sync */}
-        <ObsidianSyncCard />
 
         {/* Docs link */}
         <button

@@ -45,6 +45,7 @@ fn extract_browser_url(
     // Tier 1: AXDocument attribute on the window
     if let Some(url) = get_string_attr(window, ax::attr::document()) {
         if url.starts_with("http://") || url.starts_with("https://") {
+            debug!("browser_url: tier1 AXDocument hit for {}: {}", app_name, url);
             return Some(url);
         }
     }
@@ -53,15 +54,18 @@ fn extract_browser_url(
     let app_lower = app_name.to_lowercase();
     if app_lower.contains("arc") {
         if let Some(url) = get_arc_url(window_name) {
+            debug!("browser_url: tier2 Arc AppleScript hit: {}", url);
             return Some(url);
         }
     }
 
     // Tier 3: Shallow walk for AXTextField with URL-like value
     if let Some(url) = find_url_in_children(window, 0, 5) {
+        debug!("browser_url: tier3 AXTextField hit for {}: {}", app_name, url);
         return Some(url);
     }
 
+    debug!("browser_url: all tiers failed for app={}, window={}", app_name, window_name);
     None
 }
 
@@ -69,38 +73,61 @@ fn extract_browser_url(
 /// Cross-checks the returned title against window_name to avoid stale results.
 fn get_arc_url(window_name: &str) -> Option<String> {
     let script = r#"tell application "Arc"
-        set currentTab to active tab of front window
-        set tabURL to URL of currentTab
-        set tabTitle to title of currentTab
-        return tabTitle & "\n" & tabURL
+        set t to title of active tab of front window
+        set u to URL of active tab of front window
+        return t & "\n" & u
     end tell"#;
 
-    let output = Command::new("osascript")
+    let output = match Command::new("osascript")
         .arg("-e")
         .arg(script)
         .output()
-        .ok()?;
+    {
+        Ok(o) => o,
+        Err(e) => {
+            debug!("get_arc_url: osascript spawn failed: {}", e);
+            return None;
+        }
+    };
 
     if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        debug!("get_arc_url: osascript failed (exit={}): {}", output.status, stderr.trim());
         return None;
     }
 
     let result = String::from_utf8_lossy(&output.stdout).trim().to_string();
     let mut lines = result.lines();
-    let title = lines.next()?;
-    let url = lines.next()?;
+    let title = match lines.next() {
+        Some(t) => t,
+        None => {
+            debug!("get_arc_url: no title line in output");
+            return None;
+        }
+    };
+    let url = match lines.next() {
+        Some(u) => u,
+        None => {
+            debug!("get_arc_url: no URL line in output (title={})", title);
+            return None;
+        }
+    };
 
     // Cross-check: window title should contain the tab title (or vice versa)
     let window_lower = window_name.to_lowercase();
     let title_lower = title.to_lowercase();
     if !window_lower.contains(&title_lower) && !title_lower.contains(&window_lower) {
-        // Title mismatch — may be stale
+        debug!(
+            "get_arc_url: title mismatch — window='{}', arc_title='{}', url='{}'",
+            window_name, title, url
+        );
         return None;
     }
 
     if url.starts_with("http://") || url.starts_with("https://") {
         Some(url.to_string())
     } else {
+        debug!("get_arc_url: URL not http(s): {}", url);
         None
     }
 }

@@ -57,7 +57,6 @@ mod windows_overlay;
 #[allow(deprecated)]
 mod space_monitor;
 mod sync;
-mod obsidian_sync;
 mod reminders;
 mod calendar;
 mod pi;
@@ -1223,15 +1222,6 @@ async fn main() {
                 pi::pi_prompt,
                 pi::pi_abort,
                 pi::pi_new_session,
-                // Obsidian Sync commands
-                obsidian_sync::obsidian_save_settings,
-                obsidian_sync::obsidian_validate_vault,
-                obsidian_sync::obsidian_get_vault_paths,
-                obsidian_sync::obsidian_get_sync_status,
-                obsidian_sync::obsidian_run_sync,
-                obsidian_sync::obsidian_start_scheduler,
-                obsidian_sync::obsidian_stop_scheduler,
-                obsidian_sync::obsidian_cancel_sync,
                 // Reminders commands
                 reminders::reminders_status,
                 reminders::reminders_authorize,
@@ -1261,8 +1251,6 @@ async fn main() {
             .typ::<sync::SyncStatusResponse>()
             .typ::<sync::SyncDeviceInfo>()
             .typ::<sync::SyncConfig>()
-            .typ::<obsidian_sync::ObsidianSyncSettings>()
-            .typ::<obsidian_sync::ObsidianSyncStatus>()
             .typ::<reminders::RemindersStatus>()
             .typ::<reminders::ReminderItem>()
             .typ::<reminders::ScanResult>()
@@ -1286,7 +1274,6 @@ async fn main() {
         is_starting: Arc::new(AtomicBool::new(false)),
     };
     let pi_state = pi::PiState(Arc::new(tokio::sync::Mutex::new(None)));
-    let obsidian_sync_state = obsidian_sync::ObsidianSyncState::new();
     let reminders_state = reminders::RemindersState::new();
     let suggestions_state = suggestions::SuggestionsState::new();
     #[allow(clippy::single_match)]
@@ -1356,7 +1343,6 @@ async fn main() {
 
         let app = app.manage(recording_state)
         .manage(pi_state)
-        .manage(obsidian_sync_state)
         .manage(reminders_state)
         .manage(suggestions_state)
         .invoke_handler(tauri::generate_handler![
@@ -1437,15 +1423,6 @@ async fn main() {
             pi::pi_prompt,
             pi::pi_abort,
             pi::pi_new_session,
-            // Obsidian Sync commands
-            obsidian_sync::obsidian_save_settings,
-            obsidian_sync::obsidian_validate_vault,
-            obsidian_sync::obsidian_get_vault_paths,
-            obsidian_sync::obsidian_get_sync_status,
-            obsidian_sync::obsidian_run_sync,
-            obsidian_sync::obsidian_start_scheduler,
-            obsidian_sync::obsidian_stop_scheduler,
-            obsidian_sync::obsidian_cancel_sync,
             // Reminders commands
             reminders::reminders_status,
             reminders::reminders_authorize,
@@ -2106,20 +2083,6 @@ async fn main() {
                 if let Err(e) = initialize_global_shortcuts(&app_handle_clone).await {
                     warn!("Failed to initialize global shortcuts: {}", e);
                 }
-            });
-
-            // Auto-start obsidian sync scheduler if it was enabled
-            let app_handle_clone = app_handle.clone();
-            let obsidian_state = app_handle.state::<obsidian_sync::ObsidianSyncState>();
-            let obsidian_state_clone = obsidian_sync::ObsidianSyncState {
-                status: obsidian_state.status.clone(),
-                scheduler_handle: obsidian_state.scheduler_handle.clone(),
-                current_pid: obsidian_state.current_pid.clone(),
-            };
-            tauri::async_runtime::spawn(async move {
-                // Small delay to ensure everything is ready
-                tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
-                obsidian_sync::auto_start_scheduler(app_handle_clone, &obsidian_state_clone).await;
             });
 
             // Auto-start suggestions scheduler (always on)

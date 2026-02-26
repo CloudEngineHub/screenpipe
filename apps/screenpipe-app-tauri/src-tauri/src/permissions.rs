@@ -691,10 +691,12 @@ pub async fn start_permission_monitor(app: tauri::AppHandle) {
         let screen_confirmed_lost = screen_fail_count == REQUIRED_CONSECUTIVE_FAILURES;
         let mic_confirmed_lost = mic_fail_count == REQUIRED_CONSECUTIVE_FAILURES;
         let accessibility_confirmed_lost = accessibility_fail_count == REQUIRED_CONSECUTIVE_FAILURES;
-        let arc_confirmed_lost = arc_fail_count == REQUIRED_CONSECUTIVE_FAILURES;
+        // Arc automation is tracked but NOT used to trigger the recovery modal —
+        // it's optional and shouldn't block the user. The arc_automation field is
+        // still included in the payload for the banner/recovery page to display.
+        let _ = arc_fail_count; // keep tracking for payload, suppress unused warning
 
         // Only emit permission-lost when a CORE permission is lost (screen, mic, accessibility).
-        // Arc automation is optional — don't open the recovery modal just for that.
         let core_lost = screen_confirmed_lost || mic_confirmed_lost || accessibility_confirmed_lost;
         if core_lost && (!screen_ok || !mic_ok || !accessibility_ok) {
             // Enforce cooldown to prevent modal spam from flaky checks

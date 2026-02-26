@@ -1036,23 +1036,50 @@ export function StandaloneChat({ className }: { className?: string } = {}) {
         (async () => {
           if (piInfo?.running) {
             try {
+              // Abort any in-flight message, then reset session
+              if (piMessageIdRef.current) {
+                await commands.piAbort();
+              }
               await commands.piNewSession();
             } catch (e) {
               console.warn("[Pi] Failed to reset session:", e);
             }
           }
+          // Clear all streaming state so sendPiMessage doesn't think a message is in-flight
+          piStreamingTextRef.current = "";
+          piMessageIdRef.current = null;
+          piContentBlocksRef.current = [];
+          setIsLoading(false);
+          setIsStreaming(false);
           setMessages([]);
           setConversationId(null);
           setPrefillContext(null);
           setPrefillFrameId(null);
           // Set input as fallback in case auto-send fails (pi not ready)
           setInput(fullMessage);
-          // Try to auto-send after state settles
-          setTimeout(() => {
-            if (sendMessageRef.current) {
-              sendMessageRef.current(fullMessage);
+          // Wait for Pi to be ready before sending (poll up to 10s)
+          const waitForPi = async (maxMs: number): Promise<boolean> => {
+            const start = Date.now();
+            while (Date.now() - start < maxMs) {
+              try {
+                const info = await commands.piInfo();
+                if (info.status === "ok" && info.data.running) {
+                  // Update React state so canChat becomes true before we send
+                  setPiInfo(info.data);
+                  return true;
+                }
+              } catch {}
+              await new Promise(r => setTimeout(r, 500));
             }
-          }, 500);
+            return false;
+          };
+          const ready = piInfo?.running || await waitForPi(10000);
+          if (ready) {
+            // Give React one tick to re-render with updated piInfo so sendMessage's canChat is true
+            setTimeout(() => {
+              sendMessageRef.current?.(fullMessage);
+            }, 300);
+          }
         })();
         return;
       }
