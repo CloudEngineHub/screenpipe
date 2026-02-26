@@ -47,6 +47,33 @@ export default function RootLayout({
       }
     } catch {}
 
+    // Focus recovery for Tauri WKWebView (macOS)
+    // The webview can silently lose focus, making the entire UI unresponsive
+    // to keyboard and sometimes mouse input. Detect and recover by refocusing.
+    const handleWindowFocus = () => {
+      // When the native window regains focus, ensure the webview body is focused
+      // so keyboard events work. Small delay to let Tauri finish its focus cycle.
+      setTimeout(() => {
+        if (document.activeElement === document.body || !document.activeElement) {
+          document.body.focus();
+        }
+      }, 50);
+    };
+    window.addEventListener("focus", handleWindowFocus);
+
+    // Safety valve: triple-click on the app background to force-dismiss stuck overlays
+    // by blurring and refocusing — helps when overlays block normal interaction
+    const handlePointerRecovery = () => {
+      // If there are any fixed z-50 overlays that shouldn't be there,
+      // force focus back to body to recover keyboard input
+      if (document.activeElement === document.body || !document.activeElement) {
+        document.body.tabIndex = -1;
+        document.body.focus();
+      }
+    };
+    // Re-check focus on any click — if click reaches window, focus should work
+    window.addEventListener("mousedown", handlePointerRecovery, true);
+
     // Auto-reload on IndexedDB disconnect (APP-2E, 27 users on v2.0.379)
     // WKWebView's IndexedDB server can crash; the page becomes unusable.
     // PostHog JS SDK uses IndexedDB for session replay — this is a known WebKit bug.
@@ -107,6 +134,8 @@ export default function RootLayout({
     });
 
     return () => {
+      window.removeEventListener("focus", handleWindowFocus);
+      window.removeEventListener("mousedown", handlePointerRecovery, true);
       window.removeEventListener("unhandledrejection", handleUnhandledRejection);
     };
   }, []);

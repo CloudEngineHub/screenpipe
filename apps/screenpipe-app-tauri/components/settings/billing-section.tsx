@@ -46,14 +46,11 @@ function formatCardBrand(brand: string): string {
   return brands[brand] ?? brand;
 }
 
-function getUsageLabel(ratio: number): {
-  label: string;
-  color: string;
-} {
-  if (ratio >= 1) return { label: "using paid overage", color: "text-red-500" };
-  if (ratio >= 0.8) return { label: "heavy usage", color: "text-orange-500" };
-  if (ratio >= 0.5) return { label: "moderate usage", color: "text-yellow-500" };
-  return { label: "low usage", color: "text-green-500" };
+function getUsageLabel(ratio: number): string {
+  if (ratio >= 1) return "using paid overage";
+  if (ratio >= 0.8) return "heavy usage";
+  if (ratio >= 0.5) return "moderate usage";
+  return "low usage";
 }
 
 function formatResetTime(isoString: string): string {
@@ -84,9 +81,9 @@ export function BillingSection() {
     [token]
   );
 
-  const fetchData = useCallback(async () => {
+  const fetchData = useCallback(async (silent = false) => {
     if (!token) return;
-    setLoading(true);
+    if (!silent) setLoading(true);
     setError(null);
     try {
       const [usageRes, billingRes] = await Promise.all([
@@ -119,6 +116,9 @@ export function BillingSection() {
 
   useEffect(() => {
     fetchData();
+    // Refresh usage every 30s so the progress bar stays current
+    const interval = setInterval(() => fetchData(true), 30_000);
+    return () => clearInterval(interval);
   }, [fetchData]);
 
   const handleSaveAutoReload = async () => {
@@ -208,7 +208,7 @@ export function BillingSection() {
         </div>
         <Card className="p-6 text-center">
           <p className="text-sm text-muted-foreground mb-4">{error}</p>
-          <Button variant="outline" size="sm" onClick={fetchData}>
+          <Button variant="outline" size="sm" onClick={() => fetchData()}>
             <RefreshCw className="w-3.5 h-3.5 mr-1.5" />
             retry
           </Button>
@@ -223,8 +223,9 @@ export function BillingSection() {
       : 0
     : 0;
   const progressValue = Math.min(usageRatio * 100, 100);
-  const { label: usageLabel, color: usageColor } = getUsageLabel(usageRatio);
-  const tierLabel = usage?.tier === "pro" ? "pro" : "free";
+  const usageLabel = getUsageLabel(usageRatio);
+  const tierLabel =
+    usage?.tier === "pro" || settings.user?.cloud_subscribed ? "pro" : "free";
 
   return (
     <div className="space-y-6">
@@ -278,7 +279,7 @@ export function BillingSection() {
           <h3 className="text-sm font-semibold text-foreground">
             daily usage
           </h3>
-          <span className={`text-xs font-medium ${usageColor}`}>
+          <span className="text-xs font-medium text-muted-foreground">
             {usageLabel}
           </span>
         </div>

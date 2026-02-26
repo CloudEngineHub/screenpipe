@@ -21,21 +21,8 @@ function formatDuration(seconds: number): string {
 	return secs > 0 ? `${mins}m ${secs}s` : `${mins}m`;
 }
 
-// Subtle left-border colors to visually distinguish speakers
-const SPEAKER_COLORS = [
-	"border-l-blue-400/60",
-	"border-l-emerald-400/60",
-	"border-l-amber-400/60",
-	"border-l-rose-400/60",
-	"border-l-violet-400/60",
-	"border-l-cyan-400/60",
-	"border-l-orange-400/60",
-	"border-l-pink-400/60",
-];
-
-function getSpeakerColorClass(speakerId?: number): string {
-	if (speakerId == null) return SPEAKER_COLORS[0];
-	return SPEAKER_COLORS[Math.abs(speakerId) % SPEAKER_COLORS.length];
+function getSpeakerColorClass(_speakerId?: number): string {
+	return "border-l-border";
 }
 
 export interface ConversationBubbleProps {

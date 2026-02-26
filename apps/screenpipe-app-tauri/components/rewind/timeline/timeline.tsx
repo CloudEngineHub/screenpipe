@@ -962,7 +962,7 @@ export const TimelineSlider = ({
 								{/* Vertical stacked icons - favicons for browser groups, app icons otherwise */}
 								{groupWidth > 30 && (
 									<motion.div
-										className="absolute top-1 left-1/2 -translate-x-1/2 z-10 flex flex-col cursor-pointer p-1.5"
+										className="absolute top-1/2 -translate-y-1/2 left-1/2 -translate-x-1/2 z-10 flex flex-col items-center cursor-pointer p-1"
 										style={{
 											direction: 'ltr',
 											pointerEvents: 'auto',
@@ -984,7 +984,7 @@ export const TimelineSlider = ({
 											group.topDomains.slice(0, groupWidth > 60 ? 2 : 1).map((domain, idx) => (
 												<motion.div
 													key={`fav-${domain}-${idx}`}
-													className="w-8 h-8 rounded flex-shrink-0 overflow-hidden flex items-center justify-center"
+													className="w-5 h-5 rounded-md flex-shrink-0 overflow-hidden flex items-center justify-center"
 													style={{
 														zIndex: 10 - idx,
 														position: 'relative',
@@ -992,12 +992,12 @@ export const TimelineSlider = ({
 													}}
 													variants={{
 														collapsed: {
-															marginTop: idx === 0 ? 0 : -10,
+															marginTop: idx === 0 ? 0 : -6,
 															scale: 1
 														},
 														expanded: {
-															marginTop: idx === 0 ? 0 : 4,
-															scale: 1.1
+															marginTop: idx === 0 ? 0 : 3,
+															scale: 1.15
 														}
 													}}
 													transition={{ type: "spring", stiffness: 400, damping: 25 }}
@@ -1005,8 +1005,8 @@ export const TimelineSlider = ({
 													<FaviconImg
 														domain={domain}
 														fallbackAppName={group.appName}
-														size={32}
-														className="w-full h-full rounded-sm object-contain"
+														size={20}
+														className="w-full h-full rounded-sm object-cover"
 													/>
 												</motion.div>
 											))
@@ -1015,7 +1015,7 @@ export const TimelineSlider = ({
 											group.appNames.slice(0, 2).map((appName, idx) => (
 												<motion.div
 													key={`${appName}-${idx}`}
-													className="w-8 h-8 rounded flex-shrink-0 overflow-hidden flex items-center justify-center"
+													className="w-5 h-5 rounded-md flex-shrink-0 overflow-hidden flex items-center justify-center"
 													style={{
 														zIndex: 10 - idx,
 														position: 'relative',
@@ -1023,19 +1023,19 @@ export const TimelineSlider = ({
 													}}
 													variants={{
 														collapsed: {
-															marginTop: idx === 0 ? 0 : -10,
+															marginTop: idx === 0 ? 0 : -6,
 															scale: 1
 														},
 														expanded: {
-															marginTop: idx === 0 ? 0 : 4,
-															scale: 1.1
+															marginTop: idx === 0 ? 0 : 3,
+															scale: 1.15
 														}
 													}}
 													transition={{ type: "spring", stiffness: 400, damping: 25 }}
 												>
 													<CachedAppIcon appName={appName} />
 													<span
-														className="absolute inset-0 flex items-center justify-center text-[10px] font-bold text-white/90 pointer-events-none"
+														className="absolute inset-0 flex items-center justify-center text-[8px] font-bold text-white/90 pointer-events-none"
 														style={{ zIndex: -1 }}
 													>
 														{appName.charAt(0).toUpperCase()}

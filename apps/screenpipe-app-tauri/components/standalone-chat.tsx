@@ -678,6 +678,8 @@ export function StandaloneChat({ className }: { className?: string } = {}) {
 
   // Ref to sendMessage so useEffect callbacks can call it without stale closures
   const sendMessageRef = useRef<(msg: string) => Promise<void>>();
+  // Bypass guard for auto-send from chat-prefill (Pi confirmed running but React state stale)
+  const autoSendBypassRef = useRef(false);
 
   // Chat history state
   const [conversationId, setConversationId] = useState<string | null>(null);
@@ -1081,10 +1083,16 @@ export function StandaloneChat({ className }: { className?: string } = {}) {
           };
           const ready = piInfo?.running || await waitForPi(10000);
           if (ready) {
-            // Give React a tick to re-render with updated piInfo so sendMessage's canChat is true
-            setTimeout(() => {
-              sendMessageRef.current?.(fullMessage);
-            }, 300);
+            // Signal that the next sendPiMessage call should bypass the piInfo guard
+            // (we just confirmed Pi is running via waitForPi but React state may be stale)
+            autoSendBypassRef.current = true;
+            // Give React a tick to re-render with updated piInfo
+            await new Promise(r => setTimeout(r, 200));
+            if (sendMessageRef.current) {
+              await sendMessageRef.current(fullMessage);
+              setInput("");
+            }
+            autoSendBypassRef.current = false;
           }
         })();
         return;
@@ -2062,7 +2070,7 @@ export function StandaloneChat({ className }: { className?: string } = {}) {
 
   // Send message using Pi agent
   async function sendPiMessage(userMessage: string, displayLabel?: string) {
-    if (!piInfo?.running) {
+    if (!piInfo?.running && !autoSendBypassRef.current) {
       toast({ title: "Pi not running", description: "Please wait for Pi to start", variant: "destructive" });
       return;
     }
@@ -2312,7 +2320,7 @@ export function StandaloneChat({ className }: { className?: string } = {}) {
   }
 
   async function sendMessage(userMessage: string, displayLabel?: string) {
-    if (!canChat || !activePreset) return;
+    if ((!canChat && !autoSendBypassRef.current) || !activePreset) return;
 
     // All providers route through Pi agent
     return sendPiMessage(userMessage, displayLabel);

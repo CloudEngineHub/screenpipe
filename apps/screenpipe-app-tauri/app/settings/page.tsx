@@ -53,6 +53,7 @@ import { useSettings } from "@/lib/hooks/use-settings";
 import { useTeam } from "@/lib/hooks/use-team";
 import { open as openUrl } from "@tauri-apps/plugin-shell";
 import { commands } from "@/lib/utils/tauri";
+import { toast } from "@/components/ui/use-toast";
 import {
   Tooltip,
   TooltipContent,
@@ -681,6 +682,8 @@ function SettingsPageContent() {
 function ReferralSection() {
   const { settings } = useSettings();
   const [copied, setCopied] = useState(false);
+  const [inviteEmail, setInviteEmail] = useState("");
+  const [sending, setSending] = useState(false);
   const referralCode = settings.user?.id ? `REF-${settings.user.id.slice(0, 8).toUpperCase()}` : "";
   const referralLink = referralCode ? `https://screenpi.pe/?ref=${referralCode}` : "";
 
@@ -689,6 +692,35 @@ function ReferralSection() {
     await navigator.clipboard.writeText(referralLink);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
+  };
+
+  const handleInvite = async () => {
+    if (!inviteEmail || !referralLink || sending) return;
+    setSending(true);
+    try {
+      const res = await fetch("https://screenpi.pe/api/referral/invite", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${settings.user?.token}`,
+        },
+        body: JSON.stringify({
+          email: inviteEmail,
+          referralLink,
+          senderName: settings.user?.email,
+        }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || "failed to send invite");
+      }
+      setInviteEmail("");
+      toast({ title: "invite sent!" });
+    } catch (e: any) {
+      toast({ title: e.message || "failed to send invite", variant: "destructive" });
+    } finally {
+      setSending(false);
+    }
   };
 
   return (
@@ -731,6 +763,27 @@ function ReferralSection() {
             <p className="text-xs text-muted-foreground mt-2">
               rewards auto-applied to your next subscription payment.
             </p>
+
+            <div className="mt-4 pt-4 border-t border-border">
+              <h3 className="text-sm font-medium text-foreground mb-2">invite by email</h3>
+              <div className="flex gap-2">
+                <input
+                  type="email"
+                  placeholder="friend@email.com"
+                  value={inviteEmail}
+                  onChange={(e) => setInviteEmail(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && handleInvite()}
+                  className="flex-1 px-3 py-2 text-xs border border-border bg-card text-foreground"
+                />
+                <button
+                  onClick={handleInvite}
+                  disabled={!inviteEmail || sending}
+                  className="px-4 py-2 text-xs font-medium border border-border bg-background hover:bg-foreground hover:text-background transition-colors duration-150 disabled:opacity-50 disabled:pointer-events-none"
+                >
+                  {sending ? "SENDING..." : "INVITE"}
+                </button>
+              </div>
+            </div>
           </div>
         ) : (
           <div className="border border-border p-4 bg-card">

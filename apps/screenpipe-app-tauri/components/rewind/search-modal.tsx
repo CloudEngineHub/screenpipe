@@ -806,7 +806,19 @@ export function SearchModal({ isOpen, onClose, onNavigateToTimestamp, embedded =
     };
 
     window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
+    // Also listen on document capture phase as safety net —
+    // if a focus trap or overlay swallows the window-level event,
+    // this still fires and prevents the modal from getting stuck
+    const captureEscape = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        onClose();
+      }
+    };
+    document.addEventListener("keydown", captureEscape, true);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      document.removeEventListener("keydown", captureEscape, true);
+    };
   }, [isOpen, filteredResults, selectedIndex, selectedSpeaker, speakerTranscriptions, selectedTranscriptionIndex, onClose, onNavigateToTimestamp, handleSelectResult, handleSendToAI, handleBackFromSpeaker]);
 
   // Scroll selected item into view
