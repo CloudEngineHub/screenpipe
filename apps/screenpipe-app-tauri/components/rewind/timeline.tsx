@@ -165,6 +165,10 @@ export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 	// for the first frame after a cross-date search navigation (avoids ~5s video load)
 	const [searchNavFrame, setSearchNavFrame] = useState(false);
 
+	// Arrow key navigation flag — disables debounce for instant frame stepping
+	const [isArrowNav, setIsArrowNav] = useState(false);
+	const arrowNavTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
 	const dismissSearchHighlight = useSearchHighlight((s) => s.dismiss);
 	const hasSearchHighlight = useSearchHighlight((s) => s.highlightTerms.length > 0 && !s.dismissed);
 
@@ -926,6 +930,12 @@ export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 			}
 
 			const isAlt = e.altKey;
+
+			// Signal arrow nav to skip debounce
+			setIsArrowNav(true);
+			if (arrowNavTimerRef.current) clearTimeout(arrowNavTimerRef.current);
+			arrowNavTimerRef.current = setTimeout(() => setIsArrowNav(false), 300);
+
 			if (e.key === "ArrowLeft") {
 				e.preventDefault();
 				pausePlayback();
@@ -1519,6 +1529,8 @@ export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 							allDeviceIds={allDeviceIds}
 							searchNavFrame={searchNavFrame}
 							onSearchNavComplete={() => setSearchNavFrame(false)}
+							isArrowNav={isArrowNav}
+							adjacentFrames={frames.slice(Math.max(0, currentIndex - 3), currentIndex + 4).filter(Boolean)}
 							onNavigate={(direction) => {
 								// newer = lower index (-1), older = higher index (+1)
 								const newIndex = direction === "next"

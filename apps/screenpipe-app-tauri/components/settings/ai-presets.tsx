@@ -1142,8 +1142,7 @@ export const AIPresets = () => {
                   </div>
                 </div>
 
-                <div className="flex justify-between items-center pt-2 border-t border-border">
-                  <div className="flex gap-2">
+                <div className="flex flex-wrap gap-1 items-center pt-2 border-t border-border">
                     <Button
                       variant="ghost"
                       size="sm"
@@ -1156,7 +1155,7 @@ export const AIPresets = () => {
                     >
                       Duplicate
                     </Button>
-                    
+
                     <Button
                       variant="ghost"
                       size="sm"
@@ -1169,7 +1168,6 @@ export const AIPresets = () => {
                     >
                       {isDefault ? "Current default" : "Set as default"}
                     </Button>
-                  </div>
 
                   <Button
                     variant="ghost"
@@ -1179,7 +1177,7 @@ export const AIPresets = () => {
                       setPresetToDelete(preset.id);
                     }}
                     disabled={isLoading || isDefault}
-                    className="text-xs text-destructive hover:text-destructive"
+                    className="text-xs text-destructive hover:text-destructive ml-auto"
                   >
                     <Trash2 className="w-3 h-3 mr-1" />
                     Remove

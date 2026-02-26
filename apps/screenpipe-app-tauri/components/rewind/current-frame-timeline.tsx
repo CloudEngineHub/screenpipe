@@ -39,6 +39,10 @@ interface CurrentFrameTimelineProps {
 	searchNavFrame?: boolean;
 	/** Called after the search nav frame has loaded, so subsequent scrolling uses video mode */
 	onSearchNavComplete?: () => void;
+	/** When true, skip debounce for instant arrow-key navigation */
+	isArrowNav?: boolean;
+	/** Adjacent frames for preloading (±PRELOAD_ADJACENT around current) */
+	adjacentFrames?: StreamTimeSeriesResponse[];
 }
 
 
@@ -102,6 +106,8 @@ export const CurrentFrameTimeline: FC<CurrentFrameTimelineProps> = ({
 	allDeviceIds,
 	searchNavFrame,
 	onSearchNavComplete,
+	isArrowNav,
+	adjacentFrames,
 }) => {
 	const { isMac } = usePlatform();
 	const { settings } = useSettings();
@@ -167,7 +173,7 @@ export const CurrentFrameTimeline: FC<CurrentFrameTimelineProps> = ({
 	const [snapshotAssetUrl, setSnapshotAssetUrl] = useState<string | null>(null);
 	const [snapshotFailed, setSnapshotFailed] = useState(false);
 
-	// Debounce frame changes
+	// Debounce frame changes — skip debounce for arrow key navigation
 	useEffect(() => {
 		if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
 		if (!frameId || !filePath) {
@@ -175,13 +181,14 @@ export const CurrentFrameTimeline: FC<CurrentFrameTimelineProps> = ({
 			return;
 		}
 		setIsLoading(true);
+		const delay = isArrowNav ? FRAME_LOAD_DEBOUNCE_ARROW_MS : FRAME_LOAD_DEBOUNCE_MS;
 		debounceTimerRef.current = setTimeout(() => {
 			setDebouncedFrame({ filePath, offsetIndex, fps: fpsFromServer, frameId });
-		}, FRAME_LOAD_DEBOUNCE_MS);
+		}, delay);
 		return () => {
 			if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
 		};
-	}, [frameId, filePath, offsetIndex, fpsFromServer]);
+	}, [frameId, filePath, offsetIndex, fpsFromServer, isArrowNav]);
 
 	// Clear text selection when frame changes (avoid stale selection from previous frame)
 	useEffect(() => {
@@ -701,6 +708,32 @@ export const CurrentFrameTimeline: FC<CurrentFrameTimelineProps> = ({
 		}
 	}, [debouncedFrame?.filePath, isSnapshotFrame]);
 
+	// Preload adjacent video chunks so crossing chunk boundaries feels instant
+	useEffect(() => {
+		if (!adjacentFrames?.length) return;
+		const seen = new Set<string>();
+		if (debouncedFrame?.filePath) seen.add(debouncedFrame.filePath);
+		for (const frame of adjacentFrames) {
+			const path = frame?.devices?.[0]?.metadata?.file_path;
+			if (!path || seen.has(path)) continue;
+			const lower = path.toLowerCase();
+			if (lower.endsWith('.jpg') || lower.endsWith('.jpeg') || lower.endsWith('.png')) continue;
+			seen.add(path);
+			// Preload video chunk: create a hidden video element to trigger browser cache
+			getVideoUrl(path).then((url) => {
+				if (!url) return;
+				const v = document.createElement("video");
+				v.preload = "auto";
+				v.muted = true;
+				v.src = url;
+				// Load just enough for metadata + first frame, then discard
+				v.addEventListener("loadeddata", () => { v.src = ""; }, { once: true });
+				v.addEventListener("error", () => { v.src = ""; }, { once: true });
+				v.load();
+			});
+		}
+	}, [adjacentFrames, debouncedFrame?.filePath, getVideoUrl]);
+
 	if (!frameId) {
 		return (
 			<div className="absolute inset-0 overflow-hidden bg-background">
@@ -863,18 +896,22 @@ export const CurrentFrameTimeline: FC<CurrentFrameTimelineProps> = ({
 				</div>
 			)}
 
-			{/* Video element — always visible, no canvas back buffer needed */}
+			{/* Video element — crossfades in when frame is ready */}
 			<video
 				ref={videoRef}
 				muted
 				playsInline
 				preload="auto"
 				className="absolute inset-0 w-full h-full object-contain"
-				style={{ zIndex: 1 }}
+				style={{
+					zIndex: 1,
+					opacity: !isLoading && useVideoMode && !isSnapshotFrame && !searchNavFrame ? 1 : 0,
+					transition: `opacity ${CROSSFADE_MS}ms ease-out`,
+				}}
 				onError={() => {
 					const err = videoRef.current?.error;
 					console.warn("Video error:", err?.code, err?.message);
-		
+
 					if (debouncedFrame?.filePath) {
 						markChunkFailed(debouncedFrame.filePath);
 					}
@@ -883,25 +920,33 @@ export const CurrentFrameTimeline: FC<CurrentFrameTimelineProps> = ({
 				}}
 			/>
 
-			{/* Snapshot frame: direct local file via asset protocol — no HTTP/DB needed */}
+			{/* Snapshot frame: direct local file via asset protocol — crossfades in */}
 			{snapshotAssetUrl && isSnapshotFrame && !snapshotFailed && (
 				// eslint-disable-next-line @next/next/no-img-element
 				<img
 					src={snapshotAssetUrl}
 					className="absolute inset-0 w-full h-full object-contain"
-					style={{ zIndex: 2 }}
+					style={{
+						zIndex: 2,
+						opacity: !isLoading ? 1 : 0,
+						transition: `opacity ${CROSSFADE_MS}ms ease-out`,
+					}}
 					alt="Current frame"
 					draggable={false}
 				/>
 			)}
 
-			{/* Fallback mode: preloaded <img> via HTTP server (also used for search nav) */}
+			{/* Fallback mode: preloaded <img> via HTTP server — crossfades in */}
 			{displayedFallbackUrl && (!useVideoMode || searchNavFrame) && !(snapshotAssetUrl && isSnapshotFrame && !snapshotFailed) && (
 				// eslint-disable-next-line @next/next/no-img-element
 				<img
 					src={displayedFallbackUrl}
 					className="absolute inset-0 w-full h-full object-contain"
-					style={{ zIndex: 2 }}
+					style={{
+						zIndex: 2,
+						opacity: !isLoading ? 1 : 0,
+						transition: `opacity ${CROSSFADE_MS}ms ease-out`,
+					}}
 					alt="Current frame"
 					draggable={false}
 				/>
