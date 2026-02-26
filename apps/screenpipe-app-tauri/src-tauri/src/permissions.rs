@@ -390,25 +390,26 @@ pub fn check_arc_installed() -> bool {
 }
 
 /// Check if Automation permission for Arc is already granted.
-/// In production (.app bundle): uses direct FFI check against the app's own TCC entry.
-/// In dev mode: always returns true — dev builds inherit Terminal's permissions and
-/// the modal cannot manage Arc automation for a non-bundled binary.
+/// In production (.app bundle): uses direct FFI check (correct identity, no Terminal).
+/// In dev mode: runs the binary itself via launchctl (detached from Terminal) so
+/// macOS TCC checks the binary's own identity, not Terminal's.
 #[tauri::command(async)]
 #[specta::specta]
 pub fn check_arc_automation_permission(_app: tauri::AppHandle) -> bool {
     #[cfg(target_os = "macos")]
     {
-        if !is_app_bundle() {
-            // Dev mode: can't manage Arc automation (Terminal inheritance).
-            // Return true to skip showing the Arc row in the modal.
-            return true;
-        }
         let target = "company.thebrowser.Browser";
-        let result = ae_check_automation_direct(target, false);
-        if result != 0 {
-            info!("arc automation check: result={} (0=granted, -1744=denied, -1745=not_asked)", result);
+        if is_app_bundle() {
+            // Production: direct FFI check (no Terminal inheritance)
+            let result = ae_check_automation_direct(target, false);
+            if result != 0 {
+                info!("arc automation check (direct): result={}", result);
+            }
+            result == 0
+        } else {
+            // Dev mode: run self via launchctl to check without Terminal inheritance
+            run_self_detached("--check-arc-automation")
         }
-        result == 0
     }
 
     #[cfg(not(target_os = "macos"))]
@@ -428,8 +429,9 @@ fn is_app_bundle() -> bool {
 /// Call AEDeterminePermissionToAutomateTarget directly from the current process via FFI.
 /// Returns the raw OSStatus: 0 = granted, -1744 = denied, -1745 = not yet asked.
 /// When `ask_user` is true AND permission was not yet asked, macOS shows a system prompt.
+/// Public so main.rs can call it for --check-arc-automation / --trigger-arc-automation.
 #[cfg(target_os = "macos")]
-fn ae_check_automation_direct(target_bundle_id: &str, ask_user: bool) -> i32 {
+pub fn ae_check_automation_direct(target_bundle_id: &str, ask_user: bool) -> i32 {
     use std::ffi::c_void;
 
     #[repr(C)]
@@ -482,195 +484,117 @@ fn ae_check_automation_direct(target_bundle_id: &str, ask_user: bool) -> i32 {
     }
 }
 
-/// Generate Swift source for the AE helper binary.
-/// Supports a `request` CLI argument to trigger the permission prompt.
+
+/// Run the current binary itself via launchctl (detached from Terminal) with a flag.
+/// Waits for the result and returns true if the output is "granted".
+/// Used in dev mode so macOS TCC checks the binary's own identity.
 #[cfg(target_os = "macos")]
-fn ae_helper_swift_source(target_bundle_id: &str) -> String {
-    format!(
-        r#"import Foundation; import Carbon
-let b = "{target}"
-let ask = CommandLine.arguments.count > 1 && CommandLine.arguments[1] == "request"
-var a = AEDesc(descriptorType: 0, dataHandle: nil)
-let d = b.data(using: .utf8)!
-let e: OSErr = d.withUnsafeBytes {{ p in AECreateDesc(UInt32(typeApplicationBundleID), p.baseAddress!, p.count, &a) }}
-if e != noErr {{ print("error"); Foundation.exit(1) }}
-let r = AEDeterminePermissionToAutomateTarget(&a, typeWildCard, typeWildCard, ask)
-AEDisposeDesc(&a)
-switch r {{ case 0: print("granted"); case -1744: print("denied"); case -1745: print("not_asked"); default: print("error") }}
-"#,
-        target = target_bundle_id
-    )
-}
-
-/// Ensure the AE helper binary is compiled and up-to-date.
-/// Returns true on success.
-#[cfg(target_os = "macos")]
-fn ensure_ae_helper(target_bundle_id: &str) -> bool {
-    use std::process::Command;
-
-    let checker = "/tmp/screenpipe_ae_check";
-    let src_path = format!("{}.swift", checker);
-    let new_source = ae_helper_swift_source(target_bundle_id);
-
-    // Check if source changed (force recompile if so)
-    let source_changed = std::fs::read_to_string(&src_path)
-        .map(|existing| existing != new_source)
-        .unwrap_or(true);
-
-    if source_changed {
-        if std::fs::write(&src_path, &new_source).is_err() {
-            warn!("failed to write ae helper source");
-            return false;
-        }
-        let _ = std::fs::remove_file(checker);
-    }
-
-    if !std::path::Path::new(checker).exists() {
-        let compile = Command::new("swiftc")
-            .args([&src_path, "-o", checker, "-framework", "Carbon", "-O"])
-            .output();
-        match compile {
-            Ok(out) if out.status.success() => {}
-            Ok(out) => {
-                warn!("swiftc failed: {}", String::from_utf8_lossy(&out.stderr));
-                return false;
-            }
-            Err(e) => {
-                warn!("failed to run swiftc: {}", e);
-                return false;
-            }
-        }
-    }
-
-    true
-}
-
-/// Run the AE helper via launchctl (detached from Terminal) and return stdout content.
-/// Pass extra_args to the helper binary (e.g. &["request"] for prompt mode).
-#[cfg(target_os = "macos")]
-fn run_ae_helper_detached(target_bundle_id: &str, extra_args: &[&str], timeout_iters: u32) -> Option<String> {
+fn run_self_detached(flag: &str) -> bool {
     use std::process::Command;
     use std::time::Duration;
 
-    if !ensure_ae_helper(target_bundle_id) {
-        return None;
-    }
+    let exe = match std::env::current_exe() {
+        Ok(p) => p,
+        Err(e) => {
+            warn!("failed to get current exe: {}", e);
+            return false;
+        }
+    };
 
-    let checker = "/tmp/screenpipe_ae_check";
-    let result_path = "/tmp/screenpipe_ae_check_result";
-    let _ = std::fs::remove_file(result_path);
-    let _ = Command::new("launchctl")
-        .args(["remove", "pe.screenpi.ae-check"])
+    let label = format!("pe.screenpi.self-{}", flag.trim_start_matches("--"));
+    let result_path = format!("/tmp/screenpipe_self_{}_result", flag.trim_start_matches("--"));
+
+    let _ = std::fs::remove_file(&result_path);
+    let _ = Command::new("launchctl").args(["remove", &label]).output();
+
+    let exe_str = exe.to_string_lossy().to_string();
+    let submit = Command::new("launchctl")
+        .args(["submit", "-l", &label, "-o", &result_path, "--", &exe_str, flag])
         .output();
 
-    let mut args = vec![
-        "submit", "-l", "pe.screenpi.ae-check",
-        "-o", result_path, "--", checker,
-    ];
-    args.extend_from_slice(extra_args);
-
-    let submit = Command::new("launchctl").args(&args).output();
     if submit.is_err() {
-        warn!("failed to submit ae helper via launchctl");
-        return None;
+        warn!("failed to submit self via launchctl with {}", flag);
+        return false;
     }
 
-    for _ in 0..timeout_iters {
+    // Wait for result (binary exits quickly for --check, so 5s is plenty)
+    for _ in 0..25 {
         std::thread::sleep(Duration::from_millis(200));
-        if std::path::Path::new(result_path).exists() {
-            if let Ok(content) = std::fs::read_to_string(result_path) {
+        if std::path::Path::new(&result_path).exists() {
+            if let Ok(content) = std::fs::read_to_string(&result_path) {
                 if !content.is_empty() {
-                    let _ = Command::new("launchctl")
-                        .args(["remove", "pe.screenpi.ae-check"])
-                        .output();
-                    return Some(content.trim().to_string());
+                    let _ = Command::new("launchctl").args(["remove", &label]).output();
+                    let result = content.trim();
+                    if result != "granted" {
+                        info!("self detached {}: {}", flag, result);
+                    }
+                    return result == "granted";
                 }
             }
         }
     }
 
-    let _ = Command::new("launchctl")
-        .args(["remove", "pe.screenpi.ae-check"])
-        .output();
-    warn!("ae helper timed out");
-    None
+    let _ = Command::new("launchctl").args(["remove", &label]).output();
+    warn!("self detached {} timed out", flag);
+    false
 }
 
-/// Check AppleEvents automation permission by running a detached helper
-/// process via launchctl. This avoids inheriting Terminal's permissions.
+/// Fire-and-forget: submit the binary via launchctl with a flag, don't wait for result.
+/// Used for --trigger-arc-automation where the user needs to respond to a prompt.
 #[cfg(target_os = "macos")]
-fn ae_automation_check_detached(target_bundle_id: &str) -> bool {
-    match run_ae_helper_detached(target_bundle_id, &[], 10) {
-        Some(result) => {
-            if result != "granted" {
-                info!("arc automation check (detached): {}", result);
-            }
-            result == "granted"
-        }
-        None => false,
-    }
-}
-
-/// Submit a detached AE helper in "request" mode to trigger the macOS permission prompt.
-/// Non-blocking: returns immediately after submitting the launchctl job.
-/// The prompt will appear from the detached process; polling check detects the grant.
-#[cfg(target_os = "macos")]
-fn ae_automation_submit_request(target_bundle_id: &str) {
+fn run_self_detached_fire_and_forget(flag: &str) {
     use std::process::Command;
 
-    if !ensure_ae_helper(target_bundle_id) {
-        return;
-    }
+    let exe = match std::env::current_exe() {
+        Ok(p) => p,
+        Err(e) => {
+            warn!("failed to get current exe: {}", e);
+            return;
+        }
+    };
 
-    let checker = "/tmp/screenpipe_ae_check";
-    let result_path = "/tmp/screenpipe_ae_request_result";
-    let _ = std::fs::remove_file(result_path);
-    let _ = Command::new("launchctl")
-        .args(["remove", "pe.screenpi.ae-request"])
-        .output();
+    let label = format!("pe.screenpi.self-{}", flag.trim_start_matches("--"));
+    let result_path = format!("/tmp/screenpipe_self_{}_result", flag.trim_start_matches("--"));
 
+    let _ = std::fs::remove_file(&result_path);
+    let _ = Command::new("launchctl").args(["remove", &label]).output();
+
+    let exe_str = exe.to_string_lossy().to_string();
     let submit = Command::new("launchctl")
-        .args([
-            "submit", "-l", "pe.screenpi.ae-request",
-            "-o", result_path, "--", checker, "request",
-        ])
+        .args(["submit", "-l", &label, "-o", &result_path, "--", &exe_str, flag])
         .output();
 
-    if submit.is_err() {
-        warn!("failed to submit ae request via launchctl");
-    } else {
-        info!("submitted detached ae automation request — macOS prompt should appear");
+    match submit {
+        Ok(_) => info!("submitted self via launchctl with {} — prompt should appear", flag),
+        Err(e) => warn!("failed to submit self via launchctl: {}", e),
     }
 }
 
 /// Request macOS Automation permission for Arc browser.
 /// In production: triggers "screenpipe wants to control Arc" prompt via direct FFI.
-/// In dev mode: submits a detached helper to trigger the prompt outside Terminal's tree.
-/// Also opens System Settings > Automation as a fallback.
+/// In dev mode: runs the binary itself via launchctl to trigger the prompt with
+/// the correct binary identity (not Terminal's). Also opens System Settings as fallback.
 #[tauri::command(async)]
 #[specta::specta]
 pub fn request_arc_automation_permission(_app: tauri::AppHandle) -> bool {
     #[cfg(target_os = "macos")]
     {
-        let target = "company.thebrowser.Browser";
-
         if is_app_bundle() {
             // Production: trigger prompt directly from the app process.
-            // Shows "screenpipe wants to control Arc" system dialog.
             info!("requesting arc automation permission via direct FFI");
-            let result = ae_check_automation_direct(target, true);
+            let result = ae_check_automation_direct("company.thebrowser.Browser", true);
             info!("arc automation request (direct): result={}", result);
             if result != 0 {
-                // User denied or already denied before — open settings as fallback
                 open_permission_settings(OSPermission::Automation);
             }
             result == 0
         } else {
-            // Dev mode: submit detached request (non-blocking) to trigger prompt
-            // outside Terminal's process tree, then open settings as fallback.
-            info!("requesting arc automation permission via detached helper");
-            ae_automation_submit_request(target);
+            // Dev mode: run self via launchctl with --trigger-arc-automation.
+            // This triggers the macOS prompt with the binary's own identity
+            // so "screenpipe dev" appears in Automation settings.
+            info!("requesting arc automation permission via detached self");
             open_permission_settings(OSPermission::Automation);
+            run_self_detached_fire_and_forget("--trigger-arc-automation");
             false // Polling check will detect when granted
         }
     }

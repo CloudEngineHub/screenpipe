@@ -22,6 +22,7 @@ use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::sync::Arc;
+use std::time::Instant;
 use tokio::sync::{Mutex, Semaphore};
 use tracing::{debug, error, info, warn};
 
@@ -336,8 +337,8 @@ pub struct PipeManager {
     pipes_dir: PathBuf,
     /// Registered agent executors keyed by name (e.g. `"pi"`).
     executors: HashMap<String, Arc<dyn AgentExecutor>>,
-    /// Loaded pipe configs keyed by pipe name.
-    pipes: Arc<Mutex<HashMap<String, (PipeConfig, String)>>>, // (config, prompt_body)
+    /// Loaded pipe configs keyed by pipe name: (config, prompt_body, raw_content).
+    pipes: Arc<Mutex<HashMap<String, (PipeConfig, String, String)>>>,
     /// Recent run logs per pipe (last 50).
     logs: Arc<Mutex<HashMap<String, VecDeque<PipeRunLog>>>>,
     /// Currently running pipe PIDs.
@@ -354,6 +355,8 @@ pub struct PipeManager {
     store: Option<Arc<dyn PipeStore>>,
     /// API port for prompt rendering (default 3030).
     api_port: u16,
+    /// Timestamp of last reload_pipes() disk scan, for debouncing.
+    last_reload: Arc<Mutex<Instant>>,
 }
 
 impl PipeManager {
@@ -375,6 +378,7 @@ impl PipeManager {
             on_run_complete: None,
             store,
             api_port,
+            last_reload: Arc::new(Mutex::new(Instant::now() - std::time::Duration::from_secs(10))),
         }
     }
 
@@ -436,7 +440,7 @@ impl PipeManager {
                                 .to_string();
                             config.name = dir_name.clone();
                             info!("loaded pipe: {}", dir_name);
-                            pipes.insert(dir_name, (config, body));
+                            pipes.insert(dir_name, (config, body, content));
                         }
                         Err(e) => {
                             warn!("failed to parse {:?}: {}", pipe_md, e);
@@ -454,7 +458,15 @@ impl PipeManager {
     /// Re-scan `pipes_dir` and merge: add new pipes, update configs of existing
     /// ones, remove pipes whose directories were deleted — but preserve runtime
     /// state (running flags, logs, execution IDs).
+    /// Debounced: skips disk scan if last reload was < 2 seconds ago.
     pub async fn reload_pipes(&self) -> Result<()> {
+        {
+            let last = self.last_reload.lock().await;
+            if last.elapsed() < std::time::Duration::from_secs(2) {
+                return Ok(());
+            }
+        }
+
         let mut pipes = self.pipes.lock().await;
 
         let entries = match std::fs::read_dir(&self.pipes_dir) {
@@ -490,7 +502,7 @@ impl PipeManager {
                         if !pipes.contains_key(&dir_name) {
                             info!("discovered new pipe: {}", dir_name);
                         }
-                        pipes.insert(dir_name, (config, body));
+                        pipes.insert(dir_name, (config, body, content));
                     }
                     Err(e) => {
                         warn!("failed to parse {:?}: {}", pipe_md, e);
@@ -514,6 +526,9 @@ impl PipeManager {
             false
         });
 
+        // Update debounce timestamp
+        *self.last_reload.lock().await = Instant::now();
+
         Ok(())
     }
 
@@ -525,13 +540,10 @@ impl PipeManager {
         let exec_ids = self.running_execution_ids.lock().await;
 
         let mut result = Vec::new();
-        for (name, (config, body)) in pipes.iter() {
+        for (name, (config, body, raw)) in pipes.iter() {
             let pipe_logs = logs.get(name);
             let last_log = pipe_logs.and_then(|l| l.back());
             let last_error = last_log.filter(|l| !l.success).map(|l| l.stderr.clone());
-            // Read raw file from disk for editing
-            let raw_content = std::fs::read_to_string(self.pipes_dir.join(name).join("pipe.md"))
-                .unwrap_or_else(|_| serialize_pipe(config, body).unwrap_or_default());
             let mut cfg = config.clone();
             cfg.name = name.clone(); // always use directory name
             result.push(PipeStatus {
@@ -540,7 +552,7 @@ impl PipeManager {
                 last_success: last_log.map(|l| l.success),
                 is_running: running.contains_key(name),
                 prompt_body: body.clone(),
-                raw_content,
+                raw_content: raw.clone(),
                 last_error,
                 current_execution_id: exec_ids.get(name).copied(),
                 consecutive_failures: 0,
@@ -556,12 +568,10 @@ impl PipeManager {
         let running = self.running.lock().await;
         let exec_ids = self.running_execution_ids.lock().await;
 
-        pipes.get(name).map(|(config, body)| {
+        pipes.get(name).map(|(config, body, raw)| {
             let pipe_logs = logs.get(name);
             let last_log = pipe_logs.and_then(|l| l.back());
             let last_error = last_log.filter(|l| !l.success).map(|l| l.stderr.clone());
-            let raw_content = std::fs::read_to_string(self.pipes_dir.join(name).join("pipe.md"))
-                .unwrap_or_else(|_| serialize_pipe(config, body).unwrap_or_default());
             let mut cfg = config.clone();
             cfg.name = name.to_string(); // always use directory name
             PipeStatus {
@@ -570,7 +580,7 @@ impl PipeManager {
                 last_success: last_log.map(|l| l.success),
                 is_running: running.contains_key(name),
                 prompt_body: body.clone(),
-                raw_content,
+                raw_content: raw.clone(),
                 last_error,
                 current_execution_id: exec_ids.get(name).copied(),
                 consecutive_failures: 0,
@@ -595,6 +605,24 @@ impl PipeManager {
         }
     }
 
+    /// List all pipes with status and recent executions in a single call.
+    /// Avoids N+1 requests by fetching executions for all pipes at once.
+    pub async fn list_pipes_with_executions(
+        &self,
+        exec_limit: i32,
+    ) -> Vec<(PipeStatus, Vec<PipeExecution>)> {
+        let statuses = self.list_pipes().await;
+        let mut result = Vec::with_capacity(statuses.len());
+        for status in statuses {
+            let execs = self
+                .get_executions(&status.config.name, exec_limit)
+                .await
+                .unwrap_or_default();
+            result.push((status, execs));
+        }
+        result
+    }
+
     /// Run a pipe once (manual trigger or scheduled).
     /// NOTE: this blocks for the entire execution — avoid calling while
     /// holding the outer PipeManager mutex from an API handler.
@@ -607,7 +635,7 @@ impl PipeManager {
     /// in a spawned tokio task.  Use this from API handlers to avoid holding
     /// the PipeManager mutex for the entire execution duration.
     pub async fn start_pipe_background(&self, name: &str) -> Result<()> {
-        let (config, body) = {
+        let (config, body, _raw) = {
             let pipes = self.pipes.lock().await;
             pipes
                 .get(name)
@@ -894,7 +922,7 @@ impl PipeManager {
 
     /// Run a pipe once with an explicit trigger type.
     async fn run_pipe_with_trigger(&self, name: &str, trigger: &str) -> Result<PipeRunLog> {
-        let (config, body) = {
+        let (config, body, _raw) = {
             let pipes = self.pipes.lock().await;
             pipes
                 .get(name)
@@ -1186,12 +1214,13 @@ impl PipeManager {
         let (mut config, body) = parse_frontmatter(&content)?;
         config.enabled = enabled;
         let new_content = serialize_pipe(&config, &body)?;
-        std::fs::write(&pipe_md, new_content)?;
+        std::fs::write(&pipe_md, &new_content)?;
 
         // Update in-memory
         let mut pipes = self.pipes.lock().await;
         if let Some(entry) = pipes.get_mut(name) {
             entry.0.enabled = enabled;
+            entry.2 = new_content;
         }
 
         info!(
@@ -1226,6 +1255,7 @@ impl PipeManager {
             if let Some(entry) = pipes.get_mut(name) {
                 entry.0 = config;
                 entry.1 = body;
+                entry.2 = raw.to_string();
             }
             return Ok(());
         }
@@ -1281,13 +1311,14 @@ impl PipeManager {
         }
 
         let new_content = serialize_pipe(&config, &new_body)?;
-        std::fs::write(&pipe_md, new_content)?;
+        std::fs::write(&pipe_md, &new_content)?;
 
         // Update in-memory
         let mut pipes = self.pipes.lock().await;
         if let Some(entry) = pipes.get_mut(name) {
             entry.0 = config;
             entry.1 = new_body;
+            entry.2 = new_content;
         }
 
         Ok(())
@@ -1380,7 +1411,7 @@ impl PipeManager {
                     .lock()
                     .await
                     .get(name)
-                    .and_then(|(c, _)| self.executors.get(&c.agent))
+                    .and_then(|(c, _, _)| self.executors.get(&c.agent))
                 {
                     let _ = executor.kill(&handle);
                 }
@@ -1414,7 +1445,7 @@ impl PipeManager {
         if let Some(handle) = handle {
             if handle.pid != 0 {
                 let pipes = self.pipes.lock().await;
-                if let Some((config, _)) = pipes.get(name) {
+                if let Some((config, _, _)) = pipes.get(name) {
                     if let Some(executor) = self.executors.get(&config.agent) {
                         executor.kill(&handle)?;
                     }
@@ -1480,7 +1511,7 @@ impl PipeManager {
                 let pipe_snapshot: Vec<(String, PipeConfig, String)> = {
                     let p = pipes.lock().await;
                     p.iter()
-                        .map(|(n, (c, b))| (n.clone(), c.clone(), b.clone()))
+                        .map(|(n, (c, b, _))| (n.clone(), c.clone(), b.clone()))
                         .collect()
                 };
 

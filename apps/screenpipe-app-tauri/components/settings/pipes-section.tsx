@@ -318,10 +318,18 @@ export function PipesSection() {
 
   const fetchPipes = useCallback(async () => {
     try {
-      const res = await fetch("http://localhost:3030/pipes");
+      const res = await fetch("http://localhost:3030/pipes?include_executions=true");
       const data = await res.json();
-      const fetched: PipeStatus[] = data.data || [];
+      const rawItems: Array<PipeStatus & { recent_executions?: PipeExecution[] }> = data.data || [];
+      const fetched: PipeStatus[] = [];
+      const results: Record<string, PipeExecution[]> = {};
+      for (const item of rawItems) {
+        const { recent_executions, ...pipe } = item;
+        fetched.push(pipe);
+        results[pipe.config.name] = recent_executions || [];
+      }
       setPipes(fetched);
+      setPipeExecutions(results);
       // Clear drafts that match the server content (already saved)
       setPromptDrafts((prev) => {
         const next = { ...prev };
@@ -334,22 +342,6 @@ export function PipesSection() {
         }
         return changed ? next : prev;
       });
-      // Fetch executions immediately (no waterfall through re-render)
-      if (fetched.length > 0) {
-        const results: Record<string, PipeExecution[]> = {};
-        await Promise.all(
-          fetched.map(async (pipe) => {
-            try {
-              const r = await fetch(`http://localhost:3030/pipes/${pipe.config.name}/executions?limit=5`);
-              const d = await r.json();
-              results[pipe.config.name] = d.data || [];
-            } catch {
-              results[pipe.config.name] = [];
-            }
-          })
-        );
-        setPipeExecutions(results);
-      }
     } catch (e) {
       console.error("failed to fetch pipes:", e);
     } finally {
@@ -378,23 +370,20 @@ export function PipesSection() {
     return () => clearInterval(interval);
   }, [fetchPipes]);
 
-  const fetchAllExecutions = useCallback(async (pipeList?: PipeStatus[]) => {
-    const list = pipeList || pipes;
-    if (list.length === 0) return;
-    const results: Record<string, PipeExecution[]> = {};
-    await Promise.all(
-      list.map(async (pipe) => {
-        try {
-          const res = await fetch(`http://localhost:3030/pipes/${pipe.config.name}/executions?limit=5`);
-          const data = await res.json();
-          results[pipe.config.name] = data.data || [];
-        } catch {
-          results[pipe.config.name] = [];
-        }
-      })
-    );
-    setPipeExecutions(results);
-  }, [pipes]);
+  const fetchAllExecutions = useCallback(async () => {
+    try {
+      const res = await fetch("http://localhost:3030/pipes?include_executions=true");
+      const data = await res.json();
+      const rawItems: Array<PipeStatus & { recent_executions?: PipeExecution[] }> = data.data || [];
+      const results: Record<string, PipeExecution[]> = {};
+      for (const item of rawItems) {
+        results[item.config.name] = item.recent_executions || [];
+      }
+      setPipeExecutions(results);
+    } catch {
+      // ignore — next poll will retry
+    }
+  }, []);
 
   // Poll executions faster (3s) when any pipe is running, otherwise on pipe fetch (10s)
   useEffect(() => {

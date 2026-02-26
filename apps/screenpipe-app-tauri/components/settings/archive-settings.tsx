@@ -99,20 +99,12 @@ export function ArchiveSettings() {
 
     try {
       if (enabled) {
-        // Generate password if not already set
-        let password = settings._archiveEncryptionPassword;
-        if (!password) {
-          password = crypto.randomUUID();
-          await updateSettings({ _archiveEncryptionPassword: password });
-        }
-
-        // Initialize archive
+        // Initialize archive — encryption key is derived server-side from the token
         const res = await fetch("http://localhost:3030/archive/init", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             token: settings.user?.token,
-            password,
             retention_days: retentionDays,
           }),
         });

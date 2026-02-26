@@ -89,7 +89,7 @@ export default function PermissionRecoveryPage() {
     const interval = setInterval(() => {
       if (restartTriggeredRef.current) return;
       checkPermissions();
-    }, 500);
+    }, 3000);
     return () => clearInterval(interval);
   }, [checkPermissions]);
 

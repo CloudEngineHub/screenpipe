@@ -88,7 +88,6 @@ impl Default for ArchiveConfig {
 #[derive(Debug, Deserialize)]
 pub struct ArchiveInitRequest {
     pub token: String,
-    pub password: String,
     pub retention_days: Option<u32>,
 }
 
@@ -167,7 +166,14 @@ pub async fn archive_init(
         )
     })?;
 
-    manager.initialize(&request.password).await.map_err(|e| {
+    // Derive encryption password deterministically from the user's token.
+    // Same account = same token = same key on every device. No password needed.
+    let password = format!(
+        "screenpipe-archive-{}",
+        format!("{:x}", md5::compute(request.token.as_bytes()))
+    );
+
+    manager.initialize(&password).await.map_err(|e| {
         error!("archive: failed to initialize encryption: {}", e);
         (
             StatusCode::INTERNAL_SERVER_ERROR,

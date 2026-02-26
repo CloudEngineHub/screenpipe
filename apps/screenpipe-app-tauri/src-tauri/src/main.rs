@@ -954,6 +954,30 @@ async fn is_server_running(app: AppHandle) -> Result<bool, String> {
 async fn main() {
     let _ = fix_path_env::fix();
 
+    // Handle --check-arc-automation / --trigger-arc-automation flags early,
+    // before any Tauri initialization. Used by the permission system to run
+    // this binary via launchctl (detached from Terminal) so that macOS TCC
+    // checks the binary's own identity instead of Terminal's.
+    #[cfg(target_os = "macos")]
+    {
+        let early_args: Vec<String> = std::env::args().collect();
+        let is_check = early_args.iter().any(|a| a == "--check-arc-automation");
+        let is_trigger = early_args.iter().any(|a| a == "--trigger-arc-automation");
+        if is_check || is_trigger {
+            let result = permissions::ae_check_automation_direct(
+                "company.thebrowser.Browser",
+                is_trigger, // askUserIfNeeded = true for trigger
+            );
+            match result {
+                0 => print!("granted"),
+                -1744 => print!("denied"),
+                -1745 => print!("not_asked"),
+                _ => print!("error"),
+            }
+            return;
+        }
+    }
+
     // Single-instance check: if sidecar server is already listening, hand off and exit.
     // This covers Linux (where tauri-plugin-single-instance is disabled due to
     // zbus/tokio conflict) and acts as a fallback on macOS/Windows.

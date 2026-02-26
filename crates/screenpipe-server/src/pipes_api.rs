@@ -44,19 +44,43 @@ pub struct ExecutionsQuery {
     pub limit: Option<i32>,
 }
 
+#[derive(Deserialize)]
+pub struct ListPipesQuery {
+    pub include_executions: Option<bool>,
+}
+
 // ---------------------------------------------------------------------------
 // Handlers
 // ---------------------------------------------------------------------------
 
 /// GET /pipes — list all pipes with status.
 /// Re-scans disk so pipes installed externally (e.g. via CLI) are picked up.
-pub async fn list_pipes(State(pm): State<SharedPipeManager>) -> Json<Value> {
+/// Pass `?include_executions=true` to get recent executions inline (avoids N+1 requests).
+pub async fn list_pipes(
+    State(pm): State<SharedPipeManager>,
+    Query(query): Query<ListPipesQuery>,
+) -> Json<Value> {
     let mgr = pm.lock().await;
     if let Err(e) = mgr.reload_pipes().await {
         tracing::warn!("failed to reload pipes from disk: {}", e);
     }
-    let pipes = mgr.list_pipes().await;
-    Json(json!({ "data": pipes }))
+    if query.include_executions.unwrap_or(false) {
+        let pipes_with_execs = mgr.list_pipes_with_executions(5).await;
+        let data: Vec<Value> = pipes_with_execs
+            .into_iter()
+            .map(|(status, execs)| {
+                let mut obj = serde_json::to_value(&status).unwrap_or(json!({}));
+                if let Some(map) = obj.as_object_mut() {
+                    map.insert("recent_executions".to_string(), json!(execs));
+                }
+                obj
+            })
+            .collect();
+        Json(json!({ "data": data }))
+    } else {
+        let pipes = mgr.list_pipes().await;
+        Json(json!({ "data": pipes }))
+    }
 }
 
 /// GET /pipes/:id — single pipe detail.

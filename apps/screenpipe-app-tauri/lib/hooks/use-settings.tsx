@@ -110,8 +110,6 @@ export type Settings = SettingsStore & {
 	cloudArchiveEnabled?: boolean;
 	/** Days to keep data locally before archiving (default: 7) */
 	cloudArchiveRetentionDays?: number;
-	/** Internal: auto-generated encryption password for archive (opaque to user) */
-	_archiveEncryptionPassword?: string;
 }
 
 export function getEffectiveFilters(settings: Settings) {
