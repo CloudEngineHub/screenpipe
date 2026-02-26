@@ -229,11 +229,41 @@ export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 		return frame.devices.some((d) => d.device_id === selectedDeviceId);
 	}, [selectedDeviceId, allDeviceIds.length]);
 
-	// Find next frame index matching the device filter in a given direction
+	// Pre-computed sorted list of frame indices matching all active filters.
+	// Used by scroll handler and arrow keys to navigate in "matching frame space".
+	const matchingIndices = useMemo(() => {
+		const filterDevice = selectedDeviceId !== "all" && allDeviceIds.length > 1;
+		const filterApp = selectedAppName !== "all";
+		const filterDomain = selectedDomain !== "all";
+		const filterSpeaker = selectedSpeaker !== "all";
+		const filterTag = selectedTag !== "all";
+		if (!filterDevice && !filterApp && !filterDomain && !filterSpeaker && !filterTag) return null;
+		const indices: number[] = [];
+		for (let i = 0; i < frames.length; i++) {
+			const f = frames[i];
+			const matchesDevice = !filterDevice || f.devices.some((d) => d.device_id === selectedDeviceId);
+			const matchesApp = !filterApp || f.devices.some((d) => d.metadata?.app_name === selectedAppName);
+			const matchesDomain = !filterDomain || f.devices.some((d) => {
+				const url = d.metadata?.browser_url;
+				return url && extractDomain(url) === selectedDomain;
+			});
+			const matchesSpeaker = !filterSpeaker || f.devices.some((d) => d.audio?.some((a) => a.speaker_name === selectedSpeaker));
+			const matchesTag = !filterTag || (() => {
+				const frameId = f.devices?.[0]?.frame_id || '';
+				const frameTags = frameId ? (tags[frameId] || []) : [];
+				return frameTags.includes(selectedTag);
+			})();
+			if (matchesDevice && matchesApp && matchesDomain && matchesSpeaker && matchesTag) {
+				indices.push(i);
+			}
+		}
+		return indices.length > 0 ? indices : null;
+	}, [frames, selectedDeviceId, allDeviceIds.length, selectedAppName, selectedDomain, selectedSpeaker, selectedTag, tags]);
+
+	// Find next frame index matching active filters in a given direction
 	const findNextDevice = useCallback((fromIndex: number, dir: 1 | -1): number => {
 		// When any filter is active, navigate only through matching frames
 		if (matchingIndices) {
-			// Binary-search-ish: find current position in matching list
 			let pos = -1;
 			let bestDist = Infinity;
 			for (let j = 0; j < matchingIndices.length; j++) {
@@ -270,37 +300,6 @@ export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 		}
 		return clamped;
 	}, [selectedDeviceId, allDeviceIds.length, frames]);
-
-	// Pre-computed sorted list of frame indices matching BOTH device and app filters.
-	// Used by scroll handler to navigate in "matching frame space".
-	const matchingIndices = useMemo(() => {
-		const filterDevice = selectedDeviceId !== "all" && allDeviceIds.length > 1;
-		const filterApp = selectedAppName !== "all";
-		const filterDomain = selectedDomain !== "all";
-		const filterSpeaker = selectedSpeaker !== "all";
-		const filterTag = selectedTag !== "all";
-		if (!filterDevice && !filterApp && !filterDomain && !filterSpeaker && !filterTag) return null;
-		const indices: number[] = [];
-		for (let i = 0; i < frames.length; i++) {
-			const f = frames[i];
-			const matchesDevice = !filterDevice || f.devices.some((d) => d.device_id === selectedDeviceId);
-			const matchesApp = !filterApp || f.devices.some((d) => d.metadata?.app_name === selectedAppName);
-			const matchesDomain = !filterDomain || f.devices.some((d) => {
-				const url = d.metadata?.browser_url;
-				return url && extractDomain(url) === selectedDomain;
-			});
-			const matchesSpeaker = !filterSpeaker || f.devices.some((d) => d.audio?.some((a) => a.speaker_name === selectedSpeaker));
-			const matchesTag = !filterTag || (() => {
-				const frameId = f.devices?.[0]?.frame_id || '';
-				const frameTags = frameId ? (tags[frameId] || []) : [];
-				return frameTags.includes(selectedTag);
-			})();
-			if (matchesDevice && matchesApp && matchesDomain && matchesSpeaker && matchesTag) {
-				indices.push(i);
-			}
-		}
-		return indices.length > 0 ? indices : null;
-	}, [frames, selectedDeviceId, allDeviceIds.length, selectedAppName, selectedDomain, selectedSpeaker, selectedTag, tags]);
 
 	// When monitor filter changes, snap to nearest matching frame
 	const handleDeviceChange = useCallback((deviceId: string) => {
