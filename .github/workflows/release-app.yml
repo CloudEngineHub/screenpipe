@@ -414,6 +414,7 @@ jobs:
             apps/screenpipe-app-tauri/.tauri
             apps/screenpipe-app-tauri/src-tauri/WixTools
             apps/screenpipe-app-tauri/src-tauri/mkl
+            apps/screenpipe-app-tauri/src-tauri/vcredist
             # Ollama binaries and libs
             apps/screenpipe-app-tauri/src-tauri/ollama-*
             apps/screenpipe-app-tauri/src-tauri/lib/ollama
@@ -674,27 +675,6 @@ jobs:
           }
 
           Remove-Item -Path $temp_dir -Recurse -Force
-
-      - name: Copy library for vcredist
-        if: matrix.os_type == 'windows'
-        shell: powershell
-        run: |
-          # Create target directory
-          $vcredist_dir = "apps/screenpipe-app-tauri/src-tauri/vcredist"
-          New-Item -ItemType Directory -Force -Path $vcredist_dir | Out-Null
-
-          # Copy vcruntime DLLs from System32 (already present on Windows runners with VS installed)
-          Write-Host "Copying DLL files from System32..."
-          Copy-Item C:\Windows\System32\vcruntime140.dll -Destination $vcredist_dir -Force
-          Copy-Item C:\Windows\System32\vcruntime140_1.dll -Destination $vcredist_dir -Force -ErrorAction SilentlyContinue
-          Copy-Item C:\Windows\System32\msvcp140.dll -Destination $vcredist_dir -Force -ErrorAction SilentlyContinue
-
-          # Verify DLLs were copied
-          $dll_count = (Get-ChildItem -Path $vcredist_dir -Filter "*.dll").Count
-          Write-Host "Found $dll_count DLLs in target directory"
-          if ($dll_count -eq 0) {
-            throw "No DLLs found in target directory!"
-          }
 
       - name: Download ONNX Runtime (CPU) for Windows
         if: matrix.os_type == 'windows'

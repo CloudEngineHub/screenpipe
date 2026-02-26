@@ -80,6 +80,7 @@ jobs:
             apps/screenpipe-app-tauri/src-tauri/target
             apps/screenpipe-app-tauri/.tauri
             apps/screenpipe-app-tauri/src-tauri/mkl
+            apps/screenpipe-app-tauri/src-tauri/vcredist
             apps/screenpipe-app-tauri/src-tauri/ollama-*
             apps/screenpipe-app-tauri/src-tauri/lib/ollama
             apps/screenpipe-app-tauri/src-tauri/ui_monitor-*
@@ -180,16 +181,6 @@ jobs:
           Get-ChildItem -Path $temp_dir -Recurse -Filter "*.dll" | ForEach-Object { Copy-Item $_.FullName -Destination $mkl_dir -Force }
           if ((Get-ChildItem -Path $mkl_dir -Filter "*.dll").Count -eq 0) { throw "No DLLs found" }
           Remove-Item -Path $temp_dir -Recurse -Force
-
-      - name: Copy library for vcredist
-        shell: powershell
-        run: |
-          $vcredist_dir = "apps/screenpipe-app-tauri/src-tauri/vcredist"
-          New-Item -ItemType Directory -Force -Path $vcredist_dir | Out-Null
-          Copy-Item C:\Windows\System32\vcruntime140.dll -Destination $vcredist_dir -Force
-          Copy-Item C:\Windows\System32\vcruntime140_1.dll -Destination $vcredist_dir -Force -ErrorAction SilentlyContinue
-          Copy-Item C:\Windows\System32\msvcp140.dll -Destination $vcredist_dir -Force -ErrorAction SilentlyContinue
-          if ((Get-ChildItem -Path $vcredist_dir -Filter "*.dll").Count -eq 0) { throw "No DLLs found" }
 
       - name: Download ONNX Runtime (CPU) for Windows
         shell: pwsh
