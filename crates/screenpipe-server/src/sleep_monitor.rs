@@ -12,9 +12,10 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 #[cfg(target_os = "macos")]
 use std::time::Duration;
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 use tracing::debug;
 #[cfg(target_os = "macos")]
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 #[cfg(target_os = "windows")]
 use tracing::info;
 

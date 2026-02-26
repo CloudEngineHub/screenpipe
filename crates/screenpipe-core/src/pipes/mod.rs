@@ -1974,6 +1974,7 @@ impl PipeManager {
 
     /// Copy built-in pipe templates into pipes_dir if they don't exist.
     pub fn install_builtin_pipes(&self) -> Result<()> {
+        #[allow(unused_mut)]
         let mut builtins = vec![
             (
                 "obsidian-sync",

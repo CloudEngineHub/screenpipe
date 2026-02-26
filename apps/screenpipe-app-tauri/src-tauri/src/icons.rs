@@ -176,10 +176,10 @@ fn get_exe_by_reg_key(app_name: &str) -> Option<String> {
                     // Match on DisplayName or subkey name (App Paths uses exe name)
                     let display_match = app_key
                         .get_value::<String, _>("DisplayName")
-                        .map(|d| d.to_lowercase().contains(&app_lower))
+                        .map(|d| names_match(&d, app_name))
                         .unwrap_or(false);
-                    let subkey_match = subkey_lower.contains(&app_lower)
-                        || app_lower.contains(&subkey_lower.trim_end_matches(".exe"));
+                    let subkey_match = names_match(&subkey_lower, &app_lower)
+                        || names_match(&subkey_lower.trim_end_matches(".exe"), &app_lower);
 
                     if display_match || subkey_match {
                         if let Ok(path) = app_key.get_value::<String, _>("DisplayIcon") {
@@ -239,6 +239,30 @@ fn powershell_exe() -> std::path::PathBuf {
         .join("powershell.exe")
 }
 
+/// Strip dots, dashes, underscores and spaces so "screenpi.pe" matches "screenpipe",
+/// "wezterm-gui" matches "wezterm", etc.
+#[cfg(target_os = "windows")]
+fn normalize_app_name(name: &str) -> String {
+    name.chars()
+        .filter(|c| c.is_alphanumeric())
+        .collect::<String>()
+        .to_lowercase()
+}
+
+/// Check whether two app names are "similar enough" to be considered the same app.
+/// Uses both substring matching and normalized (punctuation-stripped) matching.
+#[cfg(target_os = "windows")]
+fn names_match(folder: &str, search: &str) -> bool {
+    let fl = folder.to_lowercase();
+    let sl = search.to_lowercase();
+    if fl.contains(&sl) || sl.contains(&fl) {
+        return true;
+    }
+    let fn_norm = normalize_app_name(folder);
+    let sn_norm = normalize_app_name(search);
+    fn_norm.contains(&sn_norm) || sn_norm.contains(&fn_norm)
+}
+
 #[cfg(target_os = "windows")]
 async fn get_exe_from_potential_path(app_name: &str) -> Option<String> {
     const CREATE_NO_WINDOW: u32 = 0x08000000;
@@ -252,7 +276,7 @@ async fn get_exe_from_potential_path(app_name: &str) -> Option<String> {
         if let Ok(entries) = std::fs::read_dir(local_dir) {
             for entry in entries.flatten() {
                 let folder_name = entry.file_name().to_string_lossy().to_lowercase();
-                if folder_name.contains(&app_lower) || app_lower.contains(&folder_name) {
+                if names_match(&folder_name, &app_lower) {
                     let entry_path = entry.path();
                     // Electron pattern: %LOCALAPPDATA%\<app>\app-*\<app>.exe
                     if let Ok(sub_entries) = std::fs::read_dir(&entry_path) {
@@ -283,7 +307,7 @@ async fn get_exe_from_potential_path(app_name: &str) -> Option<String> {
         if let Ok(entries) = std::fs::read_dir(&programs_dir) {
             for entry in entries.flatten() {
                 let folder_name = entry.file_name().to_string_lossy().to_lowercase();
-                if folder_name.contains(&app_lower) || app_lower.contains(&folder_name) {
+                if names_match(&folder_name, &app_lower) {
                     if let Ok(sub_entries) = std::fs::read_dir(entry.path()) {
                         for sub in sub_entries.flatten() {
                             let fname = sub.file_name().to_string_lossy().to_lowercase();
@@ -307,7 +331,7 @@ async fn get_exe_from_potential_path(app_name: &str) -> Option<String> {
         if let Ok(entries) = std::fs::read_dir(base) {
             for entry in entries.flatten() {
                 let folder_name = entry.file_name().to_string_lossy().to_lowercase();
-                if folder_name.contains(&app_lower) || app_lower.contains(&folder_name) {
+                if names_match(&folder_name, &app_lower) {
                     // Found matching folder, look for exe inside
                     if let Ok(sub_entries) = std::fs::read_dir(entry.path()) {
                         for sub in sub_entries.flatten() {

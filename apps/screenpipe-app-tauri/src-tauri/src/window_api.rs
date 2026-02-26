@@ -532,6 +532,7 @@ impl ShowRewindWindow {
             }
             #[cfg(not(target_os = "macos"))]
             {
+                window.unminimize().ok();
                 window.show().ok();
                 window.set_focus().ok();
                 let _ = app.emit("window-focused", true);
@@ -767,6 +768,7 @@ impl ShowRewindWindow {
                 #[cfg(not(target_os = "macos"))]
                 {
                     window.show().ok();
+                    window.set_focus().ok();
                     return Ok(window);
                 }
             }

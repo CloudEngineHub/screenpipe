@@ -4,10 +4,12 @@
 
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { invoke } from "@tauri-apps/api/core";
+import { readTextFile } from "@tauri-apps/plugin-fs";
+import { homeDir } from "@tauri-apps/api/path";
 import posthog from "posthog-js";
 import { usePlatform } from "@/lib/hooks/use-platform";
 import { getStore } from "@/lib/hooks/use-settings";
@@ -22,61 +24,57 @@ export default function ShortcutReminderPage() {
   const [overlayShortcut, setOverlayShortcut] = useState<string | null>(null);
   const [chatShortcut, setChatShortcut] = useState<string | null>(null);
   const overlayData = useOverlayData();
+  const isMacRef = useRef(isMac);
+  isMacRef.current = isMac;
 
-  // Load shortcuts from store on mount
-  useEffect(() => {
-    const loadShortcutsFromStore = async () => {
-      try {
-        const store = await getStore();
-        const settings = await store.get<{
-          showScreenpipeShortcut?: string;
-          showChatShortcut?: string;
-        }>("settings");
-        if (settings?.showScreenpipeShortcut) {
-          setOverlayShortcut(formatShortcut(settings.showScreenpipeShortcut, isMac));
-        }
-        if (settings?.showChatShortcut) {
-          setChatShortcut(formatShortcut(settings.showChatShortcut, isMac));
-        }
-      } catch (e) {
-        console.error("Failed to load shortcuts from store:", e);
+  // Read shortcuts directly from the store.bin file on disk (bypasses TS store plugin)
+  const loadShortcutsFromFile = useCallback(async () => {
+    try {
+      const home = await homeDir();
+      const raw = await readTextFile(`${home}/.screenpipe/store.bin`);
+      const data = JSON.parse(raw);
+      const settings = data?.settings;
+      if (settings?.showScreenpipeShortcut) {
+        setOverlayShortcut(formatShortcut(settings.showScreenpipeShortcut, isMacRef.current));
       }
+      if (settings?.showChatShortcut) {
+        setChatShortcut(formatShortcut(settings.showChatShortcut, isMacRef.current));
+      }
+    } catch (e) {
+      console.error("Failed to read shortcuts from store file:", e);
+    }
+  }, []);
+
+  // Load shortcuts on mount + listen for updates
+  useEffect(() => {
+    if (isLoading) return;
+
+    // Initial load from file
+    loadShortcutsFromFile().then(() => {
+      // Set platform-appropriate defaults if file had no values
+      setOverlayShortcut(prev => prev ?? (isMac ? "⌘⌃S" : "Alt+S"));
+      setChatShortcut(prev => prev ?? (isMac ? "⌘⌃L" : "Alt+L"));
+    });
+
+    // Also listen for store changes via plugin (for live updates when user changes shortcuts)
+    let unlistenStore: (() => void) | null = null;
+    getStore().then(store => {
+      store.onKeyChange("settings", () => {
+        loadShortcutsFromFile();
+      }).then(unlisten => {
+        unlistenStore = unlisten;
+      });
+    }).catch(() => {});
+
+    return () => {
+      unlistenStore?.();
     };
-    if (!isLoading) {
-      loadShortcutsFromStore();
-    }
-  }, [isLoading, isMac]);
-
-  // Set default shortcuts once platform is detected (fallback if store fails)
-  useEffect(() => {
-    if (!isLoading && overlayShortcut === null) {
-      setOverlayShortcut(isMac ? "⌘⌃S" : "Alt+S");
-    }
-    if (!isLoading && chatShortcut === null) {
-      setChatShortcut(isMac ? "⌘⌃L" : "Alt+L");
-    }
-  }, [isMac, isLoading, overlayShortcut, chatShortcut]);
+  }, [isLoading, isMac, loadShortcutsFromFile]);
 
   useEffect(() => {
-    // Listen for shortcut updates and reload both from store
-    const unlistenShortcut = listen<string>("shortcut-reminder-update", async () => {
-      if (!isLoading) {
-        try {
-          const store = await getStore();
-          const settings = await store.get<{
-            showScreenpipeShortcut?: string;
-            showChatShortcut?: string;
-          }>("settings");
-          if (settings?.showScreenpipeShortcut) {
-            setOverlayShortcut(formatShortcut(settings.showScreenpipeShortcut, isMac));
-          }
-          if (settings?.showChatShortcut) {
-            setChatShortcut(formatShortcut(settings.showChatShortcut, isMac));
-          }
-        } catch (e) {
-          console.error("Failed to reload shortcuts:", e);
-        }
-      }
+    // Listen for explicit shortcut-reminder-update event (from Rust side)
+    const unlistenShortcut = listen<string>("shortcut-reminder-update", () => {
+      loadShortcutsFromFile();
     });
 
     posthog.capture("shortcut_reminder_shown");
@@ -84,7 +82,7 @@ export default function ShortcutReminderPage() {
     return () => {
       unlistenShortcut.then((fn) => fn());
     };
-  }, [isMac, isLoading]);
+  }, [loadShortcutsFromFile]);
 
   // Use Tauri's native startDragging for window movement
   const handleMouseDown = useCallback(async (e: React.MouseEvent) => {
@@ -256,7 +254,7 @@ export default function ShortcutReminderPage() {
 /**
  * Format a shortcut string for display.
  * On macOS: replace modifier names with compact symbols (⌘, ⌃, ⌥, ⇧).
- * On other platforms: show the actual key names as configured.
+ * On Windows/Linux: translate to platform-standard names (Super→Win, Control→Ctrl).
  */
 function formatShortcut(shortcut: string, isMac: boolean): string {
   if (!shortcut) return "";
@@ -273,8 +271,14 @@ function formatShortcut(shortcut: string, isMac: boolean): string {
     return parts.map(p => macSymbols[p] || p.toUpperCase()).join("");
   }
 
-  // Windows/Linux: show exactly what the user set, just capitalized
+  // Windows/Linux: translate modifier names to platform-standard display
+  const winNames: Record<string, string> = {
+    super: "Win", command: "Win", cmd: "Win", meta: "Win",
+    ctrl: "Ctrl", control: "Ctrl",
+    alt: "Alt", option: "Alt",
+    shift: "Shift",
+  };
   return parts
-    .map(p => p.charAt(0).toUpperCase() + p.slice(1))
+    .map(p => winNames[p] || p.toUpperCase())
     .join("+");
 }
