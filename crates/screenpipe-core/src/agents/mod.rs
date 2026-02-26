@@ -53,6 +53,31 @@ pub trait AgentExecutor: Send + Sync {
         pid_tx: Option<tokio::sync::oneshot::Sender<u32>>,
     ) -> Result<AgentOutput>;
 
+    /// Execute the prompt with line-by-line streaming of stdout.
+    ///
+    /// Each stdout line is sent via `line_tx` as it arrives, AND collected
+    /// into `AgentOutput.stdout` for the final result.  The default
+    /// implementation falls back to [`run()`] and sends all lines at once.
+    async fn run_streaming(
+        &self,
+        prompt: &str,
+        model: &str,
+        working_dir: &Path,
+        provider: Option<&str>,
+        provider_url: Option<&str>,
+        provider_api_key: Option<&str>,
+        pid_tx: Option<tokio::sync::oneshot::Sender<u32>>,
+        line_tx: tokio::sync::mpsc::UnboundedSender<String>,
+    ) -> Result<AgentOutput> {
+        let output = self
+            .run(prompt, model, working_dir, provider, provider_url, provider_api_key, pid_tx)
+            .await?;
+        for line in output.stdout.lines() {
+            let _ = line_tx.send(line.to_string());
+        }
+        Ok(output)
+    }
+
     /// Kill a running agent process.
     fn kill(&self, handle: &ExecutionHandle) -> Result<()>;
 

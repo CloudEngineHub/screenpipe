@@ -9,7 +9,7 @@ use crate::store::SettingsStore;
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use tauri::State;
+use tauri::{Emitter, State};
 use tokio::sync::Mutex;
 use tracing::{debug, error, info, warn};
 
@@ -278,6 +278,28 @@ pub async fn spawn_screenpipe(
     let config = store.to_recording_config(data_dir);
     let recording_state_inner = state.handle.clone();
 
+    // Create pipe output callback that emits Tauri events to the frontend
+    let app_for_pipe = app.clone();
+    let on_pipe_output: Option<screenpipe_core::pipes::OnPipeOutputLine> = Some(
+        std::sync::Arc::new(move |pipe_name: &str, exec_id: i64, line: &str| {
+            // Try to parse each line as JSON (Pi events are JSON objects)
+            let payload = if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(line) {
+                serde_json::json!({
+                    "pipeName": pipe_name,
+                    "executionId": exec_id,
+                    "event": parsed,
+                })
+            } else {
+                serde_json::json!({
+                    "pipeName": pipe_name,
+                    "executionId": exec_id,
+                    "event": { "type": "raw_line", "text": line },
+                })
+            };
+            let _ = app_for_pipe.emit("pipe_event", &payload);
+        }),
+    );
+
     // Use a oneshot channel to report success/failure from the dedicated runtime
     let (result_tx, result_rx) = tokio::sync::oneshot::channel::<Result<(), String>>();
 
@@ -300,7 +322,7 @@ pub async fn spawn_screenpipe(
             };
 
             server_runtime.block_on(async move {
-                match start_embedded_server(config).await {
+                match start_embedded_server(config, on_pipe_output).await {
                     Ok(handle) => {
                         info!("Embedded screenpipe server started successfully on dedicated runtime");
                         {

@@ -73,13 +73,13 @@ fn default_agent() -> String {
     "pi".into()
 }
 fn default_model() -> String {
-    "claude-haiku-4-5@20251001".into()
+    "claude-haiku-4-5".into()
 }
 fn is_default_agent(s: &String) -> bool {
     s == "pi"
 }
 fn is_default_model(s: &String) -> bool {
-    s == "claude-haiku-4-5@20251001"
+    s == "claude-haiku-4-5" || s == "claude-haiku-4-5@20251001"
 }
 
 /// Result of a single pipe run.
@@ -329,6 +329,10 @@ fn parse_error_type(stderr: &str) -> (Option<String>, Option<String>) {
 /// Args: (pipe_name, success, duration_secs)
 pub type OnPipeRunComplete = Arc<dyn Fn(&str, bool, f64) + Send + Sync>;
 
+/// Callback fired for each stdout line from a running pipe.
+/// Args: (pipe_name, execution_id, line)
+pub type OnPipeOutputLine = Arc<dyn Fn(&str, i64, &str) + Send + Sync>;
+
 /// Default execution timeout: 5 minutes.
 const DEFAULT_TIMEOUT_SECS: u64 = 300;
 
@@ -351,6 +355,8 @@ pub struct PipeManager {
     shutdown_tx: Option<tokio::sync::watch::Sender<bool>>,
     /// Optional callback fired after each scheduled pipe run.
     on_run_complete: Option<OnPipeRunComplete>,
+    /// Optional callback fired for each stdout line from a running pipe.
+    on_output_line: Option<OnPipeOutputLine>,
     /// Optional persistence store (None in CLI mode).
     store: Option<Arc<dyn PipeStore>>,
     /// API port for prompt rendering (default 3030).
@@ -376,6 +382,7 @@ impl PipeManager {
             semaphore: Arc::new(Semaphore::new(1)),
             shutdown_tx: None,
             on_run_complete: None,
+            on_output_line: None,
             store,
             api_port,
             last_reload: Arc::new(Mutex::new(Instant::now() - std::time::Duration::from_secs(10))),
@@ -385,6 +392,11 @@ impl PipeManager {
     /// Set a callback to be invoked after each scheduled pipe run.
     pub fn set_on_run_complete(&mut self, cb: OnPipeRunComplete) {
         self.on_run_complete = Some(cb);
+    }
+
+    /// Set a callback to be invoked for each stdout line from a running pipe.
+    pub fn set_on_output_line(&mut self, cb: OnPipeOutputLine) {
+        self.on_output_line = Some(cb);
     }
 
     /// Mark orphaned 'running' executions as failed on startup.
@@ -752,6 +764,7 @@ impl PipeManager {
         let semaphore = self.semaphore.clone();
         let store_ref = self.store.clone();
         let on_complete = self.on_run_complete.clone();
+        let on_output = self.on_output_line.clone();
         let pipes_dir_for_log = self.pipes_dir.clone();
         let executors = self.executors.clone();
         let agent = config.agent.clone();
@@ -762,9 +775,23 @@ impl PipeManager {
             let started_at = Utc::now();
             let timeout_duration = std::time::Duration::from_secs(DEFAULT_TIMEOUT_SECS);
 
+            // Create streaming channel and drainer task
+            let (line_tx, mut line_rx) =
+                tokio::sync::mpsc::unbounded_channel::<String>();
+            let drain_pipe_name = pipe_name.clone();
+            let drain_exec_id = exec_id.unwrap_or(0);
+            let drain_on_output = on_output.clone();
+            tokio::spawn(async move {
+                while let Some(line) = line_rx.recv().await {
+                    if let Some(ref cb) = drain_on_output {
+                        cb(&drain_pipe_name, drain_exec_id, &line);
+                    }
+                }
+            });
+
             let run_result = tokio::time::timeout(
                 timeout_duration,
-                executor.run(
+                executor.run_streaming(
                     &prompt,
                     &run_model,
                     &pipe_dir,
@@ -772,6 +799,7 @@ impl PipeManager {
                     run_provider_url.as_deref(),
                     run_api_key.as_deref(),
                     Some(pid_tx),
+                    line_tx,
                 ),
             )
             .await;
@@ -975,9 +1003,12 @@ impl PipeManager {
                     )
                 }
                 None => {
-                    warn!("pipe '{}': preset '{}' not found in store.bin, falling back to pipe config",
-                        name, preset_id);
-                    (config.model.clone(), config.provider.clone(), None, None)
+                    return Err(anyhow!(
+                        "pipe '{}': preset '{}' not found in settings — \
+                         create the preset in Settings → AI or remove the \
+                         'preset: {}' line from the pipe config",
+                        name, preset_id, preset_id
+                    ));
                 }
             }
         } else {
@@ -1054,11 +1085,25 @@ impl PipeManager {
             }
         }
 
-        // Run with timeout
+        // Run with timeout + streaming
         let timeout_duration = std::time::Duration::from_secs(DEFAULT_TIMEOUT_SECS);
+
+        let (line_tx, mut line_rx) =
+            tokio::sync::mpsc::unbounded_channel::<String>();
+        let drain_pipe_name = name.to_string();
+        let drain_exec_id = exec_id.unwrap_or(0);
+        let drain_on_output = self.on_output_line.clone();
+        tokio::spawn(async move {
+            while let Some(line) = line_rx.recv().await {
+                if let Some(ref cb) = drain_on_output {
+                    cb(&drain_pipe_name, drain_exec_id, &line);
+                }
+            }
+        });
+
         let run_result = tokio::time::timeout(
             timeout_duration,
-            executor.run(
+            executor.run_streaming(
                 &prompt,
                 &run_model,
                 &pipe_dir,
@@ -1066,6 +1111,7 @@ impl PipeManager {
                 run_provider_url.as_deref(),
                 run_api_key.as_deref(),
                 Some(pid_tx),
+                line_tx,
             ),
         )
         .await;
@@ -1478,6 +1524,7 @@ impl PipeManager {
         let executors = self.executors.clone();
         let pipes_dir = self.pipes_dir.clone();
         let on_run_complete = self.on_run_complete.clone();
+        let on_output_line = self.on_output_line.clone();
         let store = self.store.clone();
         let api_port = self.api_port;
 
@@ -1601,6 +1648,7 @@ impl PipeManager {
                     let sem = semaphore.clone();
                     let pipes_dir_for_log = pipes_dir.clone();
                     let on_complete = on_run_complete.clone();
+                    let on_output = on_output_line.clone();
                     let store_ref = store.clone();
 
                     tokio::spawn(async move {
@@ -1662,9 +1710,24 @@ impl PipeManager {
 
                         let started_at = Utc::now();
                         let timeout_duration = std::time::Duration::from_secs(DEFAULT_TIMEOUT_SECS);
+
+                        // Create streaming channel and drainer for scheduler
+                        let (line_tx, mut line_rx) =
+                            tokio::sync::mpsc::unbounded_channel::<String>();
+                        let sched_pipe_name = pipe_name.clone();
+                        let sched_exec_id = exec_id.unwrap_or(0);
+                        let sched_on_output = on_output.clone();
+                        tokio::spawn(async move {
+                            while let Some(line) = line_rx.recv().await {
+                                if let Some(ref cb) = sched_on_output {
+                                    cb(&sched_pipe_name, sched_exec_id, &line);
+                                }
+                            }
+                        });
+
                         let run_result = tokio::time::timeout(
                             timeout_duration,
-                            executor.run(
+                            executor.run_streaming(
                                 &prompt,
                                 &model,
                                 &pipe_dir,
@@ -1672,6 +1735,7 @@ impl PipeManager {
                                 provider_url.as_deref(),
                                 api_key.as_deref(),
                                 Some(pid_tx),
+                                line_tx,
                             ),
                         )
                         .await;

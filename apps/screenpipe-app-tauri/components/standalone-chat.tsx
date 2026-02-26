@@ -662,6 +662,13 @@ export function StandaloneChat({ className }: { className?: string } = {}) {
   const piRestartCountRef = useRef(0);
   const piStoppedIntentionallyRef = useRef(false);
   const piThinkingStartRef = useRef<number | null>(null);
+  const piSessionSyncedRef = useRef(false);
+
+  // Active pipe execution (when watching a running pipe)
+  const [activePipeExecution, setActivePipeExecution] = useState<{
+    name: string;
+    executionId: number;
+  } | null>(null);
 
   // Follow-up suggestions state (TikTok-style)
   const [followUpSuggestions, setFollowUpSuggestions] = useState<string[]>([]);
@@ -842,6 +849,7 @@ export function StandaloneChat({ className }: { className?: string } = {}) {
     })));
     setConversationId(conv.id);
     setShowHistory(false);
+    piSessionSyncedRef.current = false;
 
     // Update activeConversationId directly in the store (read fresh to avoid
     // overwriting conversations with stale React state)
@@ -887,6 +895,7 @@ export function StandaloneChat({ className }: { className?: string } = {}) {
     setInput("");
     setShowHistory(false);
     setPastedImage(null);
+    piSessionSyncedRef.current = true;
   };
 
   // Filter conversations by search
@@ -1390,6 +1399,7 @@ export function StandaloneChat({ className }: { className?: string } = {}) {
         const result = await commands.piStart(dir, settings.user?.token ?? null, providerConfig);
         if (result.status === "ok") {
           setPiInfo(result.data);
+          piSessionSyncedRef.current = false;
         } else {
           console.error("[Pi] Restart failed:", result.error);
           toast({ title: "Failed to restart Pi", description: result.error, variant: "destructive" });
@@ -1397,27 +1407,26 @@ export function StandaloneChat({ className }: { className?: string } = {}) {
       } catch (e) {
         console.error("[Pi] Restart exception:", e);
       } finally {
-        piStartInFlightRef.current = false;
         setPiStarting(false);
+        // Keep the guard active for 2s to absorb delayed re-triggers from
+        // settings/loadUser cascades during boot (prevents double-start race)
+        setTimeout(() => { piStartInFlightRef.current = false; }, 2000);
       }
     };
     restartPi();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activePreset?.provider, activePreset?.model, settings.user?.token]);
 
-  // Listen for Pi events (all providers route through Pi)
+  // Listen for Pi events (all providers route through Pi) and pipe events
   useEffect(() => {
     let unlistenEvent: UnlistenFn | null = null;
+    let unlistenPipeEvent: UnlistenFn | null = null;
     let unlistenTerminated: UnlistenFn | null = null;
     let unlistenLog: UnlistenFn | null = null;
     let mounted = true;
 
-    const setup = async () => {
-      unlistenEvent = await listen<any>("pi_event", (event) => {
-        if (!mounted) return;
-        // Pi sent an event — it's running stably, reset restart counter
-        piRestartCountRef.current = 0;
-        const data = event.payload;
+    // Shared handler for Pi event data — used by both pi_event and pipe_event
+    const handlePiEventData = (data: any) => {
 
         if (data.type === "message_update" && data.assistantMessageEvent) {
           const evt = data.assistantMessageEvent;
@@ -1739,6 +1748,54 @@ export function StandaloneChat({ className }: { className?: string } = {}) {
           setIsLoading(false);
           setIsStreaming(false);
         }
+      };
+
+    const setup = async () => {
+      unlistenEvent = await listen<any>("pi_event", (event) => {
+        if (!mounted) return;
+        // Pi sent an event — it's running stably, reset restart counter
+        piRestartCountRef.current = 0;
+        handlePiEventData(event.payload);
+      });
+
+      // Listen for pipe execution events (same format as pi_event, wrapped with pipe metadata)
+      unlistenPipeEvent = await listen<any>("pipe_event", (event) => {
+        if (!mounted) return;
+        const payload = event.payload;
+        const pipeName = payload?.pipeName;
+        const execId = payload?.executionId;
+        const piEvent = payload?.event;
+        if (!piEvent) return;
+
+        // If no pipe is being watched yet and we see an event, auto-attach
+        // (the Watch button also sets activePipeExecution explicitly)
+        if (!piMessageIdRef.current || piMessageIdRef.current?.startsWith("pipe-")) {
+          // Create or reuse a message for this pipe execution
+          const msgId = `pipe-${pipeName}-${execId}`;
+          if (!piMessageIdRef.current || piMessageIdRef.current !== msgId) {
+            piStreamingTextRef.current = "";
+            piContentBlocksRef.current = [];
+            piThinkingStartRef.current = null;
+            piMessageIdRef.current = msgId;
+            setMessages((prev) => {
+              // Don't add duplicate
+              if (prev.some((m) => m.id === msgId)) return prev;
+              return [
+                ...prev,
+                {
+                  id: msgId,
+                  role: "assistant" as const,
+                  content: "",
+                  timestamp: Date.now(),
+                  contentBlocks: [],
+                },
+              ];
+            });
+            setIsStreaming(true);
+          }
+        }
+
+        handlePiEventData(piEvent);
       });
 
       unlistenTerminated = await listen<number>("pi_terminated", (event) => {
@@ -1799,6 +1856,7 @@ export function StandaloneChat({ className }: { className?: string } = {}) {
               const result = await commands.piStart(dir, settings.user?.token ?? null, providerConfig);
               if (result.status === "ok") {
                 setPiInfo(result.data);
+                piSessionSyncedRef.current = false;
                 if (result.data.running) piRestartCountRef.current = 0;
               } else {
                 console.error("[Pi] Auto-restart failed:", result.error);
@@ -1857,10 +1915,47 @@ export function StandaloneChat({ className }: { className?: string } = {}) {
     return () => {
       mounted = false;
       unlistenEvent?.();
+      unlistenPipeEvent?.();
       unlistenTerminated?.();
       unlistenLog?.();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Listen for "watch_pipe" events from pipes-section to start watching a running pipe
+  useEffect(() => {
+    let unlisten: (() => void) | null = null;
+    listen<{ pipeName: string; executionId: number }>("watch_pipe", (event) => {
+      const { pipeName, executionId } = event.payload;
+      setActivePipeExecution({ name: pipeName, executionId });
+      // Create a placeholder assistant message for the pipe output
+      const msgId = `pipe-${pipeName}-${executionId}`;
+      piStreamingTextRef.current = "";
+      piContentBlocksRef.current = [];
+      piThinkingStartRef.current = null;
+      piMessageIdRef.current = msgId;
+      setMessages((prev) => {
+        if (prev.some((m) => m.id === msgId)) return prev;
+        return [
+          ...prev,
+          {
+            id: `pipe-user-${executionId}`,
+            role: "user" as const,
+            content: `Watching pipe: ${pipeName}`,
+            timestamp: Date.now(),
+          },
+          {
+            id: msgId,
+            role: "assistant" as const,
+            content: "",
+            timestamp: Date.now(),
+            contentBlocks: [],
+          },
+        ];
+      });
+      setIsStreaming(true);
+    }).then((fn) => { unlisten = fn; });
+    return () => { unlisten?.(); };
   }, []);
 
   // Generate follow-up suggestions using Apple Intelligence
@@ -2033,8 +2128,21 @@ export function StandaloneChat({ className }: { className?: string } = {}) {
         { id: assistantMessageId, role: "assistant", content: "Processing...", timestamp: Date.now() },
       ]);
 
+      // If Pi's session is out of sync (restart, conversation load), inject history
+      let promptMessage = userMessage;
+      if (!piSessionSyncedRef.current && messages.length > 0) {
+        const historyLines = messages
+          .slice(-40)
+          .map(m => `${m.role}: ${m.content}`)
+          .join("\n");
+        promptMessage = `<conversation_history>\n${historyLines}\n</conversation_history>\n\n${userMessage}`;
+        piSessionSyncedRef.current = true;
+      } else {
+        piSessionSyncedRef.current = true;
+      }
+
       const result = await commands.piPrompt(
-        userMessage,
+        promptMessage,
         piImages.length > 0 ? piImages : null,
       );
 

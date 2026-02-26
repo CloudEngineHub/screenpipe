@@ -172,6 +172,15 @@ function SettingsPageContent() {
     return () => { cancelled = true; clearInterval(interval); };
   }, []);
 
+  // Watch pipe: navigate to chat when user clicks "watch" on a running pipe
+  useEffect(() => {
+    let unlisten: (() => void) | null = null;
+    listen<{ pipeName: string; executionId: number }>("watch_pipe", () => {
+      setActiveSection("home");
+    }).then((fn) => { unlisten = fn; });
+    return () => { unlisten?.(); };
+  }, [setActiveSection]);
+
   // Settings modal state
   const [settingsModalOpen, setSettingsModalOpen] = useState(false);
   const [modalSection, setModalSection] = useState<SettingsModalSection>("general");

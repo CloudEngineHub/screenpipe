@@ -67,9 +67,6 @@ const FRAME_LOAD_DEBOUNCE_ARROW_MS = 0;
 // Number of adjacent frames to preload in each direction
 const PRELOAD_ADJACENT = 3;
 
-// Crossfade duration (ms)
-const CROSSFADE_MS = 120;
-
 // Track which chunks have failed with TTL — entries expire so finished chunks can be retried
 const FAILED_CHUNK_TTL_MS = 30_000;
 const failedChunks = new Map<string, number>();
@@ -896,18 +893,14 @@ export const CurrentFrameTimeline: FC<CurrentFrameTimelineProps> = ({
 				</div>
 			)}
 
-			{/* Video element — crossfades in when frame is ready */}
+			{/* Video element — always visible, retains last seeked frame during loading */}
 			<video
 				ref={videoRef}
 				muted
 				playsInline
 				preload="auto"
 				className="absolute inset-0 w-full h-full object-contain"
-				style={{
-					zIndex: 1,
-					opacity: !isLoading && useVideoMode && !isSnapshotFrame && !searchNavFrame ? 1 : 0,
-					transition: `opacity ${CROSSFADE_MS}ms ease-out`,
-				}}
+				style={{ zIndex: 1 }}
 				onError={() => {
 					const err = videoRef.current?.error;
 					console.warn("Video error:", err?.code, err?.message);
@@ -920,33 +913,25 @@ export const CurrentFrameTimeline: FC<CurrentFrameTimelineProps> = ({
 				}}
 			/>
 
-			{/* Snapshot frame: direct local file via asset protocol — crossfades in */}
+			{/* Snapshot frame: direct local file via asset protocol — no HTTP/DB needed */}
 			{snapshotAssetUrl && isSnapshotFrame && !snapshotFailed && (
 				// eslint-disable-next-line @next/next/no-img-element
 				<img
 					src={snapshotAssetUrl}
 					className="absolute inset-0 w-full h-full object-contain"
-					style={{
-						zIndex: 2,
-						opacity: !isLoading ? 1 : 0,
-						transition: `opacity ${CROSSFADE_MS}ms ease-out`,
-					}}
+					style={{ zIndex: 2 }}
 					alt="Current frame"
 					draggable={false}
 				/>
 			)}
 
-			{/* Fallback mode: preloaded <img> via HTTP server — crossfades in */}
+			{/* Fallback mode: preloaded <img> via HTTP server (also used for search nav) */}
 			{displayedFallbackUrl && (!useVideoMode || searchNavFrame) && !(snapshotAssetUrl && isSnapshotFrame && !snapshotFailed) && (
 				// eslint-disable-next-line @next/next/no-img-element
 				<img
 					src={displayedFallbackUrl}
 					className="absolute inset-0 w-full h-full object-contain"
-					style={{
-						zIndex: 2,
-						opacity: !isLoading ? 1 : 0,
-						transition: `opacity ${CROSSFADE_MS}ms ease-out`,
-					}}
+					style={{ zIndex: 2 }}
 					alt="Current frame"
 					draggable={false}
 				/>

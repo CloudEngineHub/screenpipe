@@ -1905,6 +1905,27 @@ async fn main() {
                 let recording_state_inner = recording_state.handle.clone();
                 let is_starting_clone = recording_state.is_starting.clone();
 
+                // Create pipe output callback that emits Tauri events to the frontend
+                let app_for_pipe = app_handle.clone();
+                let on_pipe_output: Option<screenpipe_core::pipes::OnPipeOutputLine> = Some(
+                    std::sync::Arc::new(move |pipe_name: &str, exec_id: i64, line: &str| {
+                        let payload = if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(line) {
+                            serde_json::json!({
+                                "pipeName": pipe_name,
+                                "executionId": exec_id,
+                                "event": parsed,
+                            })
+                        } else {
+                            serde_json::json!({
+                                "pipeName": pipe_name,
+                                "executionId": exec_id,
+                                "event": { "type": "raw_line", "text": line },
+                            })
+                        };
+                        let _ = app_for_pipe.emit("pipe_event", &payload);
+                    }),
+                );
+
                 // Spawn a dedicated thread for the server with its own runtime
                 // This prevents CPU contention between UI and recording workloads
                 std::thread::Builder::new()
@@ -1957,7 +1978,7 @@ async fn main() {
                             info!("Starting embedded screenpipe server on dedicated runtime...");
                             let config = store_clone.to_recording_config(data_dir_clone);
 
-                            match embedded_server::start_embedded_server(config).await {
+                            match embedded_server::start_embedded_server(config, on_pipe_output).await {
                                 Ok(handle) => {
                                     info!("Embedded screenpipe server started successfully on dedicated runtime");
                                     // Store handle in state so it can be stopped/restarted later

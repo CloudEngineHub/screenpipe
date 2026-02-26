@@ -42,6 +42,7 @@ impl EmbeddedServerHandle {
 /// Start the embedded screenpipe server
 pub async fn start_embedded_server(
     config: RecordingConfig,
+    on_pipe_output: Option<screenpipe_core::pipes::OnPipeOutputLine>,
 ) -> Result<EmbeddedServerHandle, String> {
     info!("Starting embedded screenpipe server on port {}", config.port);
 
@@ -353,6 +354,9 @@ pub async fn start_embedded_server(
             "duration_secs": duration_secs,
         }));
     }));
+    if let Some(cb) = on_pipe_output {
+        pipe_manager.set_on_output_line(cb);
+    }
     pipe_manager.install_builtin_pipes().ok();
     if let Err(e) = pipe_manager.load_pipes().await {
         tracing::warn!("failed to load pipes: {}", e);

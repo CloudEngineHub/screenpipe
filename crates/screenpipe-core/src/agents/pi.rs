@@ -11,6 +11,7 @@ use super::{AgentExecutor, AgentOutput, ExecutionHandle};
 use anyhow::{anyhow, Result};
 use serde_json::json;
 use std::path::{Path, PathBuf};
+use tokio::io::AsyncBufReadExt;
 use tracing::{debug, error, info, warn};
 
 const PI_PACKAGE: &str = "@mariozechner/pi-coding-agent@0.53.0";
@@ -236,6 +237,39 @@ impl PiExecutor {
         Ok(())
     }
 
+    /// Resolve a model name for the screenpipe provider by stripping date suffixes
+    /// (e.g. "claude-haiku-4-5@20251001" → "claude-haiku-4-5") to match the cloud
+    /// model list. Passthrough for non-screenpipe providers.
+    fn resolve_model(requested: &str, provider: &str) -> String {
+        if provider != "screenpipe" {
+            return requested.to_string();
+        }
+        let models = screenpipe_cloud_models();
+        // Exact match → use as-is
+        if models
+            .as_array()
+            .map(|arr| arr.iter().any(|m| m["id"].as_str() == Some(requested)))
+            .unwrap_or(false)
+        {
+            return requested.to_string();
+        }
+        // Strip @date suffix and try again
+        if let Some(base) = requested.split('@').next() {
+            if models
+                .as_array()
+                .map(|arr| arr.iter().any(|m| m["id"].as_str() == Some(base)))
+                .unwrap_or(false)
+            {
+                warn!(
+                    "model '{}' not in cloud list, resolved to '{}'",
+                    requested, base
+                );
+                return base.to_string();
+            }
+        }
+        requested.to_string()
+    }
+
     /// Spawn the pi subprocess and wait for its output.
     #[allow(clippy::too_many_arguments)]
     async fn spawn_pi(
@@ -313,6 +347,108 @@ impl PiExecutor {
             pid,
         })
     }
+
+    /// Spawn the pi subprocess with line-by-line stdout streaming.
+    ///
+    /// Same as `spawn_pi` but reads stdout incrementally via `BufReader`
+    /// and sends each line to `line_tx`. Lines are also collected into
+    /// `AgentOutput.stdout` for the final result.
+    #[allow(clippy::too_many_arguments)]
+    async fn spawn_pi_streaming(
+        &self,
+        pi_path: &str,
+        prompt: &str,
+        model: &str,
+        working_dir: &Path,
+        resolved_provider: &str,
+        provider_api_key: Option<&str>,
+        pid_tx: Option<tokio::sync::oneshot::Sender<u32>>,
+        line_tx: tokio::sync::mpsc::UnboundedSender<String>,
+    ) -> Result<AgentOutput> {
+        let mut cmd = build_async_command(pi_path);
+        cmd.current_dir(working_dir);
+        cmd.arg("-p").arg(prompt);
+        cmd.arg("--provider").arg(resolved_provider);
+        cmd.arg("--model").arg(model);
+
+        if let Some(ref token) = self.user_token {
+            cmd.env("SCREENPIPE_API_KEY", token);
+        }
+
+        if let Some(key) = provider_api_key {
+            if !key.is_empty() {
+                match resolved_provider {
+                    "openai" | "openai-byok" => {
+                        cmd.env("OPENAI_API_KEY", key);
+                    }
+                    "custom" => {
+                        cmd.env("CUSTOM_API_KEY", key);
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        cmd.stdout(std::process::Stdio::piped());
+        cmd.stderr(std::process::Stdio::piped());
+
+        #[cfg(unix)]
+        unsafe {
+            cmd.pre_exec(|| {
+                libc::setsid();
+                Ok(())
+            });
+        }
+
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            const CREATE_NO_WINDOW: u32 = 0x08000000;
+            cmd.creation_flags(CREATE_NO_WINDOW);
+        }
+
+        let mut child = cmd.spawn()?;
+        let pid = child.id();
+
+        if let Some(tx) = pid_tx {
+            if let Some(p) = pid {
+                let _ = tx.send(p);
+            }
+        }
+
+        // Take stdout for streaming reads; stderr will be read after exit
+        let child_stdout = child
+            .stdout
+            .take()
+            .ok_or_else(|| anyhow!("failed to capture pi stdout"))?;
+
+        let mut reader = tokio::io::BufReader::new(child_stdout).lines();
+        let mut stdout_buf = String::new();
+
+        while let Some(line) = reader.next_line().await? {
+            let _ = line_tx.send(line.clone());
+            stdout_buf.push_str(&line);
+            stdout_buf.push('\n');
+        }
+
+        let status = child.wait().await?;
+
+        // Read remaining stderr
+        let stderr = if let Some(mut stderr_handle) = child.stderr.take() {
+            let mut buf = String::new();
+            tokio::io::AsyncReadExt::read_to_string(&mut stderr_handle, &mut buf).await?;
+            buf
+        } else {
+            String::new()
+        };
+
+        Ok(AgentOutput {
+            stdout: stdout_buf,
+            stderr,
+            success: status.success(),
+            pid,
+        })
+    }
 }
 
 #[async_trait::async_trait]
@@ -344,17 +480,18 @@ impl AgentExecutor for PiExecutor {
         // 1. Explicit provider from pipe frontmatter → use it
         // 2. No provider specified → screenpipe cloud (default)
         let resolved_provider = provider.unwrap_or("screenpipe").to_string();
+        let resolved_model = Self::resolve_model(model, &resolved_provider);
 
         info!(
             "pipe using provider: {}, model: {}",
-            resolved_provider, model
+            resolved_provider, resolved_model
         );
 
         let output = self
             .spawn_pi(
                 &pi_path,
                 prompt,
-                model,
+                &resolved_model,
                 working_dir,
                 &resolved_provider,
                 provider_api_key,
@@ -376,18 +513,96 @@ impl AgentExecutor for PiExecutor {
                 self.user_token.as_deref(),
                 &self.api_url,
                 provider,
-                Some(model),
+                Some(&resolved_model),
                 provider_url,
             )?;
             return self
                 .spawn_pi(
                     &pi_path,
                     prompt,
-                    model,
+                    &resolved_model,
                     working_dir,
                     &resolved_provider,
                     provider_api_key,
                     None,
+                )
+                .await;
+        }
+
+        Ok(output)
+    }
+
+    async fn run_streaming(
+        &self,
+        prompt: &str,
+        model: &str,
+        working_dir: &Path,
+        provider: Option<&str>,
+        provider_url: Option<&str>,
+        provider_api_key: Option<&str>,
+        pid_tx: Option<tokio::sync::oneshot::Sender<u32>>,
+        line_tx: tokio::sync::mpsc::UnboundedSender<String>,
+    ) -> Result<AgentOutput> {
+        let resolved_provider = provider.unwrap_or("screenpipe").to_string();
+        let resolved_model = Self::resolve_model(model, &resolved_provider);
+
+        Self::ensure_pi_config(
+            self.user_token.as_deref(),
+            &self.api_url,
+            provider,
+            Some(&resolved_model),
+            provider_url,
+        )?;
+        Self::ensure_screenpipe_skill(working_dir)?;
+        Self::ensure_web_search_extension(working_dir)?;
+
+        let pi_path = find_pi_executable()
+            .ok_or_else(|| anyhow!("pi not found. install with: bun add -g {}", PI_PACKAGE))?;
+
+        info!(
+            "pipe streaming using provider: {}, model: {}",
+            resolved_provider, resolved_model
+        );
+
+        let output = self
+            .spawn_pi_streaming(
+                &pi_path,
+                prompt,
+                &resolved_model,
+                working_dir,
+                &resolved_provider,
+                provider_api_key,
+                pid_tx,
+                line_tx.clone(),
+            )
+            .await?;
+
+        // Retry once on "model not found"
+        if !output.success && output.stderr.to_lowercase().contains("not found") {
+            warn!(
+                "pi model not found, retrying with fresh models.json (stderr: {})",
+                output.stderr.trim()
+            );
+            let config_dir = get_pi_config_dir()?;
+            let models_path = config_dir.join("models.json");
+            let _ = std::fs::remove_file(&models_path);
+            Self::ensure_pi_config(
+                self.user_token.as_deref(),
+                &self.api_url,
+                provider,
+                Some(&resolved_model),
+                provider_url,
+            )?;
+            return self
+                .spawn_pi_streaming(
+                    &pi_path,
+                    prompt,
+                    &resolved_model,
+                    working_dir,
+                    &resolved_provider,
+                    provider_api_key,
+                    None,
+                    line_tx,
                 )
                 .await;
         }

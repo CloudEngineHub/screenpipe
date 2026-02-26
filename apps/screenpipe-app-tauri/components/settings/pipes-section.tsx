@@ -877,7 +877,22 @@ export function PipesSection() {
                             </td>
                             <td className="py-0.5 pr-2 text-muted-foreground whitespace-nowrap">
                               {exec.status === "running" && exec.started_at ? (
-                                <ElapsedTimer startedAt={exec.started_at} />
+                                <span className="flex items-center gap-1">
+                                  <ElapsedTimer startedAt={exec.started_at} />
+                                  <button
+                                    className="text-[10px] text-primary underline hover:no-underline ml-1"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      emit("watch_pipe", {
+                                        pipeName: pipe.config.name,
+                                        executionId: exec.id,
+                                      });
+                                    }}
+                                    title="watch live output"
+                                  >
+                                    watch
+                                  </button>
+                                </span>
                               ) : exec.duration_ms != null ? (
                                 formatDuration(exec.duration_ms)
                               ) : null}
