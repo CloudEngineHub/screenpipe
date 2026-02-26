@@ -231,6 +231,21 @@ export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 
 	// Find next frame index matching the device filter in a given direction
 	const findNextDevice = useCallback((fromIndex: number, dir: 1 | -1): number => {
+		// When any filter is active, navigate only through matching frames
+		if (matchingIndices) {
+			// Binary-search-ish: find current position in matching list
+			let pos = -1;
+			let bestDist = Infinity;
+			for (let j = 0; j < matchingIndices.length; j++) {
+				const dist = Math.abs(matchingIndices[j] - fromIndex);
+				if (dist < bestDist) { bestDist = dist; pos = j; }
+			}
+			const nextPos = pos + (dir === 1 ? 1 : -1);
+			if (nextPos >= 0 && nextPos < matchingIndices.length) {
+				return matchingIndices[nextPos];
+			}
+			return fromIndex;
+		}
 		if (selectedDeviceId === "all" || allDeviceIds.length <= 1) {
 			return Math.max(0, Math.min(fromIndex + dir, frames.length - 1));
 		}
@@ -240,7 +255,7 @@ export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 			i += dir;
 		}
 		return fromIndex; // no match, stay put
-	}, [selectedDeviceId, allDeviceIds.length, frames]);
+	}, [selectedDeviceId, allDeviceIds.length, frames, matchingIndices]);
 
 	// Snap an arbitrary index to the nearest matching frame
 	const snapToDevice = useCallback((idx: number): number => {
