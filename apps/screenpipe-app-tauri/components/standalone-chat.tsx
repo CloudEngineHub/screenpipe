@@ -788,10 +788,14 @@ export function StandaloneChat({ className }: { className?: string } = {}) {
   };
 
   // Auto-save conversation when a response completes (isLoading transitions from true to false)
+  // Skip saving pipe watch conversations — they're transient, not user-initiated chats
   const prevIsLoadingRef = useRef(false);
   useEffect(() => {
     if (prevIsLoadingRef.current && !isLoading && messages.length > 0) {
-      saveConversation(messages);
+      const isPipeWatch = messages.some((m) => m.id?.startsWith("pipe-"));
+      if (!isPipeWatch) {
+        saveConversation(messages);
+      }
     }
     prevIsLoadingRef.current = isLoading;
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1780,6 +1784,22 @@ export function StandaloneChat({ className }: { className?: string } = {}) {
           piContentBlocksRef.current = [];
           setIsLoading(false);
           setIsStreaming(false);
+        } else if (data.type === "pipe_done") {
+          // Pipe execution finished — clean up streaming state
+          if (piMessageIdRef.current?.startsWith("pipe-")) {
+            const msgId = piMessageIdRef.current;
+            const content = piStreamingTextRef.current || "Pipe completed with no output.";
+            const blocksSnapshot = [...piContentBlocksRef.current];
+            setMessages((prev) =>
+              prev.map((m) => m.id === msgId ? { ...m, content, contentBlocks: blocksSnapshot } : m)
+            );
+            piStreamingTextRef.current = "";
+            piMessageIdRef.current = null;
+            piContentBlocksRef.current = [];
+            piThinkingStartRef.current = null;
+            setIsLoading(false);
+            setIsStreaming(false);
+          }
         }
       };
 
@@ -1791,43 +1811,14 @@ export function StandaloneChat({ className }: { className?: string } = {}) {
         handlePiEventData(event.payload);
       });
 
-      // Listen for pipe execution events (same format as pi_event, wrapped with pipe metadata)
+      // Listen for pipe execution events (only when actively watching a pipe)
       unlistenPipeEvent = await listen<any>("pipe_event", (event) => {
         if (!mounted) return;
+        // Only process events for the pipe we're actively watching
+        if (!piMessageIdRef.current?.startsWith("pipe-")) return;
         const payload = event.payload;
-        const pipeName = payload?.pipeName;
-        const execId = payload?.executionId;
         const piEvent = payload?.event;
-        console.log("[Pipe] event received:", pipeName, execId, piEvent?.type);
         if (!piEvent) return;
-
-        // If no pipe is being watched yet and we see an event, auto-attach
-        // (the Watch button also sets activePipeExecution explicitly)
-        if (!piMessageIdRef.current || piMessageIdRef.current?.startsWith("pipe-")) {
-          // Create or reuse a message for this pipe execution
-          const msgId = `pipe-${pipeName}-${execId}`;
-          if (!piMessageIdRef.current || piMessageIdRef.current !== msgId) {
-            piStreamingTextRef.current = "";
-            piContentBlocksRef.current = [];
-            piThinkingStartRef.current = null;
-            piMessageIdRef.current = msgId;
-            setMessages((prev) => {
-              // Don't add duplicate
-              if (prev.some((m) => m.id === msgId)) return prev;
-              return [
-                ...prev,
-                {
-                  id: msgId,
-                  role: "assistant" as const,
-                  content: "",
-                  timestamp: Date.now(),
-                  contentBlocks: [],
-                },
-              ];
-            });
-            setIsStreaming(true);
-          }
-        }
 
         handlePiEventData(piEvent);
       });

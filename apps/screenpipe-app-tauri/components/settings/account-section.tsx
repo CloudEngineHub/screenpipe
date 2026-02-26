@@ -205,19 +205,21 @@ export function AccountSection() {
               <h3 className="text-lg font-semibold">screenpipe pro</h3>
               <span className="text-xs bg-primary/10 text-primary px-2 py-0.5 rounded-full font-medium">active</span>
             </div>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() =>
-                openUrl(
-                  `https://billing.stripe.com/p/login/3cs6pT8Qbd846yc9AA?email=${encodeURIComponent(
-                    settings.user?.email || ""
-                  )}`
-                )
-              }
-            >
-              manage subscription <ExternalLinkIcon className="w-3.5 h-3.5 ml-1.5" />
-            </Button>
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() =>
+                  openUrl(
+                    `https://billing.stripe.com/p/login/3cs6pT8Qbd846yc9AA?email=${encodeURIComponent(
+                      settings.user?.email || ""
+                    )}`
+                  )
+                }
+              >
+                manage subscription <ExternalLinkIcon className="w-3.5 h-3.5 ml-1.5" />
+              </Button>
+            </div>
           </div>
           <div className="grid grid-cols-2 gap-2 text-sm text-muted-foreground">
             <div className="flex items-center gap-2">
@@ -227,7 +229,7 @@ export function AccountSection() {
               <span>✓</span> cloud transcription — higher quality
             </div>
             <div className="flex items-center gap-2">
-              <span>✓</span> unlimited pipes & AI
+              <span>✓</span> higher AI query limits + credits
             </div>
             <div className="flex items-center gap-2">
               <span>✓</span> priority support
@@ -294,7 +296,7 @@ export function AccountSection() {
                 </div>
                 <div className="flex items-center gap-2 text-foreground">
                   <Sparkles className="h-3.5 w-3.5 shrink-0" />
-                  unlimited pipes & AI
+                  higher AI query limits + credits
                 </div>
                 <div className="flex items-center gap-2 text-foreground">
                   <Sparkles className="h-3.5 w-3.5 shrink-0" />
@@ -360,7 +362,7 @@ export function AccountSection() {
                 </div>
                 <div className="flex items-center gap-2 text-foreground">
                   <Sparkles className="h-3.5 w-3.5 shrink-0" />
-                  unlimited pipes & AI
+                  higher AI query limits + credits
                 </div>
                 <div className="flex items-center gap-2 text-foreground">
                   <Sparkles className="h-3.5 w-3.5 shrink-0" />

@@ -206,6 +206,21 @@ function formatDuration(ms: number): string {
   return `${mins}:${String(remainSecs).padStart(2, "0")}`;
 }
 
+/** Extract human-readable text from Pi stdout, filtering out JSON event noise */
+function cleanPipeStdout(raw: string): string {
+  return raw
+    .split("\n")
+    .filter((line) => {
+      const trimmed = line.trim();
+      if (!trimmed) return false;
+      // Skip JSON event lines (Pi session/agent/message events)
+      if (trimmed.startsWith("{") && trimmed.endsWith("}")) return false;
+      return true;
+    })
+    .join("\n")
+    .trim();
+}
+
 function ElapsedTimer({ startedAt }: { startedAt: string }) {
   const [elapsed, setElapsed] = useState("");
   useEffect(() => {
@@ -434,6 +449,7 @@ export function PipesSection() {
       if (name in pendingConfigSaves.current) {
         await pendingConfigSaves.current[name];
       }
+      const minDelay = new Promise((r) => setTimeout(r, 2000));
       await fetch(`http://localhost:3030/pipes/${name}/run`, {
         method: "POST",
       });
@@ -441,6 +457,8 @@ export function PipesSection() {
         fetchLogs(name);
         fetchExecutions(name);
       }
+      // Keep loading state visible until the backend has time to start the process
+      await minDelay;
     } finally {
       setRunningPipe(null);
       fetchPipes();
@@ -913,7 +931,7 @@ export function PipesSection() {
                                 </span>
                               ) : exec.status === "completed" && exec.stdout ? (
                                 <span className="truncate block">
-                                  {exec.stdout.split("\n")[0].slice(0, 60)}
+                                  {cleanPipeStdout(exec.stdout).split("\n")[0].slice(0, 60) || "completed"}
                                 </span>
                               ) : null}
                             </td>
@@ -1040,9 +1058,9 @@ export function PipesSection() {
                                   {exec.error_message}
                                 </p>
                               )}
-                              {exec.status === "completed" && exec.stdout && (
+                              {exec.status === "completed" && exec.stdout && cleanPipeStdout(exec.stdout) && (
                                 <pre className="text-xs text-muted-foreground whitespace-pre-wrap break-words max-h-20 overflow-y-auto">
-                                  {exec.stdout.slice(0, 500)}
+                                  {cleanPipeStdout(exec.stdout).slice(0, 500)}
                                 </pre>
                               )}
                               {exec.status === "failed" && exec.stderr && !exec.error_message && (
@@ -1078,9 +1096,9 @@ export function PipesSection() {
                                     s
                                   </span>
                                 </div>
-                                {log.success && log.stdout && (
+                                {log.success && log.stdout && cleanPipeStdout(log.stdout) && (
                                   <pre className="text-xs text-muted-foreground whitespace-pre-wrap break-words max-h-20 overflow-y-auto">
-                                    {log.stdout.slice(0, 500)}
+                                    {cleanPipeStdout(log.stdout).slice(0, 500)}
                                   </pre>
                                 )}
                                 {!log.success && log.stderr && (

@@ -368,6 +368,7 @@ impl PiExecutor {
         let mut cmd = build_async_command(pi_path);
         cmd.current_dir(working_dir);
         cmd.arg("-p").arg(prompt);
+        cmd.arg("--mode").arg("json");
         cmd.arg("--provider").arg(resolved_provider);
         cmd.arg("--model").arg(model);
 

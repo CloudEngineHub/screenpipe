@@ -829,6 +829,10 @@ impl PipeManager {
                         cb(&drain_pipe_name, drain_exec_id, &line);
                     }
                 }
+                // Channel closed — pipe process exited. Emit a done sentinel.
+                if let Some(ref cb) = drain_on_output {
+                    cb(&drain_pipe_name, drain_exec_id, r#"{"type":"pipe_done"}"#);
+                }
             });
 
             let run_result = tokio::time::timeout(
@@ -1140,6 +1144,10 @@ impl PipeManager {
                 if let Some(ref cb) = drain_on_output {
                     cb(&drain_pipe_name, drain_exec_id, &line);
                 }
+            }
+            // Channel closed — pipe process exited. Emit a done sentinel.
+            if let Some(ref cb) = drain_on_output {
+                cb(&drain_pipe_name, drain_exec_id, r#"{"type":"pipe_done"}"#);
             }
         });
 
@@ -1764,6 +1772,10 @@ impl PipeManager {
                                 if let Some(ref cb) = sched_on_output {
                                     cb(&sched_pipe_name, sched_exec_id, &line);
                                 }
+                            }
+                            // Channel closed — pipe process exited. Emit a done sentinel.
+                            if let Some(ref cb) = sched_on_output {
+                                cb(&sched_pipe_name, sched_exec_id, r#"{"type":"pipe_done"}"#);
                             }
                         });
 
