@@ -31,5 +31,6 @@ mod meeting_benchmark;
 #[allow(dead_code)]
 mod metrics;
 mod pipeline_benchmark;
+mod quality_regression;
 mod smart_mode_benchmark;
 mod vad_benchmark;

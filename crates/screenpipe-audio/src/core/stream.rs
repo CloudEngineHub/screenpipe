@@ -271,7 +271,8 @@ fn build_input_stream(
             .build_input_stream(
                 &config.config(),
                 move |data: &[i16], _: &_| {
-                    let mono = audio_to_mono(bytemuck::cast_slice(data), channels);
+                    let f32_data: Vec<f32> = data.iter().map(|&s| s as f32 / 32768.0).collect();
+                    let mono = audio_to_mono(&f32_data, channels);
                     let _ = tx.send(mono);
                 },
                 error_callback,
@@ -282,7 +283,9 @@ fn build_input_stream(
             .build_input_stream(
                 &config.config(),
                 move |data: &[i32], _: &_| {
-                    let mono = audio_to_mono(bytemuck::cast_slice(data), channels);
+                    let f32_data: Vec<f32> =
+                        data.iter().map(|&s| (s as f64 / 2147483648.0) as f32).collect();
+                    let mono = audio_to_mono(&f32_data, channels);
                     let _ = tx.send(mono);
                 },
                 error_callback,
@@ -293,7 +296,8 @@ fn build_input_stream(
             .build_input_stream(
                 &config.config(),
                 move |data: &[i8], _: &_| {
-                    let mono = audio_to_mono(bytemuck::cast_slice(data), channels);
+                    let f32_data: Vec<f32> = data.iter().map(|&s| s as f32 / 128.0).collect();
+                    let mono = audio_to_mono(&f32_data, channels);
                     let _ = tx.send(mono);
                 },
                 error_callback,

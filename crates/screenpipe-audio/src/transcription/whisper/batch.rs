@@ -8,6 +8,14 @@ use anyhow::Result;
 use screenpipe_core::Language;
 use tracing::debug;
 use whisper_rs::{FullParams, SamplingStrategy, WhisperState};
+
+/// Minimum RMS energy threshold for audio to be worth transcribing.
+/// Below this, the audio is near-silent and Whisper tends to hallucinate
+/// phantom text like "Thank you." or "So, let's go."
+/// Value calibrated against: silence (RMS=0.0), ambient noise at 0.01 amplitude (RMS~0.007),
+/// white noise at 0.1 amplitude (RMS~0.071), normal speech (RMS~0.05-0.3).
+const MIN_RMS_ENERGY: f32 = 0.015;
+
 /// Processes audio data using the Whisper model to generate transcriptions.
 ///
 /// # Returns
@@ -18,7 +26,16 @@ pub async fn process_with_whisper(
     whisper_state: &mut WhisperState,
     vocabulary: &[VocabularyEntry],
 ) -> Result<String> {
-    let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 0 });
+    // Pre-check: if audio energy is too low, skip transcription entirely.
+    // Whisper hallucinates on silence/near-silence (e.g. "Thank you.", "So, let's go.")
+    // and its internal no_speech_prob is unreliable (reports 0.0 on pure silence).
+    let rms = (audio.iter().map(|s| s * s).sum::<f32>() / audio.len() as f32).sqrt();
+    if rms < MIN_RMS_ENERGY {
+        debug!("audio RMS {:.6} below threshold {:.6}, skipping whisper", rms, MIN_RMS_ENERGY);
+        return Ok(String::new());
+    }
+
+    let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
 
     let mut audio = audio.to_vec();
 
@@ -26,22 +43,29 @@ pub async fn process_with_whisper(
         audio.resize(16000, 0.0);
     }
 
-    // Edit params as needed.
-    // Set the number of threads to use to 2.
     params.set_n_threads(2);
-    // Disable anything that prints to stdout.
     params.set_print_special(false);
     params.set_print_progress(false);
     params.set_print_realtime(false);
     params.set_print_timestamps(false);
-    // Disable token-level timestamps since DTW is disabled for stability.
     params.set_token_timestamps(false);
+
+    // Hallucination prevention: suppress output when model detects no speech
+    params.set_no_speech_thold(0.6);
+    // Suppress blank/silence tokens at start of transcription
+    params.set_suppress_blank(true);
+    // Suppress non-speech tokens (music notes, special chars, etc.)
+    params.set_suppress_nst(true);
+    // Entropy threshold: high-entropy (repetitive/looping) output is suppressed
+    params.set_entropy_thold(2.4);
+    // Log-probability threshold: low-confidence segments are dropped
+    params.set_logprob_thold(-1.0);
+
     whisper_state.pcm_to_mel(&audio, 2)?;
     let (_, lang_tokens) = whisper_state.lang_detect(0, 2)?;
     let lang = detect_language(lang_tokens, languages);
     params.set_language(lang);
     params.set_debug_mode(false);
-    params.set_logprob_thold(-2.0);
     params.set_translate(false);
 
     // Set initial_prompt from vocabulary to bias Whisper toward custom words
@@ -70,7 +94,6 @@ pub async fn process_with_whisper(
     let mut transcript = String::new();
 
     for i in 0..num_segments {
-        // Get the transcribed text and timestamps for the current segment.
         if let Some(segment) = whisper_state.get_segment(i) {
             if let Ok(text) = segment.to_str() {
                 transcript.push_str(text);
@@ -78,5 +101,58 @@ pub async fn process_with_whisper(
         }
     }
 
+    // Post-processing: filter out known Whisper hallucination patterns.
+    // When Whisper processes noise/non-speech, it often produces these short generic phrases
+    // as the ENTIRE output. Real speech produces longer, contextual text.
+    let trimmed = transcript.trim();
+    if is_hallucination(trimmed) {
+        debug!("filtered hallucination: {:?}", trimmed);
+        return Ok(String::new());
+    }
+
     Ok(transcript)
+}
+
+/// Check if transcription output is a known Whisper hallucination pattern.
+/// These are short generic phrases that Whisper produces on silence/noise/non-speech audio.
+/// Only matches when the phrase IS the entire output (not part of a longer transcription).
+fn is_hallucination(text: &str) -> bool {
+    // Normalize: lowercase, strip punctuation and extra whitespace
+    let normalized: String = text
+        .to_lowercase()
+        .chars()
+        .filter(|c| c.is_alphanumeric() || c.is_whitespace())
+        .collect::<String>()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+
+    if normalized.is_empty() {
+        return false; // empty is fine, not hallucination
+    }
+
+    // Known hallucination phrases (normalized, no punctuation)
+    const HALLUCINATIONS: &[&str] = &[
+        "thank you",
+        "thanks for watching",
+        "thanks for listening",
+        "so lets go",
+        "lets go",
+        "bye",
+        "bye bye",
+        "goodbye",
+        "please subscribe",
+        "subscribe",
+        "like and subscribe",
+        "you",
+        "yeah",
+        "oh",
+        "hmm",
+        "music",
+        "applause",
+        "laughter",
+        "silence",
+    ];
+
+    HALLUCINATIONS.contains(&normalized.as_str())
 }
