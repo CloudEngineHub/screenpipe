@@ -145,43 +145,54 @@ pub async fn archive_init(
         Uuid::new_v4().to_string()
     };
 
-    let device_name = hostname::get()
-        .map(|h| h.to_string_lossy().to_string())
-        .unwrap_or_else(|_| "Unknown".to_string());
-    let device_os = std::env::consts::OS.to_string();
+    // Reuse the sync manager if sync is already initialized (same encryption keys).
+    // This avoids the AEAD decryption failure that occurs when archive derives a
+    // different password than what sync used to encrypt the master key.
+    let manager = {
+        let sync_guard = state.sync_state.read().await;
+        if let Some(ref sync_rt) = *sync_guard {
+            info!("archive: reusing sync manager (already initialized)");
+            sync_rt.manager.clone()
+        } else {
+            drop(sync_guard);
 
-    // Create SyncManager
-    let config = SyncClientConfig::new(
-        request.token.clone(),
-        machine_id.clone(),
-        device_name,
-        device_os,
-    );
+            let device_name = hostname::get()
+                .map(|h| h.to_string_lossy().to_string())
+                .unwrap_or_else(|_| "Unknown".to_string());
+            let device_os = std::env::consts::OS.to_string();
 
-    let manager = SyncManager::new(config).map_err(|e| {
-        error!("archive: failed to create sync manager: {}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": format!("failed to create sync manager: {}", e)})),
-        )
-    })?;
+            let config = SyncClientConfig::new(
+                request.token.clone(),
+                machine_id.clone(),
+                device_name,
+                device_os,
+            );
 
-    // Derive encryption password deterministically from the user's token.
-    // Same account = same token = same key on every device. No password needed.
-    let password = format!(
-        "screenpipe-archive-{}",
-        format!("{:x}", md5::compute(request.token.as_bytes()))
-    );
+            let mgr = SyncManager::new(config).map_err(|e| {
+                error!("archive: failed to create sync manager: {}", e);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({"error": format!("failed to create sync manager: {}", e)})),
+                )
+            })?;
 
-    manager.initialize(&password).await.map_err(|e| {
-        error!("archive: failed to initialize encryption: {}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": format!("failed to initialize encryption: {}", e)})),
-        )
-    })?;
+            // Derive encryption password from the token (only used when sync is not active)
+            let password = format!(
+                "screenpipe-archive-{}",
+                format!("{:x}", md5::compute(request.token.as_bytes()))
+            );
 
-    let manager = Arc::new(manager);
+            mgr.initialize(&password).await.map_err(|e| {
+                error!("archive: failed to initialize encryption: {}", e);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({"error": format!("failed to initialize encryption: {}", e)})),
+                )
+            })?;
+
+            Arc::new(mgr)
+        }
+    };
 
     let archive_config = ArchiveConfig {
         enabled: true,

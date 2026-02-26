@@ -2293,7 +2293,7 @@ export function StandaloneChat({ className }: { className?: string } = {}) {
           <Plus size={14} />
           <span>New</span>
         </Button>
-        <kbd className="hidden sm:inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-mono text-muted-foreground bg-muted/50 border border-border/50 rounded">
+        <kbd suppressHydrationWarning className="hidden sm:inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-mono text-muted-foreground bg-muted/50 border border-border/50 rounded">
           {formatShortcutDisplay(settings.showChatShortcut || (isMac ? "Control+Super+L" : "Alt+L"), isMac)}
         </kbd>
       </div>
