@@ -607,18 +607,27 @@ pub async fn start_permission_monitor(app: tauri::AppHandle) {
     let arc_installed = std::path::Path::new("/Applications/Arc.app").exists();
 
     let mut check_interval = interval(Duration::from_secs(10));
-    let mut last_screen_ok = true;
-    let mut last_mic_ok = true;
-    let mut last_accessibility_ok = true;
-    let mut last_arc_ok = true;
 
     // Track consecutive failures to avoid false positives from transient TCC issues
-    // macOS preflight() can return false transiently even when permission is granted
+    // macOS preflight() and AEDeterminePermissionToAutomateTarget can return
+    // inconsistent results transiently, especially Arc automation in dev mode
+    // (run_self_detached has timing-dependent launchctl behavior)
     let mut screen_fail_count = 0u32;
     let mut mic_fail_count = 0u32;
     let mut accessibility_fail_count = 0u32;
     let mut arc_fail_count = 0u32;
-    const REQUIRED_CONSECUTIVE_FAILURES: u32 = 2; // Require 2 consecutive failures (~20 seconds)
+    // Require consecutive successes before resetting fail count, to prevent
+    // a single transient "OK" from resetting the counter and re-triggering
+    let mut screen_ok_count = 0u32;
+    let mut mic_ok_count = 0u32;
+    let mut accessibility_ok_count = 0u32;
+    let mut arc_ok_count = 0u32;
+    const REQUIRED_CONSECUTIVE_FAILURES: u32 = 2;
+    const REQUIRED_CONSECUTIVE_SUCCESSES: u32 = 3; // need 3 consecutive OKs (~30s) to reset
+
+    // Cooldown: don't re-emit within 5 minutes even if counters re-trigger
+    let mut last_emitted: Option<tokio::time::Instant> = None;
+    const EMIT_COOLDOWN: Duration = Duration::from_secs(300);
 
     loop {
         check_interval.tick().await;
@@ -635,57 +644,75 @@ pub async fn start_permission_monitor(app: tauri::AppHandle) {
             true
         };
 
-        // Update consecutive failure counts
+        // Update consecutive failure/success counts
+        // Only reset fail count after REQUIRED_CONSECUTIVE_SUCCESSES in a row
+        // This prevents transient "OK" flickers from resetting the counter
         if screen_ok {
-            screen_fail_count = 0;
-        } else if last_screen_ok || screen_fail_count > 0 {
-            screen_fail_count += 1;
+            screen_ok_count += 1;
+            if screen_ok_count >= REQUIRED_CONSECUTIVE_SUCCESSES {
+                screen_fail_count = 0;
+            }
+        } else {
+            screen_ok_count = 0;
+            screen_fail_count = screen_fail_count.saturating_add(1);
         }
 
         if mic_ok {
-            mic_fail_count = 0;
-        } else if last_mic_ok || mic_fail_count > 0 {
-            mic_fail_count += 1;
+            mic_ok_count += 1;
+            if mic_ok_count >= REQUIRED_CONSECUTIVE_SUCCESSES {
+                mic_fail_count = 0;
+            }
+        } else {
+            mic_ok_count = 0;
+            mic_fail_count = mic_fail_count.saturating_add(1);
         }
 
         if accessibility_ok {
-            accessibility_fail_count = 0;
-        } else if last_accessibility_ok || accessibility_fail_count > 0 {
-            accessibility_fail_count += 1;
+            accessibility_ok_count += 1;
+            if accessibility_ok_count >= REQUIRED_CONSECUTIVE_SUCCESSES {
+                accessibility_fail_count = 0;
+            }
+        } else {
+            accessibility_ok_count = 0;
+            accessibility_fail_count = accessibility_fail_count.saturating_add(1);
         }
 
         if arc_ok {
-            arc_fail_count = 0;
-        } else if last_arc_ok || arc_fail_count > 0 {
-            arc_fail_count += 1;
+            arc_ok_count += 1;
+            if arc_ok_count >= REQUIRED_CONSECUTIVE_SUCCESSES {
+                arc_fail_count = 0;
+            }
+        } else {
+            arc_ok_count = 0;
+            arc_fail_count = arc_fail_count.saturating_add(1);
         }
 
         // Only trigger when we have REQUIRED_CONSECUTIVE_FAILURES in a row
-        // This prevents false positives from transient TCC database issues
         let screen_confirmed_lost = screen_fail_count == REQUIRED_CONSECUTIVE_FAILURES;
         let mic_confirmed_lost = mic_fail_count == REQUIRED_CONSECUTIVE_FAILURES;
         let accessibility_confirmed_lost = accessibility_fail_count == REQUIRED_CONSECUTIVE_FAILURES;
         let arc_confirmed_lost = arc_fail_count == REQUIRED_CONSECUTIVE_FAILURES;
 
         if screen_confirmed_lost || mic_confirmed_lost || accessibility_confirmed_lost || arc_confirmed_lost {
-            // Double-check: only emit if at least one permission is actually lost right now
-            // This prevents phantom events from transient TCC flickers
             if !screen_ok || !mic_ok || !accessibility_ok || !arc_ok {
-                if let Err(e) = app.emit("permission-lost", serde_json::json!({
-                    "screen_recording": !screen_ok,
-                    "microphone": !mic_ok,
-                    "accessibility": !accessibility_ok,
-                    "arc_automation": !arc_ok,
-                })) {
-                    error!("failed to emit permission-lost event: {}", e);
+                // Enforce cooldown to prevent modal spam from flaky checks
+                let should_emit = match last_emitted {
+                    Some(t) => t.elapsed() >= EMIT_COOLDOWN,
+                    None => true,
+                };
+                if should_emit {
+                    if let Err(e) = app.emit("permission-lost", serde_json::json!({
+                        "screen_recording": !screen_ok,
+                        "microphone": !mic_ok,
+                        "accessibility": !accessibility_ok,
+                        "arc_automation": !arc_ok,
+                    })) {
+                        error!("failed to emit permission-lost event: {}", e);
+                    }
+                    last_emitted = Some(tokio::time::Instant::now());
                 }
             }
         }
-
-        last_screen_ok = screen_ok;
-        last_mic_ok = mic_ok;
-        last_accessibility_ok = accessibility_ok;
-        last_arc_ok = arc_ok;
     }
 }
 

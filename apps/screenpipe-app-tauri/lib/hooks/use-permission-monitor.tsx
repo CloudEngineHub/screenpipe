@@ -77,9 +77,11 @@ export function usePermissionMonitor() {
       }
 
       // Reset after a delay to allow showing again later
+      // Backend has a 5-minute cooldown on re-emission, so this just guards
+      // against any edge cases where multiple events arrive close together
       setTimeout(() => {
         hasShownRef.current = false;
-      }, 60000); // 1 minute cooldown
+      }, 300000); // 5 minute cooldown (matches backend)
     });
 
     return () => {

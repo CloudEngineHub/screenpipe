@@ -75,7 +75,11 @@
     "security": {
       "assetProtocol": {
         "enable": true,
-        "scope": ["**"]
+        "scope": [
+          "$APPDATA/**",
+          "$HOME/.screenpipe/**",
+          "**"
+        ]
       },
       "csp": null
     },

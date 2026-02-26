@@ -242,7 +242,8 @@ pub async fn event_driven_capture_loop(
 
     // Capture immediately on startup so the timeline has a frame right away.
     // Also seeds the frame comparer so subsequent visual-change checks work.
-    {
+    // Skip if screen is locked — avoids storing black frames from sleep/lock.
+    if !crate::sleep_monitor::screen_is_locked() {
         // Small delay to let the monitor settle after startup
         tokio::time::sleep(Duration::from_millis(500)).await;
         state.last_capture = Instant::now() - Duration::from_millis(500); // allow capture
@@ -283,6 +284,8 @@ pub async fn event_driven_capture_loop(
                 warn!("startup capture failed for monitor {}: {}", monitor_id, e);
             }
         }
+    } else {
+        info!("screen is locked on startup, skipping initial capture for monitor {}", monitor_id);
     }
 
     loop {
