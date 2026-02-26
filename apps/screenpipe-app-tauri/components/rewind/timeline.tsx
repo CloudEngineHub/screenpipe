@@ -5,7 +5,7 @@
 
 import { useEffect, useState, useRef, useMemo, useCallback } from "react";
 
-import { Loader2, RotateCcw, AlertCircle, X, Sparkles } from "lucide-react";
+import { Loader2, RotateCcw, AlertCircle, X, Sparkles, Globe, Lock, ExternalLink } from "lucide-react";
 import { SearchModal } from "@/components/rewind/search-modal";
 import { commands } from "@/lib/utils/tauri";
 import { listen, emit } from "@tauri-apps/api/event";
@@ -1721,6 +1721,39 @@ export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 				<div className={`absolute ${embedded ? "top-12" : "top-[calc(env(safe-area-inset-top)+56px)]"} right-4 z-40`}>
 					<DailySummaryCard currentDate={currentDate} />
 				</div>
+
+				{/* Browser URL bar — below nav bar, clickable to open in browser */}
+				{(() => {
+					const browserUrl = currentFrame?.devices?.[0]?.metadata?.browser_url;
+					if (!browserUrl) return null;
+					return (
+						<div className={`absolute ${embedded ? "top-12" : "top-[calc(env(safe-area-inset-top)+52px)]"} left-0 right-0 z-[39] flex justify-center pointer-events-none`}>
+							<button
+								type="button"
+								className="flex items-center gap-1.5 max-w-lg min-w-0 px-3 py-1 rounded-full bg-black/70 backdrop-blur-sm border border-white/10 hover:bg-black/80 hover:border-white/20 transition-colors cursor-pointer pointer-events-auto"
+								title={`Open ${browserUrl}`}
+								onClick={async () => {
+									try {
+										const { open } = await import("@tauri-apps/plugin-shell");
+										await open(browserUrl);
+									} catch {
+										window.open(browserUrl, "_blank");
+									}
+								}}
+							>
+								{browserUrl.startsWith("https") ? (
+									<Lock className="w-3 h-3 text-green-400/80 shrink-0" />
+								) : (
+									<Globe className="w-3 h-3 text-white/40 shrink-0" />
+								)}
+								<span className="text-[12px] font-mono text-white/80 truncate">
+									{browserUrl.replace(/^https?:\/\/(www\.)?/, "")}
+								</span>
+								<ExternalLink className="w-3 h-3 text-white/40 shrink-0" />
+							</button>
+						</div>
+					);
+				})()}
 
 				{/* Subtitle bar — below nav bar, always visible when audio exists nearby */}
 				<div className={`absolute ${embedded ? "top-16" : "top-[calc(env(safe-area-inset-top)+96px)]"} left-4 right-4 z-[35]`}>

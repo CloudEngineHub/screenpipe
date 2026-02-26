@@ -12,7 +12,7 @@ import { SelectableTextLayer, getSelectableLayerText, clearSelectableLayerSelect
 import { RegionOcrOverlay } from "@/components/rewind/region-ocr-overlay";
 import { useSearchHighlight } from "@/lib/hooks/use-search-highlight";
 import { useSettings } from "@/lib/hooks/use-settings";
-import { ImageOff, ChevronLeft, ChevronRight, Copy, ImageIcon, Link2, MessageCircle, ExternalLink, Type, Lock, Globe, Zap } from "lucide-react";
+import { ImageOff, ChevronLeft, ChevronRight, Copy, ImageIcon, Link2, MessageCircle, ExternalLink, Type, Zap } from "lucide-react";
 import { usePipes, type TemplatePipe } from "@/lib/hooks/use-pipes";
 import posthog from "posthog-js";
 import { toast } from "@/components/ui/use-toast";
@@ -153,7 +153,6 @@ export const CurrentFrameTimeline: FC<CurrentFrameTimelineProps> = ({
 	const filePath = device?.metadata?.file_path;
 	const offsetIndex = device?.offset_index ?? 0;
 	const fpsFromServer = device?.fps ?? 0.5;
-	const browserUrl = device?.metadata?.browser_url;
 
 
 	// Track skipped frames for analytics
@@ -937,37 +936,7 @@ export const CurrentFrameTimeline: FC<CurrentFrameTimelineProps> = ({
 				/>
 			)}
 
-
-			{/* Browser address bar overlay — shows URL when viewing a web page */}
-			{!isLoading && !hasError && browserUrl && (
-				<div
-					className="absolute top-0 left-0 right-0 z-10 flex justify-center px-3 py-1.5"
-				>
-					<button
-						type="button"
-						className="flex items-center gap-1.5 max-w-lg min-w-0 px-3 py-1 rounded-full bg-black/70 backdrop-blur-sm border border-white/10 hover:bg-black/80 hover:border-white/20 transition-colors cursor-pointer"
-						title={`Open ${browserUrl}`}
-						onClick={async () => {
-							try {
-								const { open } = await import("@tauri-apps/plugin-shell");
-								await open(browserUrl);
-							} catch {
-								window.open(browserUrl, "_blank");
-							}
-						}}
-					>
-						{browserUrl.startsWith("https") ? (
-							<Lock className="w-3 h-3 text-green-400/80 shrink-0" />
-						) : (
-							<Globe className="w-3 h-3 text-white/40 shrink-0" />
-						)}
-						<span className="text-[12px] font-mono text-white/80 truncate">
-							{browserUrl.replace(/^https?:\/\/(www\.)?/, "")}
-						</span>
-						<ExternalLink className="w-3 h-3 text-white/40 shrink-0" />
-					</button>
-				</div>
-			)}
+			{/* Browser URL bar moved to parent timeline.tsx at z-[45] so it's clickable above controls */}
 
 			{/* Search highlights + URL links (pointer-events: none wrapper, links have auto) */}
 			{!isLoading && !hasError && !ocrLoading && naturalDimensions && renderedImageInfo && textPositions.length > 0 && (
