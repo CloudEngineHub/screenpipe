@@ -2555,18 +2555,18 @@ export function StandaloneChat({ className }: { className?: string } = {}) {
           }}
         >
         <div className="max-w-4xl mx-auto w-full p-4 space-y-4">
-        {messages.length === 0 && disabledReason && (
+        {messages.length === 0 && disabledReason && (!hasPresets || !hasValidModel || needsLogin) && (
           <div className="relative flex flex-col items-center justify-center py-12 space-y-4">
             <div className="relative p-6 rounded-2xl border bg-muted/50 border-border/50">
-              {needsLogin || (piStarting || !piReady) ? (
-                <PipeAIIconLarge size={48} thinking={piStarting || !piReady} className="text-muted-foreground" />
+              {needsLogin ? (
+                <PipeAIIconLarge size={48} thinking={false} className="text-muted-foreground" />
               ) : (
                 <Settings className="h-12 w-12 text-muted-foreground" />
               )}
             </div>
             <div className="text-center space-y-2">
               <h3 className="font-semibold tracking-tight">
-                {!hasPresets ? "No AI Presets" : !hasValidModel ? "No Model Selected" : needsLogin ? "Login to continue" : (piStarting || !piReady) ? "Setting up Pi..." : "Setup Required"}
+                {!hasPresets ? "No AI Presets" : !hasValidModel ? "No Model Selected" : needsLogin ? "Login to continue" : "Setup Required"}
               </h3>
               <p className="text-sm text-muted-foreground max-w-sm">
                 {needsLogin ? "Sign in to use the AI assistant" : disabledReason}
@@ -2596,7 +2596,7 @@ export function StandaloneChat({ className }: { className?: string } = {}) {
             )}
           </div>
         )}
-        {messages.length === 0 && canChat && (
+        {messages.length === 0 && hasPresets && hasValidModel && !needsLogin && (
           <SummaryCards
             onSendMessage={sendMessage}
             autoSuggestions={autoSuggestions}

@@ -693,24 +693,25 @@ pub async fn start_permission_monitor(app: tauri::AppHandle) {
         let accessibility_confirmed_lost = accessibility_fail_count == REQUIRED_CONSECUTIVE_FAILURES;
         let arc_confirmed_lost = arc_fail_count == REQUIRED_CONSECUTIVE_FAILURES;
 
-        if screen_confirmed_lost || mic_confirmed_lost || accessibility_confirmed_lost || arc_confirmed_lost {
-            if !screen_ok || !mic_ok || !accessibility_ok || !arc_ok {
-                // Enforce cooldown to prevent modal spam from flaky checks
-                let should_emit = match last_emitted {
-                    Some(t) => t.elapsed() >= EMIT_COOLDOWN,
-                    None => true,
-                };
-                if should_emit {
-                    if let Err(e) = app.emit("permission-lost", serde_json::json!({
-                        "screen_recording": !screen_ok,
-                        "microphone": !mic_ok,
-                        "accessibility": !accessibility_ok,
-                        "arc_automation": !arc_ok,
-                    })) {
-                        error!("failed to emit permission-lost event: {}", e);
-                    }
-                    last_emitted = Some(tokio::time::Instant::now());
+        // Only emit permission-lost when a CORE permission is lost (screen, mic, accessibility).
+        // Arc automation is optional — don't open the recovery modal just for that.
+        let core_lost = screen_confirmed_lost || mic_confirmed_lost || accessibility_confirmed_lost;
+        if core_lost && (!screen_ok || !mic_ok || !accessibility_ok) {
+            // Enforce cooldown to prevent modal spam from flaky checks
+            let should_emit = match last_emitted {
+                Some(t) => t.elapsed() >= EMIT_COOLDOWN,
+                None => true,
+            };
+            if should_emit {
+                if let Err(e) = app.emit("permission-lost", serde_json::json!({
+                    "screen_recording": !screen_ok,
+                    "microphone": !mic_ok,
+                    "accessibility": !accessibility_ok,
+                    "arc_automation": !arc_ok,
+                })) {
+                    error!("failed to emit permission-lost event: {}", e);
                 }
+                last_emitted = Some(tokio::time::Instant::now());
             }
         }
     }
