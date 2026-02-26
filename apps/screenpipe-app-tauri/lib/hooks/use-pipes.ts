@@ -29,6 +29,7 @@ interface PipeStatus {
 export function usePipes() {
   const [pipes, setPipes] = useState<PipeStatus[]>([]);
   const [templatePipes, setTemplatePipes] = useState<TemplatePipe[]>([]);
+  const [promptPipes, setPromptPipes] = useState<TemplatePipe[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -42,17 +43,25 @@ export function usePipes() {
       const allPipes: PipeStatus[] = json.data || [];
       setPipes(allPipes);
 
-      const templates: TemplatePipe[] = allPipes
+      const toTemplatePipe = (p: PipeStatus): TemplatePipe => ({
+        name: p.config.name,
+        title: (p.config.config?.title as string) || p.config.name,
+        description: (p.config.config?.description as string) || "",
+        icon: (p.config.config?.icon as string) || "📄",
+        featured: (p.config.config?.featured as boolean) || false,
+        prompt: p.prompt_body || "",
+      });
+
+      const templates = allPipes
         .filter((p) => p.config.config?.template === true)
-        .map((p) => ({
-          name: p.config.name,
-          title: (p.config.config?.title as string) || p.config.name,
-          description: (p.config.config?.description as string) || "",
-          icon: (p.config.config?.icon as string) || "📄",
-          featured: (p.config.config?.featured as boolean) || false,
-          prompt: p.prompt_body || "",
-        }));
+        .map(toTemplatePipe);
       setTemplatePipes(templates);
+
+      // All enabled pipes with a prompt (for radial pipe selector)
+      const withPrompt = allPipes
+        .filter((p) => p.config.enabled && p.prompt_body?.trim())
+        .map(toTemplatePipe);
+      setPromptPipes(withPrompt);
     } catch (e) {
       setError(e instanceof Error ? e.message : "failed to fetch pipes");
     } finally {
@@ -64,5 +73,5 @@ export function usePipes() {
     fetchPipes();
   }, [fetchPipes]);
 
-  return { pipes, templatePipes, loading, error, refetch: fetchPipes };
+  return { pipes, templatePipes, promptPipes, loading, error, refetch: fetchPipes };
 }

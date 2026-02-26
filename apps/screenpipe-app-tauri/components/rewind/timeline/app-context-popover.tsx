@@ -96,24 +96,34 @@ export function AppContextPopover({
 	}, [timeRange]);
 
 	const formattedUiEvents = useMemo(() => {
+		const seen = new Set<string>();
 		return uiEvents
+			.filter((ev) => {
+				const key = `${ev.event_type}:${ev.timestamp}:${ev.text_content}`;
+				if (seen.has(key)) return false;
+				seen.add(key);
+				return true;
+			})
 			.map((ev) => ({ ...formatUiEvent(ev), time: ev.timestamp }))
 			.filter((e): e is { icon: string; label: string; time: string } => e.icon != null);
 	}, [uiEvents]);
 
 	// extract audio transcripts from already-loaded frames (no fetch)
+	// deduplicate by audio_chunk_id to avoid repeating the same chunk across frames
 	const audioTranscripts = useMemo(() => {
 		const transcripts: { text: string; time: Date; speaker?: string }[] = [];
+		const seenChunks = new Set<number>();
 		for (const frame of frames) {
 			for (const device of frame.devices) {
 				for (const audio of device.audio || []) {
-					if (audio.transcription?.trim()) {
-						transcripts.push({
-							text: audio.transcription.trim(),
-							time: new Date(frame.timestamp),
-							speaker: audio.speaker_name || undefined,
-						});
-					}
+					if (!audio.transcription?.trim()) continue;
+					if (seenChunks.has(audio.audio_chunk_id)) continue;
+					seenChunks.add(audio.audio_chunk_id);
+					transcripts.push({
+						text: audio.transcription.trim(),
+						time: new Date(frame.timestamp),
+						speaker: audio.speaker_name || undefined,
+					});
 				}
 			}
 		}

@@ -14,6 +14,7 @@ import { cn } from "@/lib/utils";
 import { commands } from "@/lib/utils/tauri";
 import { emit } from "@tauri-apps/api/event";
 import { PipeAIIcon } from "@/components/pipe-ai-icon";
+import { type TemplatePipe } from "@/lib/hooks/use-pipes";
 import { AppContextPopover } from "./app-context-popover";
 import { TimelineTagToolbar } from "./timeline-tag-toolbar";
 import { extractDomain, FaviconImg } from "./favicon-utils";
@@ -61,6 +62,8 @@ interface TimelineSliderProps {
 	targetZoom: number;
 	setTargetZoom: (fn: (prev: number) => number) => void;
 	onAskAI?: () => void;
+	onRunPipe?: (pipe: TemplatePipe) => void;
+	templatePipes?: TemplatePipe[];
 	isPlaying?: boolean; // Whether audio playback is active
 	onTogglePlayPause?: () => void; // Toggle audio playback (Space key)
 	selectedDeviceId?: string; // "all" or a specific device_id — dims non-matching bars
@@ -203,6 +206,8 @@ export const TimelineSlider = ({
 	targetZoom,
 	setTargetZoom,
 	onAskAI,
+	onRunPipe,
+	templatePipes,
 	isPlaying = false,
 	onTogglePlayPause,
 	selectedDeviceId = "all",
@@ -411,11 +416,60 @@ export const TimelineSlider = ({
 	const appGroups = useMemo(() => {
 		if (!visibleFrames || visibleFrames.length === 0) return [];
 
+		// Pre-compute per-frame browser URL with bidirectional carry-forward.
+		// Only ~1% of browser frames have browser_url set, so we fill gaps by
+		// propagating the nearest known URL in both directions within consecutive
+		// browser-app runs (including "Unknown" frames which get folded into the
+		// previous app during grouping). This is O(n) over visibleFrames.
+		const frameBrowserUrls = new Array<string>(visibleFrames.length).fill("");
+		{
+			// Pass 1: forward (in iteration order, which is newest→oldest for descending frames)
+			let carry = "";
+			let lastBrowserApp = "";
+			for (let i = 0; i < visibleFrames.length; i++) {
+				const frame = visibleFrames[i];
+				const app = getFrameAppName(frame);
+				const isBrowser = getAppCategory(app) === 'browser';
+				const isUnknown = app === 'Unknown';
+				// "Unknown" frames get folded into the previous app during grouping,
+				// so treat them as continuation of the current browser run
+				if (!isBrowser && !isUnknown) { carry = ""; lastBrowserApp = ""; continue; }
+				if (isBrowser && app !== lastBrowserApp) { carry = ""; lastBrowserApp = app; }
+				// If Unknown but no active browser run, skip
+				if (isUnknown && !lastBrowserApp) continue;
+				let url = "";
+				for (const d of frame.devices) {
+					if (d.metadata?.browser_url?.trim()) { url = d.metadata.browser_url; break; }
+				}
+				if (url) carry = url;
+				if (carry) frameBrowserUrls[i] = carry;
+			}
+			// Pass 2: backward (fills newer frames that precede the first URL occurrence)
+			carry = "";
+			lastBrowserApp = "";
+			for (let i = visibleFrames.length - 1; i >= 0; i--) {
+				const frame = visibleFrames[i];
+				const app = getFrameAppName(frame);
+				const isBrowser = getAppCategory(app) === 'browser';
+				const isUnknown = app === 'Unknown';
+				if (!isBrowser && !isUnknown) { carry = ""; lastBrowserApp = ""; continue; }
+				if (isBrowser && app !== lastBrowserApp) { carry = ""; lastBrowserApp = app; }
+				if (isUnknown && !lastBrowserApp) continue;
+				let url = "";
+				for (const d of frame.devices) {
+					if (d.metadata?.browser_url?.trim()) { url = d.metadata.browser_url; break; }
+				}
+				if (url) carry = url;
+				if (carry && !frameBrowserUrls[i]) frameBrowserUrls[i] = carry;
+			}
+		}
+
 		const groups: AppGroup[] = [];
 		let currentApp = "";
 		let currentGroup: StreamTimeSeriesResponse[] = [];
 		let currentGroupAllApps = new Set<string>();
 		let currentDayKey = "";
+		let currentGroupDomainCounts = new Map<string, number>();
 
 		const flushGroup = () => {
 			if (currentGroup.length > 0) {
@@ -423,25 +477,11 @@ export const TimelineSlider = ({
 				// Compute top domains for browser groups
 				let topDomains: string[] | undefined;
 				const isBrowser = getAppCategory(currentApp) === 'browser';
-				if (isBrowser) {
-					const domainCounts = new Map<string, number>();
-					for (const f of currentGroup) {
-						for (const d of f.devices) {
-							const url = d.metadata?.browser_url;
-							if (url) {
-								const domain = extractDomain(url);
-								if (domain) {
-									domainCounts.set(domain, (domainCounts.get(domain) || 0) + 1);
-								}
-							}
-						}
-					}
-					if (domainCounts.size > 0) {
-						topDomains = [...domainCounts.entries()]
-							.sort((a, b) => b[1] - a[1])
-							.slice(0, 2)
-							.map(([domain]) => domain);
-					}
+				if (isBrowser && currentGroupDomainCounts.size > 0) {
+					topDomains = [...currentGroupDomainCounts.entries()]
+						.sort((a, b) => b[1] - a[1])
+						.slice(0, 2)
+						.map(([domain]) => domain);
 				}
 				groups.push({
 					appName: currentApp,
@@ -454,7 +494,7 @@ export const TimelineSlider = ({
 			}
 		};
 
-		visibleFrames.forEach((frame) => {
+		visibleFrames.forEach((frame, visIdx) => {
 			let appName = getFrameAppName(frame);
 			const allAppsInFrame = getFrameAppNames(frame);
 			const frameDate = new Date(frame.timestamp);
@@ -465,6 +505,8 @@ export const TimelineSlider = ({
 				appName = currentApp;
 			}
 
+			const frameUrl = frameBrowserUrls[visIdx];
+
 			// Break group at day boundary OR app change
 			if ((currentDayKey && dayKey !== currentDayKey) || appName !== currentApp) {
 				flushGroup();
@@ -473,10 +515,23 @@ export const TimelineSlider = ({
 				currentGroupAllApps = new Set(allAppsInFrame.filter(n => n !== "Unknown"));
 				if (currentApp !== "Unknown") currentGroupAllApps.add(currentApp);
 				currentDayKey = dayKey;
+				// Reset domain counts for new group
+				currentGroupDomainCounts = new Map<string, number>();
+				if (frameUrl) {
+					const domain = extractDomain(frameUrl);
+					if (domain) currentGroupDomainCounts.set(domain, 1);
+				}
 			} else {
 				currentGroup.push(frame);
 				allAppsInFrame.filter(n => n !== "Unknown").forEach(app => currentGroupAllApps.add(app));
 				if (!currentDayKey) currentDayKey = dayKey;
+				// Accumulate domain counts
+				if (frameUrl) {
+					const domain = extractDomain(frameUrl);
+					if (domain) {
+						currentGroupDomainCounts.set(domain, (currentGroupDomainCounts.get(domain) || 0) + 1);
+					}
+				}
 			}
 		});
 
@@ -1072,8 +1127,9 @@ export const TimelineSlider = ({
 												>
 													<div className="flex items-center gap-2 mb-1">
 														{(() => {
+															// Use frame's own browser_url, or fall back to group's top domain
 															const browserUrl = frame.devices?.find(d => d.metadata?.browser_url)?.metadata?.browser_url;
-															const domain = browserUrl ? extractDomain(browserUrl) : null;
+															const domain = browserUrl ? extractDomain(browserUrl) : group.topDomains?.[0] ?? null;
 															if (domain) {
 																return <FaviconImg domain={domain} fallbackAppName={group.appName} size={16} className="w-4 h-4 rounded" />;
 															}
@@ -1089,7 +1145,7 @@ export const TimelineSlider = ({
 														<p className="font-medium text-popover-foreground">
 															{(() => {
 																const browserUrl = frame.devices?.find(d => d.metadata?.browser_url)?.metadata?.browser_url;
-																const domain = browserUrl ? extractDomain(browserUrl) : null;
+																const domain = browserUrl ? extractDomain(browserUrl) : group.topDomains?.[0] ?? null;
 																return domain || getFrameAppName(frame);
 															})()}
 														</p>
@@ -1160,7 +1216,7 @@ export const TimelineSlider = ({
 
 			{/* Tag toolbar — floating above selection */}
 			{selectedIndices.size > 1 && selectionRange && (
-				<TimelineTagToolbar anchorRect={selectionRect} onAskAI={onAskAI} />
+				<TimelineTagToolbar anchorRect={selectionRect} onAskAI={onAskAI} onRunPipe={onRunPipe} templatePipes={templatePipes} />
 			)}
 
 			{/* App filter dot tooltip */}

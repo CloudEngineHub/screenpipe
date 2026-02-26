@@ -28,6 +28,7 @@ import { useSearchHighlight } from "@/lib/hooks/use-search-highlight";
 import { usePlatform } from "@/lib/hooks/use-platform";
 import { useAudioPlayback } from "@/lib/hooks/use-audio-playback";
 import { useHealthCheck } from "@/lib/hooks/use-health-check";
+import { usePipes, type TemplatePipe } from "@/lib/hooks/use-pipes";
 
 import posthog from "posthog-js";
 import { toast } from "@/components/ui/use-toast";
@@ -178,6 +179,7 @@ export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 
 	// Get timeline selection for chat context
 	const { selectionRange, loadTagsForFrames } = useTimelineSelection();
+	const { promptPipes } = usePipes();
 
 	// Load tags when a selection is made (lazy-load)
 	useEffect(() => {
@@ -718,8 +720,8 @@ export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 		};
 	}, [showSearchModal]);
 
-	// Send timeline selection context to chat
-	const sendSelectionToChat = useCallback(async () => {
+	// Send timeline selection context to chat (optionally with a specific pipe)
+	const sendSelectionToChat = useCallback(async (pipe?: TemplatePipe) => {
 		if (!selectionRange) return;
 
 		const startTime = selectionRange.start.toLocaleString();
@@ -787,17 +789,30 @@ export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 		// Open chat window first, then emit context
 		await commands.showWindow("Chat");
 		setTimeout(() => {
-			emit("chat-prefill", {
-				context,
-				prompt: `Based on my activity from ${startTime} to ${endTime}, `,
-				source: "timeline",
-			});
+			if (pipe) {
+				emit("chat-prefill", {
+					context,
+					prompt: pipe.prompt,
+					autoSend: true,
+				});
+			} else {
+				emit("chat-prefill", {
+					context,
+					prompt: `Based on my activity from ${startTime} to ${endTime}, `,
+					source: "timeline",
+				});
+			}
 		}, 200);
 
 		posthog.capture("timeline_selection_to_chat", {
 			selection_duration_ms: selectionRange.end.getTime() - selectionRange.start.getTime(),
 			frames_in_selection: selectedFrames.length,
+			pipe_name: pipe?.name,
 		});
+
+		if (pipe) {
+			toast({ title: `${pipe.icon} ${pipe.title}`, description: "running pipe with selection context" });
+		}
 	}, [selectionRange, frames]);
 
 	// Pass selection context to chat when chat shortcut is pressed with a selection
@@ -1789,7 +1804,9 @@ export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 							zoomLevel={zoomLevel}
 							targetZoom={targetZoom}
 							setTargetZoom={setTargetZoom}
-							onAskAI={sendSelectionToChat}
+							onAskAI={() => sendSelectionToChat()}
+							onRunPipe={(pipe) => sendSelectionToChat(pipe)}
+							templatePipes={promptPipes}
 							isPlaying={isPlaying}
 							onTogglePlayPause={togglePlayPause}
 							selectedDeviceId={selectedDeviceId}

@@ -20,10 +20,10 @@ export function extractDomain(url: string): string | null {
 }
 
 /**
- * Google Favicon API URL (same pattern as recording-settings.tsx).
+ * Google Favicon API URL — uses gstatic directly to avoid 301 redirect.
  */
 export function getFaviconUrl(domain: string, size = 32): string {
-	return `https://www.google.com/s2/favicons?domain=${encodeURIComponent(domain)}&sz=${size}`;
+	return `https://t2.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE,URL&url=http://${encodeURIComponent(domain)}&size=${size}`;
 }
 
 interface FaviconImgProps {
