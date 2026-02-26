@@ -941,22 +941,11 @@ export const CurrentFrameTimeline: FC<CurrentFrameTimelineProps> = ({
 			{/* Browser address bar overlay — shows URL when viewing a web page */}
 			{!isLoading && !hasError && browserUrl && (
 				<div
-					className="absolute top-0 left-0 right-0 z-10 flex items-center gap-2 px-3 py-1.5 bg-black/70 backdrop-blur-sm border-b border-white/10"
+					className="absolute top-0 left-0 right-0 z-10 flex justify-center px-3 py-1.5"
 				>
-					<div className="flex items-center gap-1.5 text-white/40">
-						<Globe className="w-3.5 h-3.5" />
-					</div>
-					<div className="flex-1 flex items-center gap-1.5 min-w-0 px-2 py-0.5 rounded-sm bg-white/10">
-						{browserUrl.startsWith("https") && (
-							<Lock className="w-3 h-3 text-green-400/80 shrink-0" />
-						)}
-						<span className="text-[12px] font-mono text-white/80 truncate">
-							{browserUrl.replace(/^https?:\/\/(www\.)?/, "")}
-						</span>
-					</div>
 					<button
 						type="button"
-						className="flex items-center gap-1 px-1.5 py-0.5 rounded-sm text-white/60 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
+						className="flex items-center gap-1.5 max-w-lg min-w-0 px-3 py-1 rounded-full bg-black/70 backdrop-blur-sm border border-white/10 hover:bg-black/80 hover:border-white/20 transition-colors cursor-pointer"
 						title={`Open ${browserUrl}`}
 						onClick={async () => {
 							try {
@@ -967,7 +956,15 @@ export const CurrentFrameTimeline: FC<CurrentFrameTimelineProps> = ({
 							}
 						}}
 					>
-						<ExternalLink className="w-3.5 h-3.5" />
+						{browserUrl.startsWith("https") ? (
+							<Lock className="w-3 h-3 text-green-400/80 shrink-0" />
+						) : (
+							<Globe className="w-3 h-3 text-white/40 shrink-0" />
+						)}
+						<span className="text-[12px] font-mono text-white/80 truncate">
+							{browserUrl.replace(/^https?:\/\/(www\.)?/, "")}
+						</span>
+						<ExternalLink className="w-3 h-3 text-white/40 shrink-0" />
 					</button>
 				</div>
 			)}
