@@ -295,8 +295,17 @@ if (platform == 'windows') {
 		await $`rm -rf ${config.windows.ffmpegName}.7z`
 	}
 
-	// Copy VC143 CRT DLLs for Tauri bundle (used by build and CI)
-	await copyVcredistDlls();
+	// Copy VC143 CRT DLLs for Tauri bundle (required in CI; optional locally)
+		const inCI = process.env.CI === 'true' || process.env.GITHUB_ACTIONS === 'true';
+		if (inCI) {
+			await copyVcredistDlls();
+		} else {
+			try {
+				await copyVcredistDlls();
+			} catch (err) {
+				console.warn('Skipping VC redist DLL copy (optional outside CI):', err.message);
+			}
+		}
 
 	// Setup vcpkg packages with environment variables set inline
 	// TODO is this even used? dont we use build.rs for this?
