@@ -1736,12 +1736,12 @@ export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 					<DailySummaryCard currentDate={currentDate} />
 				</div>
 
-				{/* Browser URL bar — below nav bar, clickable to open in browser */}
+				{/* Browser URL bar — at top of frame, above nav */}
 				{(() => {
 					const browserUrl = currentFrame?.devices?.[0]?.metadata?.browser_url;
 					if (!browserUrl) return null;
 					return (
-						<div className={`absolute ${embedded ? "top-12" : "top-[calc(env(safe-area-inset-top)+52px)]"} left-0 right-0 z-[39] flex justify-center pointer-events-none`}>
+						<div className={`absolute ${embedded ? "top-1" : "top-[calc(env(safe-area-inset-top)+4px)]"} left-0 right-0 z-[45] flex justify-center pointer-events-none`}>
 							<button
 								type="button"
 								className="flex items-center gap-1.5 max-w-lg min-w-0 px-3 py-1 rounded-full bg-black/70 backdrop-blur-sm border border-white/10 hover:bg-black/80 hover:border-white/20 transition-colors cursor-pointer pointer-events-auto"
