@@ -74,7 +74,6 @@ pub struct AudioStream {
     pub is_disconnected: Arc<AtomicBool>,
 }
 
-#[allow(dead_code)]
 enum StreamControl {
     Stop(oneshot::Sender<()>),
 }

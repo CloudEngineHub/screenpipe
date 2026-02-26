@@ -9,7 +9,6 @@
 //! and optionally runs Whisper to verify transcription quality.
 
 use crate::audio_fixtures::{self, SAMPLE_RATE};
-#[allow(unused_imports)]
 use crate::ground_truth::{ScenarioManifest, SpeechSegment, synthetic_manifest};
 use crate::metrics::PipelineResult;
 

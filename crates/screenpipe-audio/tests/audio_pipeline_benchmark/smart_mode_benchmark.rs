@@ -17,16 +17,11 @@ use std::sync::Arc;
 
 /// Simulated audio chunk matching the pipeline's 30-second intervals.
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 struct SimulatedChunk {
-    /// Chunk index (0-based)
-    index: usize,
     /// Capture timestamp (seconds from start)
     capture_time_secs: f64,
     /// Whether this chunk contains speech (ground truth)
     has_speech: bool,
-    /// Which channel: "mic" or "system"
-    channel: String,
 }
 
 /// Result of the smart mode simulation.
@@ -137,7 +132,6 @@ fn generate_chunks(
 ) -> Vec<SimulatedChunk> {
     let mut chunks = Vec::new();
     let mut t = 0.0;
-    let mut index = 0;
 
     while t < total_duration_secs {
         let has_speech = speech_ranges
@@ -145,14 +139,11 @@ fn generate_chunks(
             .any(|(start, end)| t >= *start && t < *end);
 
         chunks.push(SimulatedChunk {
-            index,
             capture_time_secs: t,
             has_speech,
-            channel: "mic".to_string(),
         });
 
         t += chunk_interval_secs;
-        index += 1;
     }
 
     chunks
