@@ -14,7 +14,11 @@ use anyhow::{anyhow, Result};
 use tokio::sync::broadcast;
 use tracing::{debug, error, info, warn};
 
-use crate::{core::update_device_capture_time, metrics::AudioPipelineMetrics, AudioInput};
+use crate::{
+    core::{device::DeviceType, update_device_capture_time},
+    metrics::AudioPipelineMetrics,
+    AudioInput,
+};
 
 use super::AudioStream;
 
@@ -78,12 +82,20 @@ pub async fn run_record_and_transcribe(
                     return Err(anyhow!("Audio stream error: {}", e));
                 }
                 Err(_timeout) => {
-                    // No audio data received for AUDIO_RECEIVE_TIMEOUT_SECS seconds
-                    // This can happen when another app hijacks the device, or simply
-                    // when no audio is playing through an output device (speakers).
-                    // Log at debug level to avoid spamming logs in the common idle case.
+                    // No audio data received for AUDIO_RECEIVE_TIMEOUT_SECS seconds.
+                    // For OUTPUT devices (speakers), this is completely normal when
+                    // nothing is playing — just keep waiting for audio to arrive.
+                    // For INPUT devices (microphones), this likely means another app
+                    // hijacked the device, so trigger a reconnect.
+                    if audio_stream.device.device_type == DeviceType::Output {
+                        debug!(
+                            "no audio from output device {} for {}s - idle (normal), continuing",
+                            device_name, AUDIO_RECEIVE_TIMEOUT_SECS
+                        );
+                        continue;
+                    }
                     debug!(
-                        "no audio received from {} for {}s - stream may be idle or hijacked, triggering reconnect",
+                        "no audio received from {} for {}s - stream may be hijacked, triggering reconnect",
                         device_name, AUDIO_RECEIVE_TIMEOUT_SECS
                     );
                     metrics.record_stream_timeout();
