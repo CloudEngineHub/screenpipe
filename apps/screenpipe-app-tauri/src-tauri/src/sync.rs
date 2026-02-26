@@ -1,6 +1,6 @@
 //! Tauri commands for cloud sync operations.
 
-use crate::store::{CloudSyncSettingsStore, SettingsStore};
+use crate::store::{CloudArchiveSettingsStore, CloudSyncSettingsStore, SettingsStore};
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use chrono::Utc;
 use screenpipe_core::sync::{SyncClientConfig, SyncManager};
@@ -530,6 +530,94 @@ pub async fn auto_start_sync(app: &AppHandle, state: &SyncState) {
         }
         Err(e) => {
             warn!("cloud sync auto-start: server not reachable: {}", e);
+        }
+    }
+}
+
+/// Auto-start cloud archive on app launch if previously enabled.
+/// Called from main.rs during startup (after sync auto-start so archive can
+/// reuse the sync manager if available).
+pub async fn auto_start_archive(app: &AppHandle) {
+    // Check dedicated cloud_archive store key first, then fall back to
+    // reading cloudArchiveEnabled from the main settings extra fields
+    // (for users who enabled archive before this auto-start was added).
+    let archive_settings = match CloudArchiveSettingsStore::get(app) {
+        Ok(Some(s)) if s.enabled => s,
+        _ => {
+            // Fallback: check main settings for cloudArchiveEnabled
+            match SettingsStore::get(app) {
+                Ok(Some(s)) => {
+                    let enabled = s.extra
+                        .get("cloudArchiveEnabled")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false);
+                    if !enabled { return; }
+                    let days = s.extra
+                        .get("cloudArchiveRetentionDays")
+                        .and_then(|v| v.as_u64())
+                        .unwrap_or(7) as u32;
+                    // Migrate: persist to dedicated key for future startups
+                    let migrated = CloudArchiveSettingsStore { enabled: true, retention_days: days };
+                    let _ = migrated.save(app);
+                    migrated
+                }
+                _ => return,
+            }
+        }
+    };
+
+    // Get auth token from settings
+    let fresh_settings = match SettingsStore::get(app) {
+        Ok(Some(s)) => s,
+        _ => {
+            warn!("cloud archive: no settings found, skipping auto-start");
+            return;
+        }
+    };
+
+    let token = match fresh_settings.user.token {
+        Some(t) if !t.is_empty() => t,
+        _ => {
+            info!("cloud archive: no auth token, skipping auto-start");
+            return;
+        }
+    };
+
+    let client = reqwest::Client::new();
+    let init_request = serde_json::json!({
+        "token": token,
+        "retention_days": archive_settings.retention_days,
+    });
+
+    match client
+        .post("http://localhost:3030/archive/init")
+        .json(&init_request)
+        .send()
+        .await
+    {
+        Ok(response) if response.status().is_success() => {
+            info!("cloud archive auto-started (retention={}d)", archive_settings.retention_days);
+        }
+        Ok(response) if response.status().as_u16() == 409 => {
+            info!("cloud archive: already initialized, re-enabling");
+            // Already initialized — make sure it's enabled
+            let enable_req = serde_json::json!({ "enabled": true });
+            if let Err(e) = client
+                .post("http://localhost:3030/archive/configure")
+                .json(&enable_req)
+                .send()
+                .await
+            {
+                warn!("cloud archive: failed to re-enable: {}", e);
+            }
+        }
+        Ok(response) => {
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            warn!("cloud archive auto-start: init failed ({}): {}", status, body);
+        }
+        Err(e) => {
+            warn!("cloud archive auto-start: server not reachable: {}", e);
         }
     }
 }

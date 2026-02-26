@@ -734,6 +734,38 @@ impl CloudSyncSettingsStore {
     }
 }
 
+// ─── Cloud Archive Settings ──────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CloudArchiveSettingsStore {
+    pub enabled: bool,
+    #[serde(default = "default_archive_retention")]
+    pub retention_days: u32,
+}
+
+fn default_archive_retention() -> u32 { 7 }
+
+impl CloudArchiveSettingsStore {
+    pub fn get(app: &AppHandle) -> Result<Option<Self>, String> {
+        let store = get_store(app, None).map_err(|e| e.to_string())?;
+        if store.is_empty() {
+            return Ok(None);
+        }
+        let settings =
+            serde_json::from_value(store.get("cloud_archive").unwrap_or(Value::Null));
+        match settings {
+            Ok(settings) => Ok(settings),
+            Err(_) => Ok(None),
+        }
+    }
+
+    pub fn save(&self, app: &AppHandle) -> Result<(), String> {
+        let store = get_store(app, None).map_err(|e| e.to_string())?;
+        store.set("cloud_archive", json!(self));
+        store.save().map_err(|e| e.to_string())
+    }
+}
+
 impl RemindersSettingsStore {
     pub fn get(app: &AppHandle) -> Result<Option<Self>, String> {
         let store = get_store(app, None).map_err(|e| e.to_string())?;

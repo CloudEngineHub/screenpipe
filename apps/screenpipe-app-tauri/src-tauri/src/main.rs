@@ -2129,6 +2129,13 @@ async fn main() {
                 sync::auto_start_sync(&app_handle_clone, &sync_state_clone).await;
             });
 
+            // Auto-start cloud archive if it was enabled (after sync so it can reuse sync manager)
+            let app_handle_clone = app_handle.clone();
+            tauri::async_runtime::spawn(async move {
+                tokio::time::sleep(tokio::time::Duration::from_secs(15)).await;
+                sync::auto_start_archive(&app_handle_clone).await;
+            });
+
             Ok(())
         })
         .build(tauri::generate_context!())

@@ -64,6 +64,12 @@ struct ArchiveRuntime {
     storage_used: u64,
     /// Storage limit bytes.
     storage_limit: u64,
+    /// Whether the archive is currently uploading data.
+    is_uploading: bool,
+    /// Number of chunks uploaded in the current/last run.
+    chunks_uploaded: u64,
+    /// Notify channel to trigger an immediate run.
+    run_now: Arc<tokio::sync::Notify>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -113,6 +119,8 @@ pub struct ArchiveStatusResponse {
     pub storage_used: u64,
     pub storage_limit: u64,
     pub pending_count: u64,
+    pub is_uploading: bool,
+    pub chunks_uploaded: u64,
 }
 
 // ============================================================================
@@ -201,6 +209,7 @@ pub async fn archive_init(
 
     // Initial watermark: epoch (nothing uploaded yet)
     let watermark = DateTime::<Utc>::MIN_UTC;
+    let run_now = Arc::new(tokio::sync::Notify::new());
 
     // Spawn cleanup loop
     let task_handle = spawn_archive_loop(
@@ -209,6 +218,7 @@ pub async fn archive_init(
         machine_id.clone(),
         archive_config.clone(),
         state.archive_state.inner.clone(),
+        run_now.clone(),
     );
 
     let runtime = ArchiveRuntime {
@@ -221,6 +231,9 @@ pub async fn archive_init(
         last_cleanup: None,
         storage_used: 0,
         storage_limit: 0,
+        is_uploading: false,
+        chunks_uploaded: 0,
+        run_now,
     };
 
     *state.archive_state.inner.write().await = Some(runtime);
@@ -259,12 +272,15 @@ pub async fn archive_configure(
         } else if enabled && !runtime.config.enabled {
             // Re-enable: spawn a new loop
             runtime.config.enabled = true;
+            let run_now = Arc::new(tokio::sync::Notify::new());
+            runtime.run_now = run_now.clone();
             runtime.task_handle = spawn_archive_loop(
                 state.db.clone(),
                 runtime.manager.clone(),
                 runtime.machine_id.clone(),
                 runtime.config.clone(),
                 state.archive_state.inner.clone(),
+                run_now,
             );
             info!("archive: re-enabled");
         }
@@ -275,6 +291,31 @@ pub async fn archive_configure(
         "enabled": runtime.config.enabled,
         "retention_days": runtime.config.retention_days,
     })))
+}
+
+/// POST /archive/run — trigger an immediate archive run.
+pub async fn archive_run(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let guard = state.archive_state.inner.read().await;
+    let runtime = guard.as_ref().ok_or_else(|| {
+        (
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "archive not initialized"})),
+        )
+    })?;
+
+    if !runtime.config.enabled {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "archive is disabled"})),
+        ));
+    }
+
+    runtime.run_now.notify_one();
+    info!("archive: manual run triggered");
+
+    Ok(Json(json!({"success": true})))
 }
 
 /// GET /archive/status — return current state.
@@ -293,6 +334,8 @@ pub async fn archive_status(
             storage_used: 0,
             storage_limit: 0,
             pending_count: 0,
+            is_uploading: false,
+            chunks_uploaded: 0,
         })),
         Some(runtime) => {
             // Count pending records between watermark and cutoff
@@ -319,6 +362,8 @@ pub async fn archive_status(
                 storage_used: runtime.storage_used,
                 storage_limit: runtime.storage_limit,
                 pending_count,
+                is_uploading: runtime.is_uploading,
+                chunks_uploaded: runtime.chunks_uploaded,
             }))
         }
     }
@@ -334,16 +379,23 @@ fn spawn_archive_loop(
     machine_id: String,
     _config: ArchiveConfig,
     state: Arc<RwLock<Option<ArchiveRuntime>>>,
+    run_now: Arc<tokio::sync::Notify>,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
-        // Wait a bit before first run
-        tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+        // Short initial delay, then run immediately
+        tokio::time::sleep(std::time::Duration::from_secs(10)).await;
 
-        let mut interval = tokio::time::interval(std::time::Duration::from_secs(3600));
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(300));
         interval.tick().await; // consume immediate tick
 
         loop {
-            interval.tick().await;
+            // Wait for either the interval or a manual trigger
+            tokio::select! {
+                _ = interval.tick() => {}
+                _ = run_now.notified() => {
+                    info!("archive: manual run triggered, starting now");
+                }
+            }
 
             let retention_days = {
                 let guard = state.read().await;
@@ -388,6 +440,15 @@ fn spawn_archive_loop(
                 watermark.to_rfc3339(),
                 cutoff.to_rfc3339()
             );
+
+            // Mark as uploading
+            {
+                let mut guard = state.write().await;
+                if let Some(rt) = guard.as_mut() {
+                    rt.is_uploading = true;
+                    rt.chunks_uploaded = 0;
+                }
+            }
 
             let mut current_watermark = watermark;
             let mut upload_error = false;
@@ -450,12 +511,13 @@ fn spawn_archive_loop(
                             current_watermark = ts.and_utc();
                         }
 
-                        // Update storage info
+                        // Update storage info and progress
                         let mut guard = state.write().await;
                         if let Some(rt) = guard.as_mut() {
                             rt.watermark = current_watermark;
                             rt.storage_used = result.storage_used;
                             rt.storage_limit = result.storage_limit;
+                            rt.chunks_uploaded += 1;
                         }
                     }
                     Err(e) => {
@@ -467,6 +529,14 @@ fn spawn_archive_loop(
                         upload_error = true;
                         break;
                     }
+                }
+            }
+
+            // Mark upload complete
+            {
+                let mut guard = state.write().await;
+                if let Some(rt) = guard.as_mut() {
+                    rt.is_uploading = false;
                 }
             }
 

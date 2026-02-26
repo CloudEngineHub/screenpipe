@@ -435,6 +435,7 @@ impl SCServer {
             .route("/archive/init", axum::routing::post(crate::archive::archive_init))
             .route("/archive/configure", axum::routing::post(crate::archive::archive_configure))
             .route("/archive/status", get(crate::archive::archive_status))
+            .route("/archive/run", axum::routing::post(crate::archive::archive_run))
             // Vision status endpoint (not in OpenAPI spec to avoid oasgen registration issues)
             .route("/vision/status", get(api_vision_status))
             // Vision pipeline metrics (not in OpenAPI spec)

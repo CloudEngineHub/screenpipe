@@ -4,7 +4,7 @@
 "use client";
 
 import React, { useEffect, useState, useCallback } from "react";
-import { useSettings } from "@/lib/hooks/use-settings";
+import { useSettings, getStore } from "@/lib/hooks/use-settings";
 import { Card, CardContent } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
 import {
@@ -18,7 +18,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/components/ui/use-toast";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Lock, CloudUpload, AlertTriangle } from "lucide-react";
+import { Lock, CloudUpload, AlertTriangle, Loader2, Play } from "lucide-react";
 import { open as openUrl } from "@tauri-apps/plugin-shell";
 import { commands } from "@/lib/utils/tauri";
 
@@ -31,6 +31,8 @@ interface ArchiveStatus {
   storage_used: number;
   storage_limit: number;
   pending_count: number;
+  is_uploading: boolean;
+  chunks_uploaded: number;
 }
 
 const RETENTION_OPTIONS = [
@@ -85,13 +87,26 @@ export function ArchiveSettings() {
     }
   }, []);
 
-  // Poll status every 30s when enabled
+  // Poll status — faster when uploading, slower when idle
   useEffect(() => {
     fetchStatus();
     if (!archiveEnabled) return;
-    const interval = setInterval(fetchStatus, 30000);
+    const pollMs = status?.is_uploading ? 5000 : 30000;
+    const interval = setInterval(fetchStatus, pollMs);
     return () => clearInterval(interval);
-  }, [archiveEnabled, fetchStatus]);
+  }, [archiveEnabled, fetchStatus, status?.is_uploading]);
+
+  // Persist archive settings to the Rust-readable store key so the backend
+  // can auto-initialize on startup without needing the frontend.
+  const persistArchiveStore = async (enabled: boolean, days: number) => {
+    try {
+      const store = await getStore();
+      await store.set("cloud_archive", { enabled, retention_days: days });
+      await store.save();
+    } catch {
+      // best effort
+    }
+  };
 
   const handleToggle = async (enabled: boolean) => {
     if (!isProUser || !isLoggedIn) return;
@@ -115,6 +130,7 @@ export function ArchiveSettings() {
         }
 
         await updateSettings({ cloudArchiveEnabled: true });
+        await persistArchiveStore(true, retentionDays);
         toast({ title: "cloud archive enabled" });
       } else {
         // Disable archive
@@ -130,6 +146,7 @@ export function ArchiveSettings() {
         }
 
         await updateSettings({ cloudArchiveEnabled: false });
+        await persistArchiveStore(false, retentionDays);
         toast({ title: "cloud archive disabled" });
       }
 
@@ -148,6 +165,7 @@ export function ArchiveSettings() {
   const handleRetentionChange = async (value: string) => {
     const days = parseInt(value, 10);
     await updateSettings({ cloudArchiveRetentionDays: days });
+    await persistArchiveStore(archiveEnabled, days);
 
     if (archiveEnabled) {
       try {
@@ -277,7 +295,7 @@ export function ArchiveSettings() {
       {/* Status card */}
       {archiveEnabled && (
         <Card>
-          <CardContent className="px-4 py-3 space-y-2">
+          <CardContent className="px-4 py-3 space-y-3">
             {!status ? (
               <div className="space-y-2">
                 <Skeleton className="h-4 w-32" />
@@ -285,17 +303,40 @@ export function ArchiveSettings() {
               </div>
             ) : (
               <>
+                {/* Status row */}
                 <div className="flex items-center justify-between text-sm">
                   <span className="text-muted-foreground">status</span>
                   <span className="text-foreground">
-                    {status.enabled ? (
-                      <span className="text-green-600">active</span>
+                    {status.is_uploading ? (
+                      <span className="flex items-center gap-1.5 text-foreground">
+                        <Loader2 className="h-3 w-3 animate-spin" />
+                        uploading ({status.chunks_uploaded} chunks)
+                      </span>
+                    ) : status.enabled ? (
+                      status.pending_count > 0 ? (
+                        <span className="text-foreground">waiting (next run in ~5m)</span>
+                      ) : (
+                        <span className="text-foreground">up to date</span>
+                      )
                     ) : (
-                      "paused"
+                      <span className="text-muted-foreground">paused</span>
                     )}
                   </span>
                 </div>
 
+                {/* Pending records */}
+                {status.pending_count > 0 && (
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-muted-foreground">
+                      pending records
+                    </span>
+                    <span className="text-foreground">
+                      {status.pending_count.toLocaleString()}
+                    </span>
+                  </div>
+                )}
+
+                {/* Last archived */}
                 {status.last_cleanup && (
                   <div className="flex items-center justify-between text-sm">
                     <span className="text-muted-foreground">last archived</span>
@@ -305,6 +346,7 @@ export function ArchiveSettings() {
                   </div>
                 )}
 
+                {/* Cloud storage */}
                 {(status.storage_used > 0 || status.storage_limit > 0) && (
                   <div className="flex items-center justify-between text-sm">
                     <span className="text-muted-foreground">
@@ -319,22 +361,39 @@ export function ArchiveSettings() {
                   </div>
                 )}
 
-                {status.pending_count > 0 && (
-                  <div className="flex items-center justify-between text-sm">
-                    <span className="text-muted-foreground">
-                      pending records
-                    </span>
-                    <span className="text-foreground">
-                      {status.pending_count.toLocaleString()}
-                    </span>
-                  </div>
-                )}
-
+                {/* Error */}
                 {status.last_error && (
                   <div className="flex items-center gap-2 text-sm text-destructive">
                     <AlertTriangle className="h-3.5 w-3.5 flex-shrink-0" />
                     <span className="truncate">{status.last_error}</span>
                   </div>
+                )}
+
+                {/* Archive now button */}
+                {status.enabled && status.pending_count > 0 && !status.is_uploading && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="w-full"
+                    onClick={async () => {
+                      try {
+                        await fetch("http://localhost:3030/archive/run", {
+                          method: "POST",
+                        });
+                        toast({ title: "archive run started" });
+                        // Poll faster while uploading
+                        setTimeout(fetchStatus, 2000);
+                      } catch {
+                        toast({
+                          title: "failed to trigger archive",
+                          variant: "destructive",
+                        });
+                      }
+                    }}
+                  >
+                    <Play className="h-3 w-3 mr-1.5" />
+                    archive now
+                  </Button>
                 )}
               </>
             )}
