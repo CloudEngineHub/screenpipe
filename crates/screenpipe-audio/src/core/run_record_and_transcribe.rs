@@ -28,15 +28,11 @@ use super::AudioStream;
 /// by another app (e.g., Wispr Flow taking over the microphone).
 const AUDIO_RECEIVE_TIMEOUT_SECS: u64 = 30;
 
-/// Batch mode: minimum seconds of audio before a silence gap can trigger a flush.
-const MIN_BATCH_SECS: usize = 30;
-/// Batch mode: maximum seconds of audio before forcing a flush regardless of silence.
-const MAX_BATCH_SECS: usize = 300;
-/// Batch mode: seconds of low-activity audio required to trigger a flush.
-const SILENCE_GAP_SECS: f32 = 3.0;
-/// Batch mode: RMS threshold below which a 100ms window is considered silent.
-/// Mic ambient noise is typically 0.001-0.006 RMS, speech is 0.02+.
-const SILENCE_RMS_THRESHOLD: f32 = 0.015;
+/// Batch mode: flush every this many seconds.
+/// 30s matches realtime mode and is plenty of context for whisper-large-v3-turbo.
+/// Previously tried silence-gap detection (3s quiet → flush) but RMS thresholds
+/// are device-dependent and fail across different mics/gain settings.
+const BATCH_FLUSH_SECS: usize = 30;
 
 pub async fn run_record_and_transcribe(
     audio_stream: Arc<AudioStream>,
@@ -94,69 +90,38 @@ pub async fn run_record_and_transcribe(
         }
         TranscriptionMode::Batch => {
             info!(
-                "starting continuous recording for {} (batch mode, {}s-{}s adaptive segments)",
-                device_name, MIN_BATCH_SECS, MAX_BATCH_SECS
+                "starting continuous recording for {} (batch mode, {}s segments)",
+                device_name, BATCH_FLUSH_SECS
             );
-            let mut tracker = BatchFlushTracker::new(sample_rate, overlap_samples);
+            let max_samples = BATCH_FLUSH_SECS * sample_rate + overlap_samples;
             let mut collected_audio = Vec::new();
 
             while is_running.load(Ordering::Relaxed)
                 && !audio_stream.is_disconnected.load(Ordering::Relaxed)
             {
-                match recv_audio_chunk(
-                    &mut receiver,
+                while collected_audio.len() < max_samples && is_running.load(Ordering::Relaxed) {
+                    match recv_audio_chunk(
+                        &mut receiver,
+                        &audio_stream,
+                        &device_name,
+                        &metrics,
+                    )
+                    .await?
+                    {
+                        Some(chunk) => collected_audio.extend(chunk),
+                        None => continue,
+                    }
+                }
+
+                flush_audio(
+                    &mut collected_audio,
+                    overlap_samples,
                     &audio_stream,
+                    &whisper_sender,
                     &device_name,
                     &metrics,
                 )
-                .await?
-                {
-                    Some(chunk) => {
-                        // Log chunk RMS before moving chunk
-                        let chunk_len = chunk.len();
-                        let chunk_rms = {
-                            let sum_sq: f32 = chunk.iter().map(|&x| x * x).sum();
-                            (sum_sq / chunk.len() as f32).sqrt()
-                        };
-
-                        // Feed raw (un-normalized) audio to the silence tracker.
-                        // normalize_v2 boosts RMS to ~0.2, making the 0.01
-                        // silence threshold useless — silence is never detected.
-                        let reason = tracker.feed_chunk(&chunk);
-                        collected_audio.extend(chunk);
-
-                        // Log batch progress every ~10s of collected audio
-                        if tracker.collected_len % (sample_rate * 10) < chunk_len {
-                            let secs = tracker.collected_len as f64 / sample_rate as f64;
-                            let silence_secs = tracker.consecutive_silence_samples as f64 / sample_rate as f64;
-                            info!(
-                                "batch {}: {:.0}s collected, {:.1}s silence, chunk_rms={:.4}, need {}s+{:.0}s silence",
-                                device_name, secs, silence_secs, chunk_rms,
-                                MIN_BATCH_SECS, SILENCE_GAP_SECS,
-                            );
-                        }
-
-                        if reason != FlushReason::NoFlush {
-                            info!(
-                                "batch mode: flushing {:.1}s of audio for {} ({:?})",
-                                collected_audio.len() as f64 / sample_rate as f64,
-                                device_name,
-                                reason,
-                            );
-                            flush_audio(
-                                &mut collected_audio,
-                                overlap_samples,
-                                &audio_stream,
-                                &whisper_sender,
-                                &device_name,
-                                &metrics,
-                            )
-                            .await?;
-                            tracker.reset(collected_audio.len());
-                        }
-                    }
-                    None => continue,
-                }
+                .await?;
             }
         }
     }
@@ -221,88 +186,6 @@ async fn recv_audio_chunk(
     }
 }
 
-/// Tracks silence gaps and decides when to flush a batch.
-/// Extracted for testability — no async, no I/O.
-#[derive(Debug)]
-pub(crate) struct BatchFlushTracker {
-    pub sample_rate: usize,
-    pub silence_window: usize,
-    pub silence_gap_samples: usize,
-    pub min_samples: usize,
-    pub max_samples: usize,
-    pub consecutive_silence_samples: usize,
-    pub collected_len: usize,
-}
-
-/// Why the tracker decided to flush.
-#[derive(Debug, PartialEq)]
-pub(crate) enum FlushReason {
-    SilenceGap,
-    MaxBatch,
-    NoFlush,
-}
-
-impl BatchFlushTracker {
-    pub fn new(sample_rate: usize, overlap_samples: usize) -> Self {
-        let silence_window = sample_rate / 10; // 100ms
-        let silence_gap_samples = (SILENCE_GAP_SECS * sample_rate as f32) as usize;
-        let min_samples = MIN_BATCH_SECS * sample_rate;
-        let max_samples = MAX_BATCH_SECS * sample_rate + overlap_samples;
-        Self {
-            sample_rate,
-            silence_window,
-            silence_gap_samples,
-            min_samples,
-            max_samples,
-            consecutive_silence_samples: 0,
-            collected_len: 0,
-        }
-    }
-
-    /// Feed a raw audio chunk. Updates silence tracker and collected length.
-    /// Returns the flush decision.
-    pub fn feed_chunk(&mut self, samples: &[f32]) -> FlushReason {
-        let mut offset = 0;
-        while offset + self.silence_window <= samples.len() {
-            let window = &samples[offset..offset + self.silence_window];
-            let sum_sq: f32 = window.iter().map(|&x| x * x).sum();
-            let rms = (sum_sq / window.len() as f32).sqrt();
-            if rms < SILENCE_RMS_THRESHOLD {
-                self.consecutive_silence_samples += self.silence_window;
-            } else {
-                // Allow occasional noise spikes in "silence" — only reset if
-                // there's actual speech (RMS well above ambient noise).
-                // This prevents a single mic pop from resetting 2.9s of silence.
-                if rms > SILENCE_RMS_THRESHOLD * 3.0 {
-                    self.consecutive_silence_samples = 0;
-                }
-                // else: ambient noise spike — don't count as silence but don't reset
-            }
-            offset += self.silence_window;
-        }
-        self.collected_len += samples.len();
-        self.check_flush()
-    }
-
-    fn check_flush(&self) -> FlushReason {
-        if self.collected_len >= self.max_samples {
-            FlushReason::MaxBatch
-        } else if self.collected_len >= self.min_samples
-            && self.consecutive_silence_samples >= self.silence_gap_samples
-        {
-            FlushReason::SilenceGap
-        } else {
-            FlushReason::NoFlush
-        }
-    }
-
-    /// Call after a flush to reset counters.
-    pub fn reset(&mut self, remaining_len: usize) {
-        self.consecutive_silence_samples = 0;
-        self.collected_len = remaining_len;
-    }
-}
-
 /// Send the collected audio to the Whisper channel and keep the overlap tail.
 /// Clears `collected_audio` down to the overlap on success.
 async fn flush_audio(
@@ -358,100 +241,3 @@ async fn flush_audio(
     Ok(())
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    const TEST_SAMPLE_RATE: usize = 16000;
-    const TEST_OVERLAP: usize = 2 * TEST_SAMPLE_RATE; // 2s
-
-    fn silence(duration_secs: f32) -> Vec<f32> {
-        vec![0.0; (TEST_SAMPLE_RATE as f32 * duration_secs) as usize]
-    }
-
-    fn speech(duration_secs: f32) -> Vec<f32> {
-        // 440Hz sine wave, normalized RMS ~0.2 (well above 0.01 threshold)
-        let n = (TEST_SAMPLE_RATE as f32 * duration_secs) as usize;
-        (0..n)
-            .map(|i| {
-                0.3 * (2.0 * std::f32::consts::PI * 440.0 * i as f32
-                    / TEST_SAMPLE_RATE as f32)
-                    .sin()
-            })
-            .collect()
-    }
-
-    #[test]
-    fn test_no_flush_before_min_batch() {
-        let mut tracker = BatchFlushTracker::new(TEST_SAMPLE_RATE, TEST_OVERLAP);
-        // Feed 10s of speech then 5s of silence — well below 30s min
-        let reason = tracker.feed_chunk(&speech(10.0));
-        assert_eq!(reason, FlushReason::NoFlush);
-        let reason = tracker.feed_chunk(&silence(5.0));
-        assert_eq!(reason, FlushReason::NoFlush);
-    }
-
-    #[test]
-    fn test_silence_gap_triggers_flush_after_min() {
-        let mut tracker = BatchFlushTracker::new(TEST_SAMPLE_RATE, TEST_OVERLAP);
-        // Feed 30s of speech
-        tracker.feed_chunk(&speech(30.0));
-        // Now 3s of silence — should trigger flush
-        let reason = tracker.feed_chunk(&silence(3.0));
-        assert_eq!(reason, FlushReason::SilenceGap);
-    }
-
-    #[test]
-    fn test_max_batch_forces_flush() {
-        let mut tracker = BatchFlushTracker::new(TEST_SAMPLE_RATE, TEST_OVERLAP);
-        // Feed 302s of continuous speech (exceeds MAX_BATCH_SECS + overlap)
-        let reason = tracker.feed_chunk(&speech(302.0));
-        assert_eq!(reason, FlushReason::MaxBatch);
-    }
-
-    #[test]
-    fn test_short_silence_no_flush() {
-        let mut tracker = BatchFlushTracker::new(TEST_SAMPLE_RATE, TEST_OVERLAP);
-        // 30s speech, then only 1s silence (below 3s gap threshold)
-        tracker.feed_chunk(&speech(30.0));
-        let reason = tracker.feed_chunk(&silence(1.0));
-        assert_eq!(reason, FlushReason::NoFlush);
-    }
-
-    #[test]
-    fn test_silence_reset_on_speech() {
-        let mut tracker = BatchFlushTracker::new(TEST_SAMPLE_RATE, TEST_OVERLAP);
-        // 30s speech, 2s silence, then speech again, then 2s silence — should NOT flush
-        tracker.feed_chunk(&speech(30.0));
-        tracker.feed_chunk(&silence(2.0));
-        tracker.feed_chunk(&speech(1.0));
-        let reason = tracker.feed_chunk(&silence(2.0));
-        assert_eq!(reason, FlushReason::NoFlush);
-    }
-
-    #[test]
-    fn test_reset_after_flush() {
-        let mut tracker = BatchFlushTracker::new(TEST_SAMPLE_RATE, TEST_OVERLAP);
-        tracker.feed_chunk(&speech(30.0));
-        let reason = tracker.feed_chunk(&silence(3.0));
-        assert_eq!(reason, FlushReason::SilenceGap);
-
-        // Reset with overlap
-        tracker.reset(TEST_OVERLAP);
-
-        // Now silence alone shouldn't flush (below min batch)
-        let reason = tracker.feed_chunk(&silence(3.0));
-        assert_eq!(reason, FlushReason::NoFlush);
-    }
-
-    #[test]
-    fn test_all_silence_flushes_at_min_with_gap() {
-        let mut tracker = BatchFlushTracker::new(TEST_SAMPLE_RATE, TEST_OVERLAP);
-        // All silence but below min — no flush
-        let reason = tracker.feed_chunk(&silence(25.0));
-        assert_eq!(reason, FlushReason::NoFlush);
-        // Pass min with silence — should flush on silence gap
-        let reason = tracker.feed_chunk(&silence(6.0));
-        assert_eq!(reason, FlushReason::SilenceGap);
-    }
-}
