@@ -453,6 +453,42 @@ impl AudioManager {
             .map_err(|e| anyhow!("failed to create initial whisper state: {}", e))?;
         info!("whisper state created (will be reused across segments)");
 
+        // Initialize alternate STT engine (Qwen3-ASR) if selected
+        let alternate_stt: Option<crate::transcription::stt::AlternateSttEngine> = {
+            #[cfg(feature = "qwen3-asr")]
+            {
+                if *audio_transcription_engine == AudioTranscriptionEngine::Qwen3Asr {
+                    match tokio::task::spawn_blocking(|| {
+                        audiopipe::Model::from_pretrained("qwen3-asr-0.6b")
+                    })
+                    .await
+                    {
+                        Ok(Ok(model)) => {
+                            info!("qwen3-asr model loaded successfully");
+                            Some(std::sync::Arc::new(std::sync::Mutex::new(
+                                Box::new(model)
+                                    as Box<dyn crate::transcription::stt::AlternateStt + Send>,
+                            )))
+                        }
+                        Ok(Err(e)) => {
+                            error!("failed to load qwen3-asr model: {}", e);
+                            None
+                        }
+                        Err(e) => {
+                            error!("qwen3-asr model loading task panicked: {}", e);
+                            None
+                        }
+                    }
+                } else {
+                    None
+                }
+            }
+            #[cfg(not(feature = "qwen3-asr"))]
+            {
+                None
+            }
+        };
+
         Ok(tokio::spawn(async move {
             while let Ok(audio) = whisper_receiver.recv() {
                 info!("Received audio from device: {:?}", audio.device.name);
@@ -529,6 +565,7 @@ impl AudioManager {
                     metrics.clone(),
                     &vocabulary,
                     persisted_file_path.clone(),
+                    alternate_stt.clone(),
                 )
                 .await
                 {

@@ -1,6 +1,6 @@
 [package]
 name = "screenpipe-app"
-version = "2.0.584"
+version = "2.0.585"
 description = "24/7 memory for your desktop. 100% local."
 authors = ["you"]
 license = ""
@@ -190,6 +190,9 @@ enterprise-build = []
 
 # On-device AI via Apple Foundation Models (macOS 26+ / Xcode 26+ only)
 apple-intelligence = ["screenpipe-server/apple-intelligence"]
+
+# Qwen3-ASR speech-to-text engine (ONNX, 0.6B)
+qwen3-asr = ["screenpipe-server/qwen3-asr"]
 
 
 [package.metadata.cargo-machete]

@@ -111,18 +111,63 @@ pub async fn retranscribe_handler(
         }
     }
 
-    // 3. Get WhisperContext for re-transcription
-    let whisper_ctx = match audio_manager.whisper_context().await {
-        Some(ctx) => ctx,
-        None => {
-            return error_response(
-                StatusCode::SERVICE_UNAVAILABLE,
-                "whisper model not loaded — audio recording may be disabled".into(),
-            );
+    // 3. Build alternate STT engine for Qwen3-ASR retranscription
+    let alternate_stt: Option<screenpipe_audio::transcription::stt::AlternateSttEngine> = {
+        #[cfg(feature = "qwen3-asr")]
+        {
+            use screenpipe_audio::core::engine::AudioTranscriptionEngine;
+            if *engine == AudioTranscriptionEngine::Qwen3Asr {
+                match audiopipe::Model::from_pretrained("qwen3-asr-0.6b") {
+                    Ok(model) => {
+                        info!("loaded qwen3-asr model for retranscription");
+                        Some(std::sync::Arc::new(std::sync::Mutex::new(
+                            Box::new(model)
+                                as Box<
+                                    dyn screenpipe_audio::transcription::stt::AlternateStt + Send,
+                                >,
+                        )))
+                    }
+                    Err(e) => {
+                        error!("failed to load qwen3-asr for retranscription: {}", e);
+                        return error_response(
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            format!("failed to load qwen3-asr: {}", e),
+                        );
+                    }
+                }
+            } else {
+                None
+            }
+        }
+        #[cfg(not(feature = "qwen3-asr"))]
+        {
+            None
         }
     };
 
-    // 4. Process each chunk
+    // 4. Get WhisperContext for re-transcription (not needed for Qwen3-ASR)
+    let whisper_ctx = match audio_manager.whisper_context().await {
+        Some(ctx) => ctx,
+        None => {
+            use screenpipe_audio::core::engine::AudioTranscriptionEngine;
+            if *engine == AudioTranscriptionEngine::Qwen3Asr && alternate_stt.is_some() {
+                // Qwen3-ASR doesn't need WhisperContext; create a dummy one won't work,
+                // so we handle this in the loop below
+                // For now, return error if whisper isn't loaded (we still need it for state creation)
+                return error_response(
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "whisper model not loaded — audio recording may be disabled".into(),
+                );
+            } else {
+                return error_response(
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "whisper model not loaded — audio recording may be disabled".into(),
+                );
+            }
+        }
+    };
+
+    // 5. Process each chunk
     let mut results = Vec::new();
     let mut processed = 0;
 
@@ -175,6 +220,7 @@ pub async fn retranscribe_handler(
             languages.clone(),
             &mut whisper_state,
             &effective_vocabulary,
+            alternate_stt.clone(),
         )
         .await
         {

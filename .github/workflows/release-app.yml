@@ -840,6 +840,24 @@ jobs:
           echo "args=$ARGS" >> $GITHUB_OUTPUT
           echo "Final tauri args: $ARGS"
 
+      - name: Re-unlock build keychain before signing (macOS)
+        if: matrix.os_type == 'macos'
+        shell: bash
+        run: |
+          # Re-unlock the build keychain right before tauri build to ensure it
+          # hasn't auto-locked during cargo compilation (can take 5+ minutes).
+          BUILD_KC="$HOME/Library/Keychains/build.keychain-db"
+          if [ -f "$BUILD_KC" ]; then
+            security unlock-keychain -p "build_password" "$BUILD_KC"
+            # Re-assert the keychain search list (other steps may have modified it)
+            security list-keychains -d user -s "$BUILD_KC" \
+              "$HOME/Library/Keychains/login.keychain-db" \
+              "/Library/Keychains/System.keychain" \
+              "/System/Library/Keychains/SystemRootCertificates.keychain"
+            echo "Build keychain unlocked and search list verified"
+            security find-identity -v -p codesigning "$BUILD_KC" 2>&1 | tail -3
+          fi
+
       - name: Build
         uses: tauri-apps/tauri-action@v0.5.17
         env:
@@ -848,9 +866,9 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
           # for release
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # for macos signing — cert is pre-imported into login keychain above,
+          # for macos signing — cert is pre-imported into build keychain above,
           # so we do NOT pass APPLE_CERTIFICATE (which would create a temp keychain
-          # that fails with errSecInternalComponent on some self-hosted runners)
+          # that conflicts with our build keychain setup)
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}

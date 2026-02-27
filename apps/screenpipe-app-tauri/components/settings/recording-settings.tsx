@@ -999,6 +999,7 @@ Your screen is a pipe. Everything you see, hear, and type flows through it. Scre
                   <SelectItem value="whisper-large-quantized">Whisper Large V3 Quantized{hwCapability?.recommendedEngine === "whisper-large-quantized" && " (recommended)"}</SelectItem>
                   <SelectItem value="whisper-large-v3-turbo">Whisper Large V3 Turbo{hwCapability?.recommendedEngine === "whisper-large-v3-turbo" && " (recommended)"}</SelectItem>
                   <SelectItem value="whisper-large-v3-turbo-quantized">Whisper Large V3 Turbo Quantized{hwCapability?.recommendedEngine === "whisper-large-v3-turbo-quantized" && " (recommended)"}</SelectItem>
+                  <SelectItem value="qwen3-asr">Qwen3-ASR (0.6B, ONNX)</SelectItem>
                   <SelectItem value="deepgram">Deepgram</SelectItem>
                   <SelectItem value="disabled">Disabled (capture only)</SelectItem>
                 </SelectContent>

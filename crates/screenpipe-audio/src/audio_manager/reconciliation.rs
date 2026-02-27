@@ -106,6 +106,7 @@ pub async fn reconcile_untranscribed(
             languages.clone(),
             &mut state,
             vocabulary,
+            None,
         )
         .await
         {
