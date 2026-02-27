@@ -31,7 +31,6 @@ use crate::{
         record_and_transcribe,
     },
     device::device_manager::DeviceManager,
-    idle_detector::IdleDetector,
     meeting_detector::MeetingDetector,
     metrics::AudioPipelineMetrics,
     segmentation::segmentation_manager::SegmentationManager,
@@ -72,9 +71,8 @@ pub struct AudioManager {
     recording_receiver_handle: Arc<RwLock<Option<JoinHandle<()>>>>,
     stt_model_path: tokio::sync::watch::Receiver<Option<PathBuf>>,
     pub metrics: Arc<AudioPipelineMetrics>,
-    idle_detector: Option<Arc<IdleDetector>>,
     meeting_detector: Option<Arc<MeetingDetector>>,
-    /// Whether transcription is currently paused due to high CPU or meeting (batch/smart mode).
+    /// Whether transcription is currently paused (legacy, always false — deferral removed).
     pub transcription_paused: Arc<AtomicBool>,
     /// Optional callback invoked after each audio transcription DB insert.
     /// Used by the hot frame cache to receive live audio updates.
@@ -126,21 +124,6 @@ impl AudioManager {
 
         whisper_rs::install_logging_hooks();
 
-        // Only create idle detector for Smart mode with local Whisper engines
-        let is_local_whisper = !matches!(
-            *options.transcription_engine,
-            AudioTranscriptionEngine::Deepgram | AudioTranscriptionEngine::Disabled
-        );
-        let idle_detector = if options.transcription_mode == TranscriptionMode::Smart
-            && is_local_whisper
-        {
-            let detector = Arc::new(IdleDetector::new(70.0));
-            info!("batch/smart transcription mode enabled — will defer Whisper during high CPU");
-            Some(detector)
-        } else {
-            None
-        };
-
         let meeting_detector = options.meeting_detector.clone();
 
         let manager = Self {
@@ -159,7 +142,6 @@ impl AudioManager {
             transcription_receiver_handle: Arc::new(RwLock::new(None)),
             stt_model_path: stt_model_rx,
             metrics: Arc::new(AudioPipelineMetrics::new()),
-            idle_detector,
             meeting_detector,
             transcription_paused: Arc::new(AtomicBool::new(false)),
             on_transcription_insert: None,
@@ -193,42 +175,28 @@ impl AudioManager {
         *recording_receiver_handle = Some(self.start_audio_receiver_handler().await?);
         let self_arc = Arc::new(self.clone());
 
-        // Spawn idle detector refresh task if in Smart mode
-        if let Some(ref detector) = self.idle_detector {
-            let detector = detector.clone();
-            tokio::spawn(async move {
-                loop {
-                    detector.refresh();
-                    tokio::time::sleep(Duration::from_secs(10)).await;
-                }
-            });
-        }
-
-        // Spawn reconciliation sweep for orphaned audio chunks (smart mode only)
-        if self.idle_detector.is_some() || self.meeting_detector.is_some() {
+        // Spawn reconciliation sweep for orphaned audio chunks (batch mode only)
+        if self.options.read().await.transcription_mode == TranscriptionMode::Batch {
             let db = self.db.clone();
             let whisper_ctx_ref = self.whisper_context.clone();
             let options = self.options.clone();
-            let transcription_paused = self.transcription_paused.clone();
             tokio::spawn(async move {
                 // Wait for Whisper model to load + initial recordings
                 tokio::time::sleep(Duration::from_secs(120)).await;
                 loop {
-                    if !transcription_paused.load(Ordering::Relaxed) {
-                        if let Some(ref ctx) = *whisper_ctx_ref.read().await {
-                            let opts = options.read().await;
-                            let engine = opts.transcription_engine.clone();
-                            let key = opts.deepgram_api_key.clone();
-                            let langs = opts.languages.clone();
-                            let vocab = opts.vocabulary.clone();
-                            drop(opts);
-                            let count = super::reconciliation::reconcile_untranscribed(
-                                &db, ctx, engine, key, langs, &vocab,
-                            )
-                            .await;
-                            if count > 0 {
-                                info!("reconciliation: transcribed {} orphaned chunks", count);
-                            }
+                    if let Some(ref ctx) = *whisper_ctx_ref.read().await {
+                        let opts = options.read().await;
+                        let engine = opts.transcription_engine.clone();
+                        let key = opts.deepgram_api_key.clone();
+                        let langs = opts.languages.clone();
+                        let vocab = opts.vocabulary.clone();
+                        drop(opts);
+                        let count = super::reconciliation::reconcile_untranscribed(
+                            &db, ctx, engine, key, langs, &vocab,
+                        )
+                        .await;
+                        if count > 0 {
+                            info!("reconciliation: transcribed {} orphaned chunks", count);
                         }
                     }
                     tokio::time::sleep(Duration::from_secs(300)).await;
@@ -368,6 +336,7 @@ impl AudioManager {
         let languages = options.languages.clone();
         let deepgram_api_key = options.deepgram_api_key.clone();
         let realtime_enabled = options.enable_realtime;
+        let transcription_mode = options.transcription_mode.clone();
         let device_clone = device.clone();
         let metrics = self.metrics.clone();
 
@@ -378,6 +347,7 @@ impl AudioManager {
                 recording_sender.clone(),
                 is_running.clone(),
                 metrics,
+                transcription_mode,
             ));
 
             let realtime_handle = if realtime_enabled {
@@ -442,9 +412,7 @@ impl AudioManager {
         let whisper_receiver = self.recording_receiver.clone();
         let metrics = self.metrics.clone();
         let context_param = create_whisper_context_parameters(audio_transcription_engine.clone())?;
-        let idle_detector = self.idle_detector.clone();
         let meeting_detector = self.meeting_detector.clone();
-        let transcription_paused = self.transcription_paused.clone();
         let db = self.db.clone();
 
         let quantized_path = {
@@ -536,68 +504,13 @@ impl AudioManager {
                     None
                 };
 
-                // Smart mode: defer Whisper during meetings, then check CPU idle
-                let mut deferred = false;
-
-                // 1. Meeting-based deferral (primary signal)
+                // Meeting detector: log meeting metadata (no deferral)
                 if let Some(ref meeting) = meeting_detector {
-                    // Check if grace period expired (handles case where no new
-                    // app switch events arrive after the user leaves the meeting app)
                     meeting.check_grace_period().await;
-
-                    let mut was_paused = false;
-                    while meeting.is_in_meeting() {
-                        // Only defer if we can identify the meeting app.
-                        // Audio-based detection can fire with no app name
-                        // (e.g. YouTube + ambient mic noise) — skip those.
-                        let meeting_app = meeting.current_meeting_app().await;
-                        if meeting_app.is_none() {
-                            break;
+                    if meeting.is_in_meeting() {
+                        if let Some(app) = meeting.current_meeting_app().await {
+                            debug!("batch mode: meeting detected ({}), metadata only", app);
                         }
-                        if !was_paused {
-                            warn!(
-                                "smart mode: meeting detected ({}), deferring transcription",
-                                meeting_app.unwrap_or_default()
-                            );
-                            metrics.record_batch_pause();
-                            was_paused = true;
-                        }
-                        metrics.record_segment_deferred();
-                        transcription_paused.store(true, Ordering::Relaxed);
-                        tokio::time::sleep(Duration::from_secs(5)).await;
-                        // Re-check grace period each iteration
-                        meeting.check_grace_period().await;
-                    }
-                    if was_paused {
-                        info!("smart mode: meeting ended, processing backlog");
-                        metrics.record_batch_resume();
-                        deferred = true;
-                    }
-                    transcription_paused.store(false, Ordering::Relaxed);
-                }
-
-                // 2. CPU idle deferral (fallback — only if meeting didn't already defer)
-                if !deferred {
-                    if let Some(ref detector) = idle_detector {
-                        let mut was_paused = false;
-                        while !detector.is_idle() {
-                            if !was_paused {
-                                warn!(
-                                    "batch mode: deferring transcription ({})",
-                                    detector.paused_reason().unwrap_or_default()
-                                );
-                                metrics.record_batch_pause();
-                                was_paused = true;
-                            }
-                            metrics.record_segment_deferred();
-                            transcription_paused.store(true, Ordering::Relaxed);
-                            tokio::time::sleep(Duration::from_secs(10)).await;
-                        }
-                        if was_paused {
-                            info!("batch mode: system idle, resuming transcription");
-                            metrics.record_batch_resume();
-                        }
-                        transcription_paused.store(false, Ordering::Relaxed);
                     }
                 }
 
@@ -620,8 +533,6 @@ impl AudioManager {
                 .await
                 {
                     error!("Error processing audio: {:?}", e);
-                } else if idle_detector.is_some() {
-                    metrics.record_segment_batch_processed();
                 }
             }
         }))
@@ -678,7 +589,7 @@ impl AudioManager {
         self.options.read().await.enabled_devices.clone()
     }
 
-    /// Returns a reference to the meeting detector, if smart mode is active.
+    /// Returns a reference to the meeting detector, if batch mode is active.
     pub fn meeting_detector(&self) -> Option<&Arc<MeetingDetector>> {
         self.meeting_detector.as_ref()
     }
