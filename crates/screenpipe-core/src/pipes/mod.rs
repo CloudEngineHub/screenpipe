@@ -351,6 +351,7 @@ pub struct PipeManager {
     /// Registered agent executors keyed by name (e.g. `"pi"`).
     executors: HashMap<String, Arc<dyn AgentExecutor>>,
     /// Loaded pipe configs keyed by pipe name: (config, prompt_body, raw_content).
+    #[allow(clippy::type_complexity)]
     pipes: Arc<Mutex<HashMap<String, (PipeConfig, String, String)>>>,
     /// Recent run logs per pipe (last 50).
     logs: Arc<Mutex<HashMap<String, VecDeque<PipeRunLog>>>>,
