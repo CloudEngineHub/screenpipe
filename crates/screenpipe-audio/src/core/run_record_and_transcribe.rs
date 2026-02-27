@@ -15,7 +15,6 @@ use tokio::sync::broadcast;
 use tracing::{debug, error, info, warn};
 
 use crate::{
-    audio_manager::TranscriptionMode,
     core::{device::DeviceType, update_device_capture_time},
     metrics::AudioPipelineMetrics,
     AudioInput,
@@ -28,20 +27,16 @@ use super::AudioStream;
 /// by another app (e.g., Wispr Flow taking over the microphone).
 const AUDIO_RECEIVE_TIMEOUT_SECS: u64 = 30;
 
-/// Batch mode: flush every this many seconds.
-/// Longer segments give VAD more context for natural speech boundaries,
-/// producing cleaner sentence-level segments for whisper → better quality.
-/// Previously tried silence-gap detection but RMS thresholds
-/// are device-dependent and fail across different mics/gain settings.
-const BATCH_FLUSH_SECS: usize = 120;
-
+/// Recording always uses 30s segments. Both batch and realtime modes record identically.
+/// The batch vs realtime distinction is in the processing layer (manager.rs):
+/// - Realtime: transcribe immediately after each segment
+/// - Batch: persist to disk, defer transcription until meeting ends
 pub async fn run_record_and_transcribe(
     audio_stream: Arc<AudioStream>,
     duration: Duration,
     whisper_sender: Arc<crossbeam::channel::Sender<AudioInput>>,
     is_running: Arc<AtomicBool>,
     metrics: Arc<AudioPipelineMetrics>,
-    transcription_mode: TranscriptionMode,
 ) -> Result<()> {
     let mut receiver = audio_stream.subscribe().await;
     let device_name = audio_stream.device.to_string();
@@ -50,114 +45,58 @@ pub async fn run_record_and_transcribe(
     const OVERLAP_SECONDS: usize = 2;
     let overlap_samples = OVERLAP_SECONDS * sample_rate;
 
-    match transcription_mode {
-        TranscriptionMode::Realtime => {
-            info!(
-                "starting continuous recording for {} ({}s segments, realtime mode)",
-                device_name,
-                duration.as_secs()
-            );
-            let audio_samples_len = sample_rate * duration.as_secs() as usize;
-            let max_samples = audio_samples_len + overlap_samples;
-            let mut collected_audio = Vec::new();
-            let mut segment_start_time = now_epoch_secs();
+    info!(
+        "starting continuous recording for {} ({}s segments)",
+        device_name,
+        duration.as_secs()
+    );
+    let audio_samples_len = sample_rate * duration.as_secs() as usize;
+    let max_samples = audio_samples_len + overlap_samples;
+    let mut collected_audio = Vec::new();
+    let mut segment_start_time = now_epoch_secs();
 
-            while is_running.load(Ordering::Relaxed)
-                && !audio_stream.is_disconnected.load(Ordering::Relaxed)
-            {
-                while collected_audio.len() < max_samples && is_running.load(Ordering::Relaxed) {
-                    match recv_audio_chunk(
-                        &mut receiver,
-                        &audio_stream,
-                        &device_name,
-                        &metrics,
-                    )
-                    .await?
-                    {
-                        Some(chunk) => collected_audio.extend(chunk),
-                        None => continue, // lagged or idle output device
-                    }
-                }
-
-                flush_audio(
-                    &mut collected_audio,
-                    overlap_samples,
-                    segment_start_time,
-                    &audio_stream,
-                    &whisper_sender,
-                    &device_name,
-                    &metrics,
-                )
-                .await?;
-                segment_start_time = now_epoch_secs();
-            }
-
-            // Flush remaining audio on exit
-            flush_audio(
-                &mut collected_audio,
-                0,
-                segment_start_time,
+    while is_running.load(Ordering::Relaxed)
+        && !audio_stream.is_disconnected.load(Ordering::Relaxed)
+    {
+        while collected_audio.len() < max_samples && is_running.load(Ordering::Relaxed) {
+            match recv_audio_chunk(
+                &mut receiver,
                 &audio_stream,
-                &whisper_sender,
                 &device_name,
                 &metrics,
             )
-            .await
-            .ok();
-        }
-        TranscriptionMode::Batch => {
-            info!(
-                "starting continuous recording for {} (batch mode, {}s segments)",
-                device_name, BATCH_FLUSH_SECS
-            );
-            let max_samples = BATCH_FLUSH_SECS * sample_rate + overlap_samples;
-            let mut collected_audio = Vec::new();
-            let mut segment_start_time = now_epoch_secs();
-
-            while is_running.load(Ordering::Relaxed)
-                && !audio_stream.is_disconnected.load(Ordering::Relaxed)
+            .await?
             {
-                while collected_audio.len() < max_samples && is_running.load(Ordering::Relaxed) {
-                    match recv_audio_chunk(
-                        &mut receiver,
-                        &audio_stream,
-                        &device_name,
-                        &metrics,
-                    )
-                    .await?
-                    {
-                        Some(chunk) => collected_audio.extend(chunk),
-                        None => continue,
-                    }
-                }
-
-                flush_audio(
-                    &mut collected_audio,
-                    overlap_samples,
-                    segment_start_time,
-                    &audio_stream,
-                    &whisper_sender,
-                    &device_name,
-                    &metrics,
-                )
-                .await?;
-                segment_start_time = now_epoch_secs();
+                Some(chunk) => collected_audio.extend(chunk),
+                None => continue,
             }
-
-            // Flush remaining audio on exit
-            flush_audio(
-                &mut collected_audio,
-                0,
-                segment_start_time,
-                &audio_stream,
-                &whisper_sender,
-                &device_name,
-                &metrics,
-            )
-            .await
-            .ok();
         }
+
+        flush_audio(
+            &mut collected_audio,
+            overlap_samples,
+            segment_start_time,
+            &audio_stream,
+            &whisper_sender,
+            &device_name,
+            &metrics,
+        )
+        .await?;
+        segment_start_time = now_epoch_secs();
     }
+
+    // Flush remaining audio on exit
+    flush_audio(
+        &mut collected_audio,
+        0,
+        segment_start_time,
+        &audio_stream,
+        &whisper_sender,
+        &device_name,
+        &metrics,
+    )
+    .await
+    .ok();
 
     info!("stopped recording for {}", device_name);
     Ok(())
@@ -277,4 +216,3 @@ async fn flush_audio(
 
     Ok(())
 }
-

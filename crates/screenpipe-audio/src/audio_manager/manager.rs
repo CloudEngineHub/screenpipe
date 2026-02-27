@@ -336,7 +336,6 @@ impl AudioManager {
         let languages = options.languages.clone();
         let deepgram_api_key = options.deepgram_api_key.clone();
         let realtime_enabled = options.enable_realtime;
-        let transcription_mode = options.transcription_mode.clone();
         let device_clone = device.clone();
         let metrics = self.metrics.clone();
 
@@ -347,7 +346,6 @@ impl AudioManager {
                 recording_sender.clone(),
                 is_running.clone(),
                 metrics,
-                transcription_mode,
             ));
 
             let realtime_handle = if realtime_enabled {
@@ -408,6 +406,7 @@ impl AudioManager {
         let deepgram_api_key = options.deepgram_api_key.clone();
         let audio_transcription_engine = options.transcription_engine.clone();
         let vocabulary = options.vocabulary.clone();
+        let is_batch_mode = options.transcription_mode == TranscriptionMode::Batch;
         let vad_engine = self.vad_engine.clone();
         let whisper_receiver = self.recording_receiver.clone();
         let metrics = self.metrics.clone();
@@ -538,36 +537,101 @@ impl AudioManager {
                     None
                 };
 
-                // Meeting detector: log meeting metadata (no deferral)
-                if let Some(ref meeting) = meeting_detector {
-                    meeting.check_grace_period().await;
-                    if meeting.is_in_meeting() {
-                        if let Some(app) = meeting.current_meeting_app().await {
-                            debug!("batch mode: meeting detected ({}), metadata only", app);
+                // Batch mode: defer transcription until meeting ends.
+                // Audio is already persisted to disk + DB above.
+                // When meeting ends, reconciliation will transcribe all untranscribed chunks.
+                if is_batch_mode {
+                    if let Some(ref meeting) = meeting_detector {
+                        let was_in_meeting = meeting.is_in_meeting();
+                        meeting.check_grace_period().await;
+                        let now_in_meeting = meeting.is_in_meeting();
+
+                        if was_in_meeting && !now_in_meeting {
+                            // Meeting just ended — trigger immediate reconciliation
+                            info!("batch mode: meeting ended, transcribing accumulated audio");
+                            let count = super::reconciliation::reconcile_untranscribed(
+                                &db,
+                                &whisper_context,
+                                audio_transcription_engine.clone(),
+                                deepgram_api_key.clone(),
+                                languages.clone(),
+                                &vocabulary,
+                            )
+                            .await;
+                            info!("batch mode: transcribed {} chunks after meeting end", count);
+                        } else if now_in_meeting {
+                            debug!("batch mode: in meeting, deferring transcription");
+                        } else {
+                            // Not in a meeting — transcribe immediately like realtime
+                            if let Err(e) = process_audio_input(
+                                audio.clone(),
+                                vad_engine.clone(),
+                                segmentation_model_path.clone(),
+                                embedding_manager.clone(),
+                                embedding_extractor.clone(),
+                                &output_path.clone().unwrap(),
+                                audio_transcription_engine.clone(),
+                                deepgram_api_key.clone(),
+                                languages.clone(),
+                                &transcription_sender.clone(),
+                                &mut whisper_state,
+                                metrics.clone(),
+                                &vocabulary,
+                                persisted_file_path.clone(),
+                                alternate_stt.clone(),
+                            )
+                            .await
+                            {
+                                error!("Error processing audio: {:?}", e);
+                            }
+                        }
+                    } else {
+                        // No meeting detector available — transcribe immediately
+                        if let Err(e) = process_audio_input(
+                            audio.clone(),
+                            vad_engine.clone(),
+                            segmentation_model_path.clone(),
+                            embedding_manager.clone(),
+                            embedding_extractor.clone(),
+                            &output_path.clone().unwrap(),
+                            audio_transcription_engine.clone(),
+                            deepgram_api_key.clone(),
+                            languages.clone(),
+                            &transcription_sender.clone(),
+                            &mut whisper_state,
+                            metrics.clone(),
+                            &vocabulary,
+                            persisted_file_path.clone(),
+                            alternate_stt.clone(),
+                        )
+                        .await
+                        {
+                            error!("Error processing audio: {:?}", e);
                         }
                     }
-                }
-
-                if let Err(e) = process_audio_input(
-                    audio.clone(),
-                    vad_engine.clone(),
-                    segmentation_model_path.clone(),
-                    embedding_manager.clone(),
-                    embedding_extractor.clone(),
-                    &output_path.clone().unwrap(),
-                    audio_transcription_engine.clone(),
-                    deepgram_api_key.clone(),
-                    languages.clone(),
-                    &transcription_sender.clone(),
-                    &mut whisper_state,
-                    metrics.clone(),
-                    &vocabulary,
-                    persisted_file_path.clone(),
-                    alternate_stt.clone(),
-                )
-                .await
-                {
-                    error!("Error processing audio: {:?}", e);
+                } else {
+                    // Realtime mode: transcribe immediately
+                    if let Err(e) = process_audio_input(
+                        audio.clone(),
+                        vad_engine.clone(),
+                        segmentation_model_path.clone(),
+                        embedding_manager.clone(),
+                        embedding_extractor.clone(),
+                        &output_path.clone().unwrap(),
+                        audio_transcription_engine.clone(),
+                        deepgram_api_key.clone(),
+                        languages.clone(),
+                        &transcription_sender.clone(),
+                        &mut whisper_state,
+                        metrics.clone(),
+                        &vocabulary,
+                        persisted_file_path.clone(),
+                        alternate_stt.clone(),
+                    )
+                    .await
+                    {
+                        error!("Error processing audio: {:?}", e);
+                    }
                 }
             }
         }))
