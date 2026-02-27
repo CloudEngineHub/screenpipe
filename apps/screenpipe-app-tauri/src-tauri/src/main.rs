@@ -62,6 +62,7 @@ mod calendar;
 mod pi;
 mod embedded_server;
 mod suggestions;
+mod hardware;
 mod voice_training;
 
 pub use server::*;
@@ -1245,6 +1246,8 @@ async fn main() {
                 suggestions::get_cached_suggestions,
                 // Config commands
                 config::validate_data_dir,
+                // Hardware detection
+                hardware::get_hardware_capability,
             ])
             .typ::<SettingsStore>()
             .typ::<OnboardingStore>()
@@ -1257,7 +1260,8 @@ async fn main() {
             .typ::<calendar::CalendarStatus>()
             .typ::<calendar::CalendarEventItem>()
             .typ::<suggestions::CachedSuggestions>()
-            .typ::<suggestions::Suggestion>();
+            .typ::<suggestions::Suggestion>()
+            .typ::<hardware::HardwareCapability>();
 
         if let Err(e) = builder
             .export(
@@ -1462,7 +1466,9 @@ async fn main() {
             // Suggestions
             suggestions::get_cached_suggestions,
             // Config commands
-            config::validate_data_dir
+            config::validate_data_dir,
+            // Hardware detection
+            hardware::get_hardware_capability
         ])
         .setup(move |app| {
             //deep link register_all
