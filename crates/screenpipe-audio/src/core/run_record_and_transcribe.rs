@@ -60,6 +60,7 @@ pub async fn run_record_and_transcribe(
             let audio_samples_len = sample_rate * duration.as_secs() as usize;
             let max_samples = audio_samples_len + overlap_samples;
             let mut collected_audio = Vec::new();
+            let mut segment_start_time = now_epoch_secs();
 
             while is_running.load(Ordering::Relaxed)
                 && !audio_stream.is_disconnected.load(Ordering::Relaxed)
@@ -81,18 +82,21 @@ pub async fn run_record_and_transcribe(
                 flush_audio(
                     &mut collected_audio,
                     overlap_samples,
+                    segment_start_time,
                     &audio_stream,
                     &whisper_sender,
                     &device_name,
                     &metrics,
                 )
                 .await?;
+                segment_start_time = now_epoch_secs();
             }
 
             // Flush remaining audio on exit
             flush_audio(
                 &mut collected_audio,
                 0,
+                segment_start_time,
                 &audio_stream,
                 &whisper_sender,
                 &device_name,
@@ -108,6 +112,7 @@ pub async fn run_record_and_transcribe(
             );
             let max_samples = BATCH_FLUSH_SECS * sample_rate + overlap_samples;
             let mut collected_audio = Vec::new();
+            let mut segment_start_time = now_epoch_secs();
 
             while is_running.load(Ordering::Relaxed)
                 && !audio_stream.is_disconnected.load(Ordering::Relaxed)
@@ -129,18 +134,21 @@ pub async fn run_record_and_transcribe(
                 flush_audio(
                     &mut collected_audio,
                     overlap_samples,
+                    segment_start_time,
                     &audio_stream,
                     &whisper_sender,
                     &device_name,
                     &metrics,
                 )
                 .await?;
+                segment_start_time = now_epoch_secs();
             }
 
             // Flush remaining audio on exit
             flush_audio(
                 &mut collected_audio,
                 0,
+                segment_start_time,
                 &audio_stream,
                 &whisper_sender,
                 &device_name,
@@ -211,11 +219,19 @@ async fn recv_audio_chunk(
     }
 }
 
+fn now_epoch_secs() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("Time went backwards")
+        .as_secs()
+}
+
 /// Send the collected audio to the Whisper channel and keep the overlap tail.
 /// Clears `collected_audio` down to the overlap on success.
 async fn flush_audio(
     collected_audio: &mut Vec<f32>,
     overlap_samples: usize,
+    capture_timestamp: u64,
     audio_stream: &Arc<AudioStream>,
     whisper_sender: &Arc<crossbeam::channel::Sender<AudioInput>>,
     device_name: &str,
@@ -226,10 +242,6 @@ async fn flush_audio(
     }
 
     debug!("sending audio segment to audio model");
-    let capture_timestamp = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("Time went backwards")
-        .as_secs();
 
     match whisper_sender.send_timeout(
         AudioInput {
