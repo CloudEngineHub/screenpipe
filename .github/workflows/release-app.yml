@@ -969,18 +969,29 @@ jobs:
           AWS_DEFAULT_REGION: auto
           R2_ENDPOINT: https://${{ secrets.CLOUDFLARE_ACCOUNT_ID }}.r2.cloudflarestorage.com
         run: |
-          # Upload helper with retry (R2 intermittently drops TLS on multipart uploads)
+          # Upload helper with retry and large multipart threshold to avoid
+          # R2 TLS failures (SSLV3_ALERT_BAD_RECORD_MAC) on self-hosted runners.
+          # Setting multipart_threshold to 500MB forces single-part upload for
+          # tar.gz (~200MB) and DMG files, avoiding the flaky multipart path.
+          export AWS_CONFIG_FILE=$(mktemp)
+          cat > "$AWS_CONFIG_FILE" <<AWSCFG
+          [default]
+          s3 =
+            multipart_threshold = 500MB
+            max_concurrent_requests = 1
+          AWSCFG
+
           upload_with_retry() {
             local src="$1" dst="$2"
-            for attempt in 1 2 3; do
+            for attempt in 1 2 3 4 5; do
               if aws s3 cp "$src" "$dst" --endpoint-url "$R2_ENDPOINT" 2>&1; then
                 echo "  ✅ $(basename "$src")"
                 return 0
               fi
-              echo "  ⚠️ attempt $attempt failed for $(basename "$src"), retrying..."
-              sleep 5
+              echo "  ⚠️ attempt $attempt failed for $(basename "$src"), retrying in $((attempt * 10))s..."
+              sleep $((attempt * 10))
             done
-            echo "  ❌ failed to upload $(basename "$src") after 3 attempts"
+            echo "  ❌ failed to upload $(basename "$src") after 5 attempts"
             return 1
           }
 
@@ -1135,17 +1146,25 @@ jobs:
           AWS_DEFAULT_REGION: auto
           R2_ENDPOINT: https://${{ secrets.CLOUDFLARE_ACCOUNT_ID }}.r2.cloudflarestorage.com
         run: |
+          export AWS_CONFIG_FILE=$(mktemp)
+          cat > "$AWS_CONFIG_FILE" <<AWSCFG
+          [default]
+          s3 =
+            multipart_threshold = 500MB
+            max_concurrent_requests = 1
+          AWSCFG
+
           upload_with_retry() {
             local src="$1" dst="$2"
-            for attempt in 1 2 3; do
+            for attempt in 1 2 3 4 5; do
               if aws s3 cp "$src" "$dst" --endpoint-url "$R2_ENDPOINT" 2>&1; then
                 echo "  ✅ $(basename "$src")"
                 return 0
               fi
-              echo "  ⚠️ attempt $attempt failed for $(basename "$src"), retrying..."
-              sleep 5
+              echo "  ⚠️ attempt $attempt failed for $(basename "$src"), retrying in $((attempt * 10))s..."
+              sleep $((attempt * 10))
             done
-            echo "  ❌ failed to upload $(basename "$src") after 3 attempts"
+            echo "  ❌ failed to upload $(basename "$src") after 5 attempts"
             return 1
           }
           VERSION=$(grep '^version = ' apps/screenpipe-app-tauri/src-tauri/Cargo.toml | sed 's/version = "\(.*\)"/\1/')
