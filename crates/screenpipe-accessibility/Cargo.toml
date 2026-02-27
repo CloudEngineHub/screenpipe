@@ -52,7 +52,7 @@ windows = { version = "0.58", features = [
 
 [target.'cfg(target_os = "linux")'.dependencies]
 # AT-SPI2 accessibility via D-Bus (pure Rust, no system deps for compilation)
-zbus = { version = "5", default-features = false, features = ["blocking"] }
+zbus = { version = "5", features = ["blocking"] }
 # Input device events from /dev/input/event*
 evdev = "0.13"
 # fcntl for non-blocking I/O on evdev fds

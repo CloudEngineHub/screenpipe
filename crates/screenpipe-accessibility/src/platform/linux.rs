@@ -35,7 +35,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread;
 use std::time::Instant;
-use tracing::{debug, error, warn};
+use tracing::{debug, warn};
 
 /// Permission status for UI capture on Linux.
 #[derive(Debug, Clone)]
