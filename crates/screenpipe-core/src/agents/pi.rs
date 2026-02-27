@@ -655,6 +655,10 @@ impl AgentExecutor for PiExecutor {
     fn name(&self) -> &str {
         "pi"
     }
+
+    fn user_token(&self) -> Option<&str> {
+        self.user_token.as_deref()
+    }
 }
 
 // ---------------------------------------------------------------------------

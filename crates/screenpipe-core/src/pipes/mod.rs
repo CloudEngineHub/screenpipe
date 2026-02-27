@@ -802,7 +802,7 @@ impl PipeManager {
         // Pre-configure pi
         if config.agent == "pi" {
             if let Err(e) = PiExecutor::ensure_pi_config(
-                None,
+                executor.user_token(),
                 SCREENPIPE_API_URL,
                 run_provider.as_deref(),
                 Some(&run_model),
@@ -1713,7 +1713,7 @@ impl PipeManager {
                     // Pre-configure pi with the pipe's provider
                     if config.agent == "pi" {
                         if let Err(e) = PiExecutor::ensure_pi_config(
-                            None,
+                            executor.user_token(),
                             SCREENPIPE_API_URL,
                             provider.as_deref(),
                             Some(&model),
