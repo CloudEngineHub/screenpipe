@@ -18,7 +18,7 @@ import posthog from "posthog-js";
 import { toast } from "@/components/ui/use-toast";
 import { commands } from "@/lib/utils/tauri";
 import { invoke } from "@tauri-apps/api/core";
-import { emit } from "@tauri-apps/api/event";
+import { showChatWithPrefill } from "@/lib/chat-utils";
 
 export interface DetectedUrl {
 	normalized: string;
@@ -607,9 +607,7 @@ export const CurrentFrameTimeline: FC<CurrentFrameTimelineProps> = ({
 		const rawText = frameContext?.text || textPositions.map((p) => p.text).join(" ");
 		const textSnippet = rawText.slice(0, 300);
 		const context = `Context from timeline frame:\n${device.metadata?.app_name || "?"} - ${device.metadata?.window_name || "?"}\nTime: ${currentFrame?.timestamp || "?"}\n\nText:\n${textSnippet}${textSnippet.length >= 300 ? "…" : ""}`;
-		await commands.showWindow("Chat");
-		await new Promise((r) => setTimeout(r, 150));
-		await emit("chat-prefill", { context, frameId: parseInt(debouncedFrame.frameId, 10) });
+		await showChatWithPrefill({ context, frameId: parseInt(debouncedFrame.frameId, 10) });
 		toast({ title: "ask about this frame", description: "chat opened with frame context" });
 	}, [debouncedFrame, device, frameContext?.text, textPositions, currentFrame]);
 
@@ -618,9 +616,7 @@ export const CurrentFrameTimeline: FC<CurrentFrameTimelineProps> = ({
 		const rawText = frameContext?.text || textPositions.map((p) => p.text).join(" ");
 		const textSnippet = rawText.slice(0, 300);
 		const context = `Context from timeline frame:\n${device.metadata?.app_name || "?"} - ${device.metadata?.window_name || "?"}\nTime: ${currentFrame?.timestamp || "?"}\n\nText:\n${textSnippet}${textSnippet.length >= 300 ? "…" : ""}`;
-		await commands.showWindow("Chat");
-		await new Promise((r) => setTimeout(r, 150));
-		await emit("chat-prefill", { context, prompt: pipe.prompt, autoSend: true });
+		await showChatWithPrefill({ context, prompt: pipe.prompt, autoSend: true });
 		toast({ title: `${pipe.icon} ${pipe.title}`, description: "running pipe with frame context" });
 	}, [debouncedFrame, device, frameContext?.text, textPositions, currentFrame]);
 

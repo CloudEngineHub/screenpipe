@@ -8,7 +8,7 @@ import { useDebounce } from "@/lib/hooks/use-debounce";
 import { format, isToday, isYesterday } from "date-fns";
 import { cn } from "@/lib/utils";
 import { commands } from "@/lib/utils/tauri";
-import { emit } from "@tauri-apps/api/event";
+import { showChatWithPrefill } from "@/lib/chat-utils";
 import { ThumbnailHighlightOverlay } from "./thumbnail-highlight-overlay";
 
 interface SpeakerResult {
@@ -626,14 +626,8 @@ export function SearchModal({ isOpen, onClose, onNavigateToTimestamp, embedded =
     // Close search modal first
     onClose();
 
-    // Show chat window (it will overlay on top of timeline, not close it)
-    await commands.showWindow("Chat");
-
-    // Small delay to ensure chat window's React components are mounted and listening
-    await new Promise(resolve => setTimeout(resolve, 150));
-
-    // Emit prefill event with context and frame image
-    await emit("chat-prefill", { context, frameId: result.frame_id });
+    // Show chat window and deliver prefill (handles fresh webview creation)
+    await showChatWithPrefill({ context, frameId: result.frame_id });
   }, [filteredResults, selectedIndex, onClose]);
 
   // Handle going back from speaker drill-down

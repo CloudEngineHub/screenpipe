@@ -31,6 +31,7 @@ import { Input } from "@/components/ui/input";
 import { homeDir, join } from "@tauri-apps/api/path";
 import { revealItemInDir, openUrl } from "@tauri-apps/plugin-opener";
 import { emit } from "@tauri-apps/api/event";
+import { showChatWithPrefill } from "@/lib/chat-utils";
 import { commands } from "@/lib/utils/tauri";
 import { cn } from "@/lib/utils";
 import {
@@ -1164,9 +1165,7 @@ export function PipesSection() {
           if (!value) return;
           input.value = "";
 
-          await commands.showWindow("Chat");
-          await new Promise((r) => setTimeout(r, 200));
-          await emit("chat-prefill", {
+          await showChatWithPrefill({
             context: PIPE_CREATION_PROMPT,
             prompt: value,
             autoSend: true,

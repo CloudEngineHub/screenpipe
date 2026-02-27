@@ -9,6 +9,7 @@ import { Loader2, RotateCcw, AlertCircle, X, Sparkles, Globe, Lock, ExternalLink
 import { SearchModal } from "@/components/rewind/search-modal";
 import { commands } from "@/lib/utils/tauri";
 import { listen, emit } from "@tauri-apps/api/event";
+import { showChatWithPrefill } from "@/lib/chat-utils";
 import { invoke } from "@tauri-apps/api/core";
 import { AudioTranscript } from "@/components/rewind/timeline/audio-transcript";
 import { SubtitleBar } from "@/components/rewind/timeline/subtitle-bar";
@@ -871,23 +872,12 @@ export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 
 		const context = contextParts.join("\n\n");
 
-		// Open chat window first, then emit context
-		await commands.showWindow("Chat");
-		setTimeout(() => {
-			if (pipe) {
-				emit("chat-prefill", {
-					context,
-					prompt: pipe.prompt,
-					autoSend: true,
-				});
-			} else {
-				emit("chat-prefill", {
-					context,
-					prompt: `Based on my activity from ${startTime} to ${endTime}, `,
-					source: "timeline",
-				});
-			}
-		}, 200);
+		// Open chat window and deliver prefill reliably (handles fresh webview creation)
+		if (pipe) {
+			await showChatWithPrefill({ context, prompt: pipe.prompt, autoSend: true });
+		} else {
+			await showChatWithPrefill({ context, prompt: `Based on my activity from ${startTime} to ${endTime}, `, source: "timeline" });
+		}
 
 		posthog.capture("timeline_selection_to_chat", {
 			selection_duration_ms: selectionRange.end.getTime() - selectionRange.start.getTime(),
