@@ -306,21 +306,12 @@ const AISection = ({
       if (preset && !isDuplicating) {
         const updatedPresets = settings.aiPresets.map((p) => {
           if (p.id === preset.id) {
-            const updatedPreset = {
+            return {
               ...settingsPreset,
               prompt: settingsPreset?.prompt || DEFAULT_PROMPT,
               maxContextChars: settingsPreset?.maxContextChars || 512000,
               defaultPreset: p.defaultPreset,
             } as AIPreset;
-
-            // If this is the default preset, update global settings too
-            if (p.defaultPreset) {
-              updateSettings({
-                aiPresets: updatedPresets,
-              });
-            }
-
-            return updatedPreset;
           }
           return p;
         });

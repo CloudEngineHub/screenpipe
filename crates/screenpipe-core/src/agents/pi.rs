@@ -292,6 +292,7 @@ impl PiExecutor {
         let mut cmd = build_async_command(pi_path);
         cmd.current_dir(working_dir);
         cmd.arg("-p").arg(prompt);
+        cmd.arg("--no-session");
         cmd.arg("--provider").arg(resolved_provider);
         cmd.arg("--model").arg(model);
 
@@ -309,6 +310,10 @@ impl PiExecutor {
                     }
                     "custom" => {
                         cmd.env("CUSTOM_API_KEY", key);
+                    }
+                    // Ensure screenpipe API key is set as env var fallback
+                    "screenpipe" if self.user_token.is_none() => {
+                        cmd.env("SCREENPIPE_API_KEY", key);
                     }
                     _ => {}
                 }
@@ -375,6 +380,7 @@ impl PiExecutor {
         cmd.current_dir(working_dir);
         cmd.arg("-p").arg(prompt);
         cmd.arg("--mode").arg("json");
+        cmd.arg("--no-session");
         cmd.arg("--provider").arg(resolved_provider);
         cmd.arg("--model").arg(model);
 
@@ -390,6 +396,10 @@ impl PiExecutor {
                     }
                     "custom" => {
                         cmd.env("CUSTOM_API_KEY", key);
+                    }
+                    // Ensure screenpipe API key is set as env var fallback
+                    "screenpipe" if self.user_token.is_none() => {
+                        cmd.env("SCREENPIPE_API_KEY", key);
                     }
                     _ => {}
                 }
