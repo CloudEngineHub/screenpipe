@@ -142,10 +142,14 @@ impl PiExecutor {
             json!({"providers": {}})
         };
 
+        // Use actual token value in apiKey (not env var name) — Pi v0.51.1+ may not
+        // resolve env var names reliably, causing tier=anonymous on the gateway.
+        // Falls back to env var name for backwards compatibility when token is absent.
+        let api_key_value = user_token.unwrap_or("SCREENPIPE_API_KEY");
         let screenpipe_provider = json!({
             "baseUrl": api_url,
             "api": "openai-completions",
-            "apiKey": "SCREENPIPE_API_KEY",
+            "apiKey": api_key_value,
             "authHeader": true,
             "models": screenpipe_cloud_models()
         });
