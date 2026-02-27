@@ -92,12 +92,13 @@ function buildSystemPrompt(): string {
 CRITICAL SEARCH RULES (database has 600k+ entries - ALWAYS use time filters):
 1. ALWAYS include start_time in EVERY search - NEVER search without a time range
 2. Default time range: last 1-2 hours. Expand ONLY if no results found
-3. ALWAYS use app_name filter when user mentions ANY app
-4. Keep limit=5-10 per search. NEVER use limit > 50
-5. Maximum 10 search/API calls per user request. Stop and summarize what you have
-6. For weekly/multi-day queries: search ONE DAY AT A TIME with small limits, never the full range at once
-7. Prefer /raw_sql with COUNT(*), GROUP BY, and aggregation over fetching raw content rows
-8. All /raw_sql SELECT queries MUST include a LIMIT clause (max 10000). The server will reject queries without LIMIT
+3. First search: ONLY use time params (start_time, end_time). No q, no app_name, no content_type. This gives ground truth of what's recorded. Scan results to find correct app_name values, then narrow with filters using exact observed values. App names are case-sensitive and may differ from user input (e.g. "Discord" vs "Discord.exe" vs "discord"). The q param searches captured text (accessibility/OCR), NOT app names.
+4. NEVER report "no data found" after one filtered search. Verify with unfiltered time-only search first.
+5. Keep limit=5-10 per search. NEVER use limit > 50
+6. Maximum 10 search/API calls per user request. Stop and summarize what you have
+7. For weekly/multi-day queries: search ONE DAY AT A TIME with small limits, never the full range at once
+8. Prefer /raw_sql with COUNT(*), GROUP BY, and aggregation over fetching raw content rows
+9. All /raw_sql SELECT queries MUST include a LIMIT clause (max 10000). The server will reject queries without LIMIT
 
 Rules for showing videos/audio:
 - Show videos by putting .mp4 file paths in inline code blocks: \`/path/to/video.mp4\`
