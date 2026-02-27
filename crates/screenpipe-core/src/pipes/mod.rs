@@ -2146,10 +2146,13 @@ fn render_prompt_with_port(
         prompt.push_str("\n\n");
     }
 
+    let os = std::env::consts::OS; // "windows", "macos", "linux"
+
     let header = format!(
         r#"Time range: {start_time} to {end_time}
 Date: {date}
 Timezone: {timezone} (UTC{tz_offset})
+OS: {os}
 Output directory: ./output/
 Screenpipe API: http://localhost:{api_port}
 "#

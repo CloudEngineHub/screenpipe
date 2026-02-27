@@ -70,7 +70,7 @@ pub struct AudioManager {
     transcription_sender: Arc<crossbeam::channel::Sender<TranscriptionResult>>,
     transcription_receiver_handle: Arc<RwLock<Option<JoinHandle<()>>>>,
     recording_receiver_handle: Arc<RwLock<Option<JoinHandle<()>>>>,
-    stt_model_path: PathBuf,
+    stt_model_path: tokio::sync::watch::Receiver<Option<PathBuf>>,
     pub metrics: Arc<AudioPipelineMetrics>,
     idle_detector: Option<Arc<IdleDetector>>,
     meeting_detector: Option<Arc<MeetingDetector>>,
@@ -107,7 +107,22 @@ impl AudioManager {
         let (transcription_sender, transcription_receiver) = crossbeam::channel::bounded(1000);
 
         let recording_handles = DashMap::new();
-        let stt_model_path = download_whisper_model(options.transcription_engine.clone())?;
+        let (stt_model_tx, stt_model_rx) = tokio::sync::watch::channel(None);
+        {
+            let engine = options.transcription_engine.clone();
+            tokio::task::spawn_blocking(move || {
+                match download_whisper_model(engine) {
+                    Ok(path) => {
+                        info!("whisper model available: {:?}", path);
+                        let _ = stt_model_tx.send(Some(path));
+                    }
+                    Err(e) => {
+                        error!("failed to download whisper model: {}", e);
+                        // watch stays None — start_audio_receiver_handler will handle this
+                    }
+                }
+            });
+        }
 
         whisper_rs::install_logging_hooks();
 
@@ -142,7 +157,7 @@ impl AudioManager {
             recording_handles: Arc::new(recording_handles),
             recording_receiver_handle: Arc::new(RwLock::new(None)),
             transcription_receiver_handle: Arc::new(RwLock::new(None)),
-            stt_model_path,
+            stt_model_path: stt_model_rx,
             metrics: Arc::new(AudioPipelineMetrics::new()),
             idle_detector,
             meeting_detector,
@@ -432,18 +447,30 @@ impl AudioManager {
         let transcription_paused = self.transcription_paused.clone();
         let db = self.db.clone();
 
-        let quantized_path = self.stt_model_path.clone();
+        let quantized_path = {
+            let mut rx = self.stt_model_path.clone();
+            let deadline = tokio::time::Instant::now() + Duration::from_secs(600);
+            loop {
+                if let Some(ref path) = *rx.borrow() {
+                    break path.clone();
+                }
+                match tokio::time::timeout_at(deadline, rx.changed()).await {
+                    Ok(Ok(())) => continue,
+                    Ok(Err(_)) => return Err(anyhow!("whisper model download failed")),
+                    Err(_) => return Err(anyhow!("whisper model download timed out (10 min)")),
+                }
+            }
+        };
         info!("loading whisper model with GPU acceleration...");
         // Use spawn_blocking to avoid blocking a tokio worker thread for 1-3s
         // while the 834MB model is loaded into Metal/Vulkan GPU memory.
         let whisper_context = tokio::task::spawn_blocking(move || {
-            Arc::new(
-                WhisperContext::new_with_params(&quantized_path.to_string_lossy(), context_param)
-                    .expect("failed to load model"),
-            )
+            WhisperContext::new_with_params(&quantized_path.to_string_lossy(), context_param)
+                .map(Arc::new)
         })
         .await
-        .expect("whisper model loading task panicked");
+        .map_err(|e| anyhow!("whisper model loading task panicked: {}", e))?
+        .map_err(|e| anyhow!("failed to load whisper model: {}", e))?;
         info!("whisper model loaded successfully");
 
         // Store the context for re-transcription use
@@ -662,8 +689,8 @@ impl AudioManager {
     }
 
     /// Returns the STT model path (for creating new WhisperContext if needed).
-    pub fn stt_model_path(&self) -> &PathBuf {
-        &self.stt_model_path
+    pub fn stt_model_path(&self) -> Option<PathBuf> {
+        self.stt_model_path.borrow().clone()
     }
 
     /// Returns the current transcription engine.
