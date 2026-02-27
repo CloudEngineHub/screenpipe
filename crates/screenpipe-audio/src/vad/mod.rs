@@ -24,9 +24,16 @@ pub enum VadEngineEnum {
     Silero,
 }
 
+/// Speech threshold used for output/system audio devices.
+/// Lower than SPEECH_THRESHOLD because system audio (YouTube, Zoom speaker output)
+/// often has background music mixed with speech, reducing Silero's confidence to 0.2-0.4.
+pub const OUTPUT_SPEECH_THRESHOLD: f32 = 0.3;
+
 pub trait VadEngine: Send {
     fn is_voice_segment(&mut self, audio_chunk: &[f32]) -> anyhow::Result<bool>;
     fn audio_type(&mut self, audio_chunk: &[f32]) -> anyhow::Result<VadStatus>;
+    /// Override the speech probability threshold. Call with `None` to reset to default.
+    fn set_speech_threshold(&mut self, threshold: Option<f32>);
 }
 
 const FRAME_HISTORY: usize = 10; // Number of frames to consider for decision

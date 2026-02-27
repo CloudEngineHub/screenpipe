@@ -4,11 +4,8 @@
 import { useState, useRef, useMemo, useCallback, useEffect } from "react";
 import { AudioData, StreamTimeSeriesResponse, TimeRange } from "@/components/rewind/timeline";
 import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
-import { Play, Pause, Volume2, GripHorizontal, X, MessageSquare, Layers, Users, Copy, Check, BotMessageSquare, Sparkles } from "lucide-react";
+import { GripHorizontal, X, Users, Copy, Check, BotMessageSquare, Sparkles } from "lucide-react";
 import { showChatWithPrefill } from "@/lib/chat-utils";
-import { VideoComponent } from "@/components/rewind/video";
-import { SpeakerAssignPopover } from "@/components/speaker-assign-popover";
 import {
 	ConversationBubble,
 	TimeGapDivider,
@@ -18,14 +15,6 @@ import { cn } from "@/lib/utils";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Meeting, deduplicateAudioItems } from "@/lib/hooks/use-meetings";
 import { usePipes } from "@/lib/hooks/use-pipes";
-
-interface AudioGroup {
-	deviceName: string;
-	isInput: boolean;
-	audioItems: AudioData[];
-	startTime: Date;
-	endTime: Date;
-}
 
 // Extended audio item with timestamp for conversation view
 interface AudioItemWithTimestamp extends AudioData {
@@ -38,8 +27,6 @@ interface ConversationItem {
 	isFirstInGroup: boolean;
 	gapMinutesBefore?: number;
 }
-
-type ViewMode = "device" | "thread";
 
 type TabMode = "nearby" | "meeting";
 
@@ -90,7 +77,6 @@ export function AudioTranscript({
 	isPlaying = false,
 }: AudioTranscriptProps) {
 	const [playing, setPlaying] = useState<string | null>(null);
-	const [viewMode, setViewMode] = useState<ViewMode>("thread"); // Default to thread view
 	const [tabMode, setTabMode] = useState<TabMode>("nearby");
 	const { templatePipes } = usePipes();
 	const meetingScrollRef = useRef<HTMLDivElement | null>(null);
@@ -182,52 +168,7 @@ export function AudioTranscript({
 	);
 
 	// Compute audio groups (device view)
-	const audioGroups = useMemo(() => {
-		if (!frames.length) return [];
-
-		const currentFrame = frames[currentIndex];
-		if (!currentFrame) return [];
-
-		const currentTime = new Date(currentFrame.timestamp);
-		const windowStart = new Date(currentTime.getTime() - groupingWindowMs);
-		const windowEnd = new Date(currentTime.getTime() + groupingWindowMs);
-
-		const nearbyFrames = frames.filter((frame) => {
-			const frameTime = new Date(frame.timestamp);
-			return frameTime >= windowStart && frameTime <= windowEnd;
-		});
-
-		const groups = new Map<string, AudioGroup>();
-
-		nearbyFrames.forEach((frame) => {
-			frame.devices.forEach((device) => {
-				device.audio.forEach((audio) => {
-					const key = `${audio.device_name}-${audio.is_input}`;
-
-					if (!groups.has(key)) {
-						groups.set(key, {
-							deviceName: audio.device_name,
-							isInput: audio.is_input,
-							audioItems: [],
-							startTime: new Date(frame.timestamp),
-							endTime: new Date(frame.timestamp),
-						});
-					}
-
-					const group = groups.get(key)!;
-					group.audioItems.push(audio);
-
-					const frameTime = new Date(frame.timestamp);
-					if (frameTime < group.startTime) group.startTime = frameTime;
-					if (frameTime > group.endTime) group.endTime = frameTime;
-				});
-			});
-		});
-
-		return Array.from(groups.values());
-	}, [frames, currentIndex, groupingWindowMs]);
-
-	// Compute conversation items (thread view)
+	// Compute conversation items
 	const conversationData = useMemo(() => {
 		if (!frames.length) return { items: [], participants: [], timeRange: null, totalDuration: 0, firstChunkBySpeaker: new Map() };
 
@@ -543,12 +484,9 @@ export function AudioTranscript({
 		await showChatWithPrefill({ context, prompt, autoSend: true });
 	}, [summarizeInfo, getSpeakerInfo, templatePipes]);
 
-	// Auto-switch to thread view if multiple speakers detected
-	const hasMultipleSpeakers = conversationData.participants.length > 1;
-
 	const isVisible = useMemo(() => {
-		return audioGroups.length > 0 || (tabMode === "meeting" && activeMeeting != null);
-	}, [audioGroups, tabMode, activeMeeting]);
+		return conversationData.items.length > 0 || (tabMode === "meeting" && activeMeeting != null);
+	}, [conversationData.items.length, tabMode, activeMeeting]);
 
 	const handlePanelMouseMove = useCallback(
 		(e: React.MouseEvent) => {
@@ -645,7 +583,7 @@ export function AudioTranscript({
 
 					<TooltipProvider delayDuration={300}>
 					<div className="flex items-center gap-0.5 shrink-0">
-						{tabMode === "meeting" ? (
+						{activeMeeting && tabMode === "meeting" && (
 							<Tooltip>
 								<TooltipTrigger asChild>
 									<Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={() => setTabMode("nearby")}>
@@ -654,38 +592,16 @@ export function AudioTranscript({
 								</TooltipTrigger>
 								<TooltipContent side="bottom"><p>nearby view</p></TooltipContent>
 							</Tooltip>
-						) : (
-							<>
-								<Tooltip>
-									<TooltipTrigger asChild>
-										<Button variant={viewMode === "device" ? "secondary" : "ghost"} size="sm" className="h-6 w-6 p-0" onClick={() => setViewMode("device")}>
-											<Layers className="h-3 w-3" />
-										</Button>
-									</TooltipTrigger>
-									<TooltipContent side="bottom"><p>by device</p></TooltipContent>
-								</Tooltip>
-								<Tooltip>
-									<TooltipTrigger asChild>
-										<Button variant={viewMode === "thread" ? "secondary" : "ghost"} size="sm" className="h-6 w-6 p-0" onClick={() => setViewMode("thread")}>
-											<MessageSquare className="h-3 w-3" />
-										</Button>
-									</TooltipTrigger>
-									<TooltipContent side="bottom"><p>conversation</p></TooltipContent>
-								</Tooltip>
-								{activeMeeting && (
-									<>
-										<div className="w-px h-4 bg-border mx-0.5" />
-										<Tooltip>
-											<TooltipTrigger asChild>
-												<Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={() => setTabMode("meeting")}>
-													<Users className="h-3 w-3" />
-												</Button>
-											</TooltipTrigger>
-											<TooltipContent side="bottom"><p>full meeting</p></TooltipContent>
-										</Tooltip>
-									</>
-								)}
-							</>
+						)}
+						{activeMeeting && tabMode === "nearby" && (
+							<Tooltip>
+								<TooltipTrigger asChild>
+									<Button variant="ghost" size="sm" className="h-6 px-1.5 p-0 text-xs" onClick={() => setTabMode("meeting")}>
+										<Users className="h-3 w-3 mr-1" />full meeting
+									</Button>
+								</TooltipTrigger>
+								<TooltipContent side="bottom"><p>show full meeting transcript</p></TooltipContent>
+							</Tooltip>
 						)}
 
 						<div className="w-px h-4 bg-border mx-0.5" />
@@ -735,10 +651,7 @@ export function AudioTranscript({
 			{/* Participants summary */}
 			{(() => {
 				const activeData = tabMode === "meeting" ? meetingConversationData : conversationData;
-				const showSummary =
-					tabMode === "meeting"
-						? activeData.participants.length > 0 && activeData.timeRange
-						: viewMode === "thread" && activeData.participants.length > 0 && activeData.timeRange;
+				const showSummary = activeData.participants.length > 0 && activeData.timeRange;
 				return showSummary && activeData.timeRange ? (
 					<ParticipantsSummary
 						participants={activeData.participants}
@@ -759,9 +672,7 @@ export function AudioTranscript({
 					height: `calc(100% - ${
 						(() => {
 							const activeData = tabMode === "meeting" ? meetingConversationData : conversationData;
-							const hasSummary = tabMode === "meeting"
-								? activeData.participants.length > 0
-								: viewMode === "thread" && activeData.participants.length > 0;
+							const hasSummary = activeData.participants.length > 0;
 							if (!hasSummary) return "45px";
 							// Extra space when unnamed speakers exist (hint banner)
 							const hasUnnamed = activeData.participants.some((p) => !p.name);
@@ -781,7 +692,6 @@ export function AudioTranscript({
 							</div>
 						) : (
 							<>
-								{/* Show "Load earlier" if paginated */}
 								{meetingPageSize < meetingConversationData.items.length && (
 									<div className="text-center py-2">
 										<Button
@@ -859,94 +769,8 @@ export function AudioTranscript({
 							</>
 						)}
 					</div>
-				) : viewMode === "device" ? (
-					// Device view (original)
-					<div className="space-y-2 p-3 pb-14">
-						{audioGroups.map((group, groupIndex) => (
-							<Card
-								key={groupIndex}
-								className="p-4 bg-card border border-border rounded-xl"
-							>
-								<div className="text-xs text-muted-foreground mb-2">
-									{group.deviceName} ({group.isInput ? "input" : "output"})
-									<div className="text-[10px] text-muted-foreground">
-										{formatTimeRange(
-											calculateTimeRange(
-												group.startTime,
-												group.audioItems.reduce(
-													(value, item) => value + item.duration_secs,
-													0
-												)
-											)
-										)}
-									</div>
-								</div>
-
-								{group.audioItems.map((audio, index) => {
-									const { speakerId, speakerName } = getSpeakerInfo(audio);
-
-									return (
-										<div
-											key={index}
-											className="space-y-2 mb-3 last:mb-0 pb-3 last:pb-0 border-b last:border-b-0 border-border/50"
-										>
-											<div className="flex items-center gap-2 flex-wrap">
-												<Button
-													variant="ghost"
-													size="sm"
-													className="h-6 w-6 p-0"
-													onClick={() => handlePlay(audio.audio_file_path)}
-												>
-													{playing === audio.audio_file_path ? (
-														<Pause className="h-3 w-3" />
-													) : (
-														<Play className="h-3 w-3" />
-													)}
-												</Button>
-
-												<SpeakerAssignPopover
-													audioChunkId={audio.audio_chunk_id}
-													speakerId={speakerId}
-													speakerName={speakerName}
-													audioFilePath={audio.audio_file_path}
-													onAssigned={(newId, newName) =>
-														handleSpeakerAssigned(
-															audio.audio_chunk_id,
-															newId,
-															newName
-														)
-													}
-												/>
-
-												<div className="flex items-center gap-1 text-xs text-muted-foreground">
-													<Volume2 className="h-3 w-3" />
-													<span>
-														{formatDurationHuman(
-															Math.round(audio.duration_secs)
-														)}
-													</span>
-												</div>
-											</div>
-
-											{audio.transcription && (
-												<div className="text-xs pl-8 text-muted-foreground">
-													{audio.transcription}
-												</div>
-											)}
-
-											{playing === audio.audio_file_path && (
-												<div className="pl-8">
-													<VideoComponent filePath={audio.audio_file_path} startTimeSecs={audio.start_offset} />
-												</div>
-											)}
-										</div>
-									);
-								})}
-							</Card>
-						))}
-					</div>
 				) : (
-					// Conversation thread view (nearby)
+					// Conversation thread view
 					<div className="p-3 pb-14 space-y-0">
 						{conversationData.items.length === 0 ? (
 							<div className="text-center text-sm text-muted-foreground py-8">

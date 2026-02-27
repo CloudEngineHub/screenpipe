@@ -20,6 +20,8 @@ use super::{
 pub struct SileroVad {
     vad: Vad,
     prob_history: VecDeque<f32>,
+    /// Per-call override for SPEECH_THRESHOLD. None = use default.
+    speech_threshold_override: Option<f32>,
 }
 
 impl SileroVad {
@@ -41,6 +43,7 @@ impl SileroVad {
         Ok(Self {
             vad,
             prob_history: VecDeque::with_capacity(FRAME_HISTORY),
+            speech_threshold_override: None,
         })
     }
 
@@ -144,16 +147,21 @@ impl SileroVad {
         Ok(proj_dirs.join("screenpipe").join("vad"))
     }
 
+    fn effective_speech_threshold(&self) -> f32 {
+        self.speech_threshold_override.unwrap_or(SPEECH_THRESHOLD)
+    }
+
     fn update_status(&mut self, prob: f32) -> VadStatus {
         self.prob_history.push_back(prob);
         if self.prob_history.len() > FRAME_HISTORY {
             self.prob_history.pop_front();
         }
 
+        let threshold = self.effective_speech_threshold();
         let speech_frames = self
             .prob_history
             .iter()
-            .filter(|&&p| p > SPEECH_THRESHOLD)
+            .filter(|&&p| p > threshold)
             .count();
         let silence_frames = self
             .prob_history
@@ -174,11 +182,9 @@ impl SileroVad {
 
 impl VadEngine for SileroVad {
     fn is_voice_segment(&mut self, audio_chunk: &[f32]) -> anyhow::Result<bool> {
-        // Silero VAD v5 requires fixed 512 samples for 16kHz (~32ms).
-        // Process all 512-sample windows in the chunk instead of truncating.
         const CHUNK_SIZE: usize = 512;
 
-        let threshold = SPEECH_THRESHOLD;
+        let threshold = self.effective_speech_threshold();
         let mut max_prob: f32 = 0.0;
 
         for window in audio_chunk.chunks(CHUNK_SIZE) {
@@ -196,21 +202,13 @@ impl VadEngine for SileroVad {
             }
         }
 
-        let status = if max_prob > threshold {
-            VadStatus::Speech
-        } else {
-            VadStatus::Silence
-        };
-
-        Ok(status == VadStatus::Speech)
+        Ok(max_prob > threshold)
     }
 
     fn audio_type(&mut self, audio_chunk: &[f32]) -> anyhow::Result<VadStatus> {
-        // Silero VAD v5 requires fixed 512 samples for 16kHz (~32ms).
-        // Process all 512-sample windows in the chunk instead of truncating.
         const CHUNK_SIZE: usize = 512;
 
-        let threshold = SPEECH_THRESHOLD;
+        let threshold = self.effective_speech_threshold();
         let mut max_prob: f32 = 0.0;
         let mut last_status = VadStatus::Unknown;
 
@@ -239,4 +237,7 @@ impl VadEngine for SileroVad {
         }
     }
 
+    fn set_speech_threshold(&mut self, threshold: Option<f32>) {
+        self.speech_threshold_override = threshold;
+    }
 }

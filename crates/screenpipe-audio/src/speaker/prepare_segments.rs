@@ -20,11 +20,22 @@ pub async fn prepare_segments(
     embedding_manager: Arc<StdMutex<EmbeddingManager>>,
     embedding_extractor: Arc<StdMutex<EmbeddingExtractor>>,
     device: &str,
+    is_output_device: bool,
 ) -> Result<(tokio::sync::mpsc::Receiver<SpeechSegment>, bool, f32)> {
     let audio_data = normalize_v2(audio_data);
 
     let frame_size = 1600;
     let vad_engine = vad_engine.clone();
+
+    // Use a lower speech threshold for output/system audio devices.
+    // System audio (YouTube, Zoom speaker output) often has background music
+    // mixed with speech, reducing Silero's confidence below the default 0.5.
+    if is_output_device {
+        vad_engine
+            .lock()
+            .await
+            .set_speech_threshold(Some(crate::vad::OUTPUT_SPEECH_THRESHOLD));
+    }
 
     let mut noise = 0.;
     let mut audio_frames = Vec::new();
@@ -49,6 +60,11 @@ pub async fn prepare_segments(
             _ => {}
         }
         audio_frames.extend(new_chunk);
+    }
+
+    // Reset threshold to default after processing
+    if is_output_device {
+        vad_engine.lock().await.set_speech_threshold(None);
     }
 
     let speech_ratio = speech_frame_count as f32 / total_frames as f32;

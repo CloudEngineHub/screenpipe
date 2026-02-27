@@ -142,6 +142,8 @@ pub async fn process_audio_input(
         capture_timestamp: audio.capture_timestamp,
     };
 
+    let is_output_device =
+        audio.device.device_type == crate::core::device::DeviceType::Output;
     let (mut segments, speech_ratio_ok, speech_ratio) = prepare_segments(
         &audio_data,
         vad_engine,
@@ -149,6 +151,7 @@ pub async fn process_audio_input(
         embedding_manager,
         embedding_extractor,
         &audio.device.to_string(),
+        is_output_device,
     )
     .await?;
 
