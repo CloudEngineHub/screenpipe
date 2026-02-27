@@ -12,9 +12,11 @@ pub fn download_whisper_model(engine: Arc<AudioTranscriptionEngine>) -> Result<P
         AudioTranscriptionEngine::WhisperTinyQuantized => "ggml-tiny-q8_0.bin",
         AudioTranscriptionEngine::WhisperLargeV3 => "ggml-large-v3.bin",
         AudioTranscriptionEngine::WhisperLargeV3Quantized => "ggml-large-v3-q5_0.bin",
-        // Disabled still needs a model loaded to satisfy WhisperState type requirement.
-        // Use the smallest model (tiny quantized, ~40MB) — it's never used for inference.
-        AudioTranscriptionEngine::Disabled => "ggml-tiny-q8_0.bin",
+        // Disabled / Qwen3Asr still need a model loaded to satisfy WhisperState type
+        // requirement. Use the smallest model (tiny quantized, ~40MB) — never used for inference.
+        AudioTranscriptionEngine::Disabled | AudioTranscriptionEngine::Qwen3Asr => {
+            "ggml-tiny-q8_0.bin"
+        }
         _ => "ggml-large-v3-turbo-q8_0.bin",
     };
 
