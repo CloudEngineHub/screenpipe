@@ -54,64 +54,72 @@ fn should_skip_role(role: u32) -> bool {
 }
 
 /// Roles that carry user-visible text in their name, description, or Text interface.
+/// Values from: https://docs.rs/atspi/latest/atspi/enum.Role.html
 fn should_extract_text(role: u32) -> bool {
     matches!(
         role,
         29  // ROLE_LABEL
-        | 60 // ROLE_TEXT
+        | 61 // ROLE_TEXT
         | 73 // ROLE_PARAGRAPH
         | 81 // ROLE_HEADING
         | 101 // ROLE_LINK
-        | 34  // ROLE_LIST_ITEM
-        | 37  // ROLE_MENU_ITEM
-        | 62  // ROLE_PAGE_TAB
-        | 58  // ROLE_TABLE_CELL
-        | 82  // ROLE_ENTRY
+        | 32  // ROLE_LIST_ITEM
+        | 35  // ROLE_MENU_ITEM
+        | 58  // ROLE_PAGE_TAB
+        | 56  // ROLE_TABLE_CELL
+        | 79  // ROLE_ENTRY
         | 11  // ROLE_COMBO_BOX
-        | 42  // ROLE_PUSH_BUTTON
+        | 43  // ROLE_PUSH_BUTTON
         | 64  // ROLE_TOGGLE_BUTTON
-        | 43  // ROLE_RADIO_BUTTON
+        | 44  // ROLE_RADIO_BUTTON
         | 7   // ROLE_CHECK_BOX
         | 83  // ROLE_STATIC
-        | 54  // ROLE_STATUS_BAR
+        | 60  // ROLE_STATUS_BAR
         | 104 // ROLE_DOCUMENT_WEB
         | 18  // ROLE_DOCUMENT_TEXT
         | 17  // ROLE_DOCUMENT_FRAME
         | 25  // ROLE_HEADER
-        | 69  // ROLE_FOOTER
+        | 69  // ROLE_WINDOW (for tooltips/popups)
         | 9   // ROLE_COLUMN_HEADER
+        | 49  // ROLE_TERMINAL (VTE terminal widget)
     )
 }
 
 /// Map AT-SPI2 role ID to a human-readable name for the TreeNode.
+/// Values from: https://docs.rs/atspi/latest/atspi/enum.Role.html
 fn role_name(role: u32) -> &'static str {
     match role {
-        22 => "Frame",
-        68 => "Window",
+        23 => "Frame",
+        69 => "Window",
         16 => "Dialog",
         75 => "Application",
-        42 => "Button",
+        43 => "Button",
         64 => "ToggleButton",
-        43 => "RadioButton",
+        44 => "RadioButton",
         7 => "CheckBox",
         29 => "Label",
-        60 => "Text",
+        61 => "Text",
         73 => "Paragraph",
         81 => "Heading",
         101 => "Link",
-        34 => "ListItem",
-        37 => "MenuItem",
-        62 => "Tab",
-        58 => "TableCell",
-        82 => "Entry",
+        32 => "ListItem",
+        35 => "MenuItem",
+        58 => "Tab",
+        56 => "TableCell",
+        79 => "Entry",
         11 => "ComboBox",
         83 => "Static",
         84 => "Section",
-        54 => "StatusBar",
+        60 => "StatusBar",
         104 => "DocumentWeb",
         18 => "DocumentText",
         25 => "Header",
         46 => "Panel",
+        51 => "Slider",
+        52 => "SpinButton",
+        49 => "Terminal",
+        55 => "Table",
+        63 => "ToolBar",
         _ => "Other",
     }
 }
@@ -149,6 +157,13 @@ const EXCLUDED_APPS: &[&str] = &[
     "screenpipe",
     "nm-connection-editor",
     "polkit",
+    // Window managers — no user content
+    "xfwm4",
+    "mutter",
+    "kwin",
+    "marco",
+    "openbox",
+    "compiz",
 ];
 
 const SENSITIVE_TITLES: &[&str] = &["password", "private", "incognito", "secret"];
@@ -359,8 +374,8 @@ fn find_url_in_children(
     }
     for child in children {
         let role = get_accessible_role(conn, child).unwrap_or(0);
-        // Entry (82) or ComboBox (11) — might contain URL
-        if role == 82 || role == 11 {
+        // Entry (79) or ComboBox (11) — might contain URL
+        if role == 79 || role == 11 {
             if let Some(text) = get_text_content(conn, child) {
                 if looks_like_url(&text) {
                     return Some(text);
@@ -473,7 +488,7 @@ fn walk_accessible(conn: &Connection, aref: &AccessibleRef, depth: usize, state:
     // Extract text from text-bearing elements
     if should_extract_text(role) {
         extract_text(conn, aref, role, depth, state);
-    } else if role == 46 /* Panel */ || role == 84 /* Section */ || role == 22 /* Frame */ {
+    } else if role == 46 /* Panel */ || role == 84 /* Section */ || role == 23 /* Frame */ {
         // Containers: only extract if they have a direct text value
         let name = get_accessible_name(conn, aref);
         if !name.is_empty() && name.len() < 200 {
@@ -510,7 +525,7 @@ fn extract_text(
     let role_str = role_name(role);
 
     // For editable text (Entry, Text, ComboBox), prefer Text interface content
-    if matches!(role, 82 | 60 | 11) {
+    if matches!(role, 79 | 61 | 11) {
         if let Some(text) = get_text_content(conn, aref) {
             append_text(&mut state.text_buffer, &text);
             state.nodes.push(AccessibilityTreeNode {
@@ -687,8 +702,8 @@ fn find_focused_window(
         let windows = get_accessible_children(conn, app_ref);
         for win_ref in &windows {
             let role = get_accessible_role(conn, win_ref).unwrap_or(0);
-            // Only consider Frame (22), Window (68), Dialog (16)
-            if !matches!(role, 22 | 68 | 16) {
+            // Only consider Frame (23), Window (69), Dialog (16)
+            if !matches!(role, 23 | 69 | 16) {
                 continue;
             }
 
