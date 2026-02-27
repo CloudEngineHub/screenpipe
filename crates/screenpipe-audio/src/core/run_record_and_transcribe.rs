@@ -29,10 +29,11 @@ use super::AudioStream;
 const AUDIO_RECEIVE_TIMEOUT_SECS: u64 = 30;
 
 /// Batch mode: flush every this many seconds.
-/// 30s matches realtime mode and is plenty of context for whisper-large-v3-turbo.
-/// Previously tried silence-gap detection (3s quiet → flush) but RMS thresholds
+/// Longer segments give VAD more context for natural speech boundaries,
+/// producing cleaner sentence-level segments for whisper → better quality.
+/// Previously tried silence-gap detection but RMS thresholds
 /// are device-dependent and fail across different mics/gain settings.
-const BATCH_FLUSH_SECS: usize = 30;
+const BATCH_FLUSH_SECS: usize = 120;
 
 pub async fn run_record_and_transcribe(
     audio_stream: Arc<AudioStream>,
@@ -87,6 +88,18 @@ pub async fn run_record_and_transcribe(
                 )
                 .await?;
             }
+
+            // Flush remaining audio on exit
+            flush_audio(
+                &mut collected_audio,
+                0,
+                &audio_stream,
+                &whisper_sender,
+                &device_name,
+                &metrics,
+            )
+            .await
+            .ok();
         }
         TranscriptionMode::Batch => {
             info!(
@@ -123,6 +136,18 @@ pub async fn run_record_and_transcribe(
                 )
                 .await?;
             }
+
+            // Flush remaining audio on exit
+            flush_audio(
+                &mut collected_audio,
+                0,
+                &audio_stream,
+                &whisper_sender,
+                &device_name,
+                &metrics,
+            )
+            .await
+            .ok();
         }
     }
 

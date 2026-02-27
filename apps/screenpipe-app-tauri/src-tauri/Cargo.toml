@@ -1,6 +1,6 @@
 [package]
 name = "screenpipe-app"
-version = "2.0.594"
+version = "2.0.595"
 description = "24/7 memory for your desktop. 100% local."
 authors = ["you"]
 license = ""
