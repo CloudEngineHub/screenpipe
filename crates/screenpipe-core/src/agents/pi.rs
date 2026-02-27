@@ -794,14 +794,40 @@ pub fn find_pi_executable() -> Option<String> {
 /// Build an async command for launching pi.
 ///
 /// Pi's shebang is `#!/usr/bin/env node`, but screenpipe only bundles bun
-/// (not node). On Unix we run `bun <pi_path>` so the script executes under
-/// bun's Node-compatible runtime regardless of whether node is installed.
-/// On Windows, .cmd files need `cmd.exe /C` and bun injected into PATH
-/// because the .cmd shim created by `bun add -g` needs to find bun.exe.
+/// (not node). On both platforms we resolve the actual JS entry point and
+/// run it with bun so the script executes under bun's Node-compatible
+/// runtime regardless of whether node is installed.
+///
+/// On Windows, `cmd.exe /C` mangles arguments that contain newlines and
+/// shell metacharacters (`|`, `&`, `>`, `<`, `^`), which breaks multi-line
+/// prompts passed via `-p`. To avoid this we resolve the JS entry point
+/// from the `.cmd` shim and run it directly — no cmd.exe involved.
 fn build_async_command(path: &str) -> tokio::process::Command {
     #[cfg(windows)]
     {
-        let mut cmd = if path.ends_with(".cmd") || path.ends_with(".bat") {
+        // Try to resolve the JS entry point from .cmd shim to avoid cmd.exe.
+        let js_entry = if path.ends_with(".cmd") || path.ends_with(".bat") {
+            resolve_cmd_js_entry(path)
+        } else {
+            None
+        };
+
+        let mut cmd = if let Some(ref js_path) = js_entry {
+            // Run JS entry point directly with bun (preferred) or node.
+            if let Some(bun) = find_bun_executable() {
+                let mut c = tokio::process::Command::new(&bun);
+                c.arg(js_path);
+                debug!("bypassing cmd.exe, running pi via bun: {} {}", bun, js_path);
+                c
+            } else {
+                let mut c = tokio::process::Command::new("node");
+                c.arg(js_path);
+                debug!("bypassing cmd.exe, running pi via node: {}", js_path);
+                c
+            }
+        } else if path.ends_with(".cmd") || path.ends_with(".bat") {
+            // Fallback: use cmd.exe /C (may mangle multi-line args)
+            warn!("could not resolve JS entry from {}, falling back to cmd.exe /C", path);
             let mut c = tokio::process::Command::new("cmd.exe");
             c.args(["/C", path]);
             c
@@ -809,9 +835,7 @@ fn build_async_command(path: &str) -> tokio::process::Command {
             tokio::process::Command::new(path)
         };
 
-        // Inject bundled bun directory into PATH so the .cmd shim can find bun.exe.
-        // Without this, fresh Windows installs where bun is only bundled (not in
-        // system PATH) fail with "bun is not installed in %PATH%".
+        // Inject bundled bun directory into PATH so node_modules resolve correctly.
         if let Some(bun_path) = find_bun_executable() {
             if let Some(bun_dir) = std::path::Path::new(&bun_path).parent() {
                 let current_path = std::env::var("PATH").unwrap_or_default();
@@ -834,6 +858,38 @@ fn build_async_command(path: &str) -> tokio::process::Command {
             tokio::process::Command::new(path)
         }
     }
+}
+
+/// Resolve the JS entry point from a Windows `.cmd` shim.
+///
+/// npm/bun global `.cmd` shims contain a line referencing the JS entry point,
+/// e.g. `"%_prog%"  "%dp0%\node_modules\@pkg\dist\cli.js" %*`.
+/// We extract the `node_modules\...\*.js` path and resolve it relative to
+/// the `.cmd` file's directory.
+#[cfg(windows)]
+fn resolve_cmd_js_entry(cmd_path: &str) -> Option<String> {
+    let content = std::fs::read_to_string(cmd_path).ok()?;
+    let cmd_dir = std::path::Path::new(cmd_path).parent()?;
+
+    for line in content.lines() {
+        // Look for node_modules references pointing to .js files
+        if let Some(nm_idx) = line.find("node_modules") {
+            let rest = &line[nm_idx..];
+            if let Some(js_end) = rest.find(".js") {
+                let js_rel = &rest[..js_end + 3];
+                // Normalise separators
+                let js_rel = js_rel.replace('/', "\\");
+                let full_path = cmd_dir.join(&js_rel);
+                if full_path.exists() {
+                    let resolved = full_path.to_string_lossy().to_string();
+                    debug!("resolved .cmd JS entry: {} -> {}", cmd_path, resolved);
+                    return Some(resolved);
+                }
+            }
+        }
+    }
+
+    None
 }
 
 /// Kill a process group (SIGTERM → 5s → SIGKILL).
