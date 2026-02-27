@@ -914,8 +914,8 @@ Your screen is a pipe. Everything you see, hear, and type flows through it. Scre
           </CardContent>
         </Card>
 
-        {/* Your Name + Train Voice */}
-        {!settings.disableAudio && (
+        {/* Your Name + Train Voice — hidden when transcription is disabled */}
+        {!settings.disableAudio && settings.audioTranscriptionEngine !== "disabled" && (
         <Card className="border-border bg-card">
           <CardContent className="px-3 py-2.5">
             <div className="flex items-center justify-between">
