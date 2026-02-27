@@ -55,6 +55,8 @@ windows = { version = "0.58", features = [
 zbus = { version = "5", default-features = false, features = ["blocking"] }
 # Input device events from /dev/input/event*
 evdev = "0.13"
+# fcntl for non-blocking I/O on evdev fds
+libc = "0.2"
 
 [dev-dependencies]
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
