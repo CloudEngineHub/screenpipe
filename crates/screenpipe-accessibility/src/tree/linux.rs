@@ -293,9 +293,9 @@ fn get_accessible_children(conn: &Connection, aref: &AccessibleRef) -> Vec<Acces
             &(i,),
         ) {
             // Return type is (so) — bus name + object path
-            if let Ok((bus_name, path)): Result<(String, zbus::zvariant::OwnedObjectPath), _> =
-                reply.body().deserialize()
-            {
+            let deserialized: Result<(String, zbus::zvariant::OwnedObjectPath), _> =
+                reply.body().deserialize();
+            if let Ok((bus_name, path)) = deserialized {
                 children.push(AccessibleRef {
                     bus_name,
                     path: path.to_string(),
