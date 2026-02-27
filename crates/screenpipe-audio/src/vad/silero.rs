@@ -182,58 +182,41 @@ impl SileroVad {
 
 impl VadEngine for SileroVad {
     fn is_voice_segment(&mut self, audio_chunk: &[f32]) -> anyhow::Result<bool> {
-        // Silero VAD v5 requires fixed 512 samples for 16kHz (~32ms).
-        // Process all windows but only update history once per frame (with max prob)
-        // to preserve FRAME_HISTORY as a history across frames, not within a frame.
+        // Silero VAD v5 requires fixed 512 samples for 16kHz (~32ms)
         const CHUNK_SIZE: usize = 512;
 
         let threshold = self.effective_speech_threshold();
-        let mut max_prob: f32 = 0.0;
 
-        for window in audio_chunk.chunks(CHUNK_SIZE) {
-            let mut chunk_data = window.to_vec();
-            chunk_data.resize(CHUNK_SIZE, 0.0);
+        let mut chunk_data: Vec<f32> = audio_chunk.to_vec();
+        chunk_data.resize(CHUNK_SIZE, 0.0);
 
-            let result = self.vad.compute(&chunk_data).map_err(|e| {
-                debug!("SileroVad Error computing VAD: {}", e);
-                anyhow::anyhow!("Vad compute error: {}", e)
-            })?;
+        let result = self.vad.compute(&chunk_data).map_err(|e| {
+            debug!("SileroVad Error computing VAD: {}", e);
+            anyhow::anyhow!("Vad compute error: {}", e)
+        })?;
 
-            if result.prob > max_prob {
-                max_prob = result.prob;
-            }
-        }
+        let status = self.update_status(result.prob);
 
-        self.update_status(max_prob);
-        Ok(max_prob > threshold)
+        Ok(status == VadStatus::Speech && result.prob > threshold)
     }
 
     fn audio_type(&mut self, audio_chunk: &[f32]) -> anyhow::Result<VadStatus> {
-        // Silero VAD v5 requires fixed 512 samples for 16kHz (~32ms).
-        // Process all windows but only update history once per frame (with max prob)
-        // to preserve FRAME_HISTORY as a history across frames, not within a frame.
+        // Silero VAD v5 requires fixed 512 samples for 16kHz (~32ms)
         const CHUNK_SIZE: usize = 512;
 
         let threshold = self.effective_speech_threshold();
-        let mut max_prob: f32 = 0.0;
 
-        for window in audio_chunk.chunks(CHUNK_SIZE) {
-            let mut chunk_data = window.to_vec();
-            chunk_data.resize(CHUNK_SIZE, 0.0);
+        let mut chunk_data: Vec<f32> = audio_chunk.to_vec();
+        chunk_data.resize(CHUNK_SIZE, 0.0);
 
-            let result = self.vad.compute(&chunk_data).map_err(|e| {
-                debug!("SileroVad Error computing VAD: {}", e);
-                anyhow::anyhow!("Vad compute error: {}", e)
-            })?;
+        let result = self.vad.compute(&chunk_data).map_err(|e| {
+            debug!("SileroVad Error computing VAD: {}", e);
+            anyhow::anyhow!("Vad compute error: {}", e)
+        })?;
 
-            if result.prob > max_prob {
-                max_prob = result.prob;
-            }
-        }
+        let status = self.update_status(result.prob);
 
-        let status = self.update_status(max_prob);
-
-        if max_prob > threshold {
+        if status == VadStatus::Speech && result.prob > threshold {
             return Ok(VadStatus::Speech);
         }
 

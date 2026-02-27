@@ -40,7 +40,7 @@ use crate::{
         stt::{process_audio_input, SAMPLE_RATE},
         whisper::model::{create_whisper_context_parameters, download_whisper_model},
     },
-    utils::{audio::{normalize_v2, resample}, ffmpeg::{get_new_file_path, write_audio_to_file}},
+    utils::{audio::resample, ffmpeg::{get_new_file_path, write_audio_to_file}},
     vad::{silero::SileroVad, webrtc::WebRtcVad, VadEngine, VadEngineEnum},
     AudioInput, TranscriptionResult,
 };
@@ -493,15 +493,13 @@ impl AudioManager {
             while let Ok(audio) = whisper_receiver.recv() {
                 info!("Received audio from device: {:?}", audio.device.name);
 
-                // Audio-based call detection: normalize first so the threshold works
-                // consistently across devices with different native gain levels
+                // Audio-based call detection: update meeting detector with speech activity
                 if let Some(ref meeting) = meeting_detector {
-                    let normalized = normalize_v2(&audio.data);
                     let rms = {
-                        let sum_sq: f32 = normalized.iter().map(|&x| x * x).sum();
-                        (sum_sq / normalized.len() as f32).sqrt()
+                        let sum_sq: f32 = audio.data.iter().map(|&x| x * x).sum();
+                        (sum_sq / audio.data.len() as f32).sqrt()
                     };
-                    meeting.on_audio_activity(&audio.device.device_type, rms > 0.08);
+                    meeting.on_audio_activity(&audio.device.device_type, rms > 0.05);
                 }
 
                 // ALWAYS persist audio to disk immediately, before any deferral.
