@@ -237,6 +237,7 @@ pub async fn retranscribe_handler(
         let is_input = chunk.is_input_device.unwrap_or(false);
         let engine_name = engine.to_string();
         let timestamp = chunk.timestamp;
+        let duration_secs = samples.len() as f64 / sample_rate as f64;
         if let Err(e) = state
             .db
             .replace_audio_transcription(
@@ -246,6 +247,7 @@ pub async fn retranscribe_handler(
                 device_name,
                 is_input,
                 timestamp,
+                Some(duration_secs),
             )
             .await
         {

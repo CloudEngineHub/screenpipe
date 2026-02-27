@@ -122,6 +122,7 @@ pub async fn reconcile_untranscribed(
 
         // Write transcription to DB
         let engine_name = engine.to_string();
+        let duration_secs = samples.len() as f64 / sample_rate as f64;
         if let Err(e) = db
             .replace_audio_transcription(
                 chunk.id,
@@ -130,6 +131,7 @@ pub async fn reconcile_untranscribed(
                 "unknown",
                 false,
                 chunk.timestamp,
+                Some(duration_secs),
             )
             .await
         {

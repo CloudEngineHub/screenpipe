@@ -767,8 +767,11 @@ impl DatabaseManager {
         device: &str,
         is_input_device: bool,
         timestamp: DateTime<Utc>,
+        duration_secs: Option<f64>,
     ) -> Result<(), sqlx::Error> {
         let text_length = transcription.len() as i64;
+        let start_time: f64 = 0.0;
+        let end_time: f64 = duration_secs.unwrap_or(0.0);
         let mut tx = self.begin_immediate_with_retry().await?;
 
         sqlx::query("DELETE FROM audio_transcriptions WHERE audio_chunk_id = ?1")
@@ -777,8 +780,8 @@ impl DatabaseManager {
             .await?;
 
         sqlx::query(
-            "INSERT INTO audio_transcriptions (audio_chunk_id, transcription, text_length, offset_index, timestamp, transcription_engine, device, is_input_device)
-             VALUES (?1, ?2, ?3, 0, ?4, ?5, ?6, ?7)",
+            "INSERT INTO audio_transcriptions (audio_chunk_id, transcription, text_length, offset_index, timestamp, transcription_engine, device, is_input_device, start_time, end_time)
+             VALUES (?1, ?2, ?3, 0, ?4, ?5, ?6, ?7, ?8, ?9)",
         )
         .bind(audio_chunk_id)
         .bind(transcription)
@@ -787,6 +790,8 @@ impl DatabaseManager {
         .bind(engine)
         .bind(device)
         .bind(is_input_device)
+        .bind(start_time)
+        .bind(end_time)
         .execute(&mut **tx.conn())
         .await?;
 
