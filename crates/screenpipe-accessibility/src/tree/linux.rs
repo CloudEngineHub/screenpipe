@@ -36,20 +36,14 @@ use zbus::zvariant::{ObjectPath, OwnedValue};
 fn should_skip_role(role: u32) -> bool {
     matches!(
         role,
-        47  // ROLE_SCROLL_BAR
-        | 26 // ROLE_IMAGE
-        | 49 // ROLE_SEPARATOR
-        | 41 // ROLE_PROGRESS_BAR
-        | 65 // ROLE_TOOL_TIP
-        | 36 // ROLE_MENU_BAR
-        | 21 // ROLE_FILLER
-        | 80 // ROLE_REDUNDANT_OBJECT
-        | 48 // ROLE_SCROLL_PANE (often just a container)
-        | 72 // ROLE_ANIMATION
-        | 27 // ROLE_ICON
-        | 35 // ROLE_MENU (menus are transient)
-        | 55 // ROLE_TABLE_ROW_HEADER (header, not content)
-        | 56 // ROLE_TABLE_COLUMN_HEADER
+        48  // ROLE_SCROLL_BAR
+        | 27 // ROLE_IMAGE
+        | 50 // ROLE_SEPARATOR
+        | 42 // ROLE_PROGRESS_BAR
+        | 64 // ROLE_TOOL_TIP
+        | 86 // ROLE_REDUNDANT_OBJECT
+        | 3  // ROLE_ANIMATION
+        | 26 // ROLE_ICON
     )
 }
 
@@ -61,27 +55,26 @@ fn should_extract_text(role: u32) -> bool {
         29  // ROLE_LABEL
         | 61 // ROLE_TEXT
         | 73 // ROLE_PARAGRAPH
-        | 81 // ROLE_HEADING
-        | 101 // ROLE_LINK
+        | 83 // ROLE_HEADING
+        | 88 // ROLE_LINK
         | 32  // ROLE_LIST_ITEM
         | 35  // ROLE_MENU_ITEM
-        | 58  // ROLE_PAGE_TAB
+        | 37  // ROLE_PAGE_TAB
         | 56  // ROLE_TABLE_CELL
         | 79  // ROLE_ENTRY
         | 11  // ROLE_COMBO_BOX
         | 43  // ROLE_PUSH_BUTTON
-        | 64  // ROLE_TOGGLE_BUTTON
+        | 62  // ROLE_TOGGLE_BUTTON
         | 44  // ROLE_RADIO_BUTTON
         | 7   // ROLE_CHECK_BOX
-        | 83  // ROLE_STATIC
-        | 60  // ROLE_STATUS_BAR
-        | 104 // ROLE_DOCUMENT_WEB
-        | 18  // ROLE_DOCUMENT_TEXT
-        | 17  // ROLE_DOCUMENT_FRAME
-        | 25  // ROLE_HEADER
-        | 69  // ROLE_WINDOW (for tooltips/popups)
-        | 9   // ROLE_COLUMN_HEADER
-        | 49  // ROLE_TERMINAL (VTE terminal widget)
+        | 116 // ROLE_STATIC
+        | 54  // ROLE_STATUS_BAR
+        | 95  // ROLE_DOCUMENT_WEB
+        | 94  // ROLE_DOCUMENT_TEXT
+        | 82  // ROLE_DOCUMENT_FRAME
+        | 71  // ROLE_HEADER
+        | 10  // ROLE_COLUMN_HEADER
+        | 60  // ROLE_TERMINAL (VTE terminal widget)
     )
 }
 
@@ -94,32 +87,33 @@ fn role_name(role: u32) -> &'static str {
         16 => "Dialog",
         75 => "Application",
         43 => "Button",
-        64 => "ToggleButton",
+        62 => "ToggleButton",
         44 => "RadioButton",
         7 => "CheckBox",
         29 => "Label",
         61 => "Text",
         73 => "Paragraph",
-        81 => "Heading",
-        101 => "Link",
+        83 => "Heading",
+        88 => "Link",
         32 => "ListItem",
         35 => "MenuItem",
-        58 => "Tab",
+        37 => "Tab",
         56 => "TableCell",
         79 => "Entry",
         11 => "ComboBox",
-        83 => "Static",
-        84 => "Section",
-        60 => "StatusBar",
-        104 => "DocumentWeb",
-        18 => "DocumentText",
-        25 => "Header",
-        46 => "Panel",
+        116 => "Static",
+        85 => "Section",
+        54 => "StatusBar",
+        95 => "DocumentWeb",
+        94 => "DocumentText",
+        71 => "Header",
+        39 => "Panel",
         51 => "Slider",
         52 => "SpinButton",
-        49 => "Terminal",
+        60 => "Terminal",
         55 => "Table",
         63 => "ToolBar",
+        40 => "PasswordText",
         _ => "Other",
     }
 }
@@ -488,7 +482,7 @@ fn walk_accessible(conn: &Connection, aref: &AccessibleRef, depth: usize, state:
     // Extract text from text-bearing elements
     if should_extract_text(role) {
         extract_text(conn, aref, role, depth, state);
-    } else if role == 46 /* Panel */ || role == 84 /* Section */ || role == 23 /* Frame */ {
+    } else if role == 39 /* Panel */ || role == 85 /* Section */ || role == 23 /* Frame */ {
         // Containers: only extract if they have a direct text value
         let name = get_accessible_name(conn, aref);
         if !name.is_empty() && name.len() < 200 {
@@ -539,7 +533,7 @@ fn extract_text(
     }
 
     // For static text (Label, Paragraph, Static), also try Text interface first
-    if matches!(role, 29 | 73 | 83) {
+    if matches!(role, 29 | 73 | 116) {
         if let Some(text) = get_text_content(conn, aref) {
             append_text(&mut state.text_buffer, &text);
             state.nodes.push(AccessibilityTreeNode {
@@ -883,27 +877,30 @@ mod tests {
 
     #[test]
     fn test_should_skip_role() {
-        assert!(should_skip_role(47)); // SCROLL_BAR
-        assert!(should_skip_role(26)); // IMAGE
-        assert!(should_skip_role(49)); // SEPARATOR
-        assert!(!should_skip_role(42)); // PUSH_BUTTON
+        assert!(should_skip_role(48)); // SCROLL_BAR
+        assert!(should_skip_role(27)); // IMAGE
+        assert!(should_skip_role(50)); // SEPARATOR
+        assert!(should_skip_role(26)); // ICON
+        assert!(!should_skip_role(43)); // PUSH_BUTTON
         assert!(!should_skip_role(29)); // LABEL
+        assert!(!should_skip_role(20)); // FILLER (container, must traverse)
+        assert!(!should_skip_role(34)); // MENU_BAR (container, must traverse)
     }
 
     #[test]
     fn test_should_extract_text() {
         assert!(should_extract_text(29)); // LABEL
-        assert!(should_extract_text(60)); // TEXT
-        assert!(should_extract_text(82)); // ENTRY
-        assert!(should_extract_text(42)); // PUSH_BUTTON
-        assert!(!should_extract_text(22)); // FRAME
+        assert!(should_extract_text(61)); // TEXT
+        assert!(should_extract_text(79)); // ENTRY
+        assert!(should_extract_text(43)); // PUSH_BUTTON
+        assert!(!should_extract_text(23)); // FRAME
         assert!(!should_extract_text(75)); // APPLICATION
     }
 
     #[test]
     fn test_role_name() {
-        assert_eq!(role_name(42), "Button");
-        assert_eq!(role_name(82), "Entry");
+        assert_eq!(role_name(43), "Button");
+        assert_eq!(role_name(79), "Entry");
         assert_eq!(role_name(29), "Label");
         assert_eq!(role_name(999), "Other");
     }

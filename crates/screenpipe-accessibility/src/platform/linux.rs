@@ -167,10 +167,11 @@ impl UiRecorder {
         activity_feed: Option<ActivityFeed>,
     ) -> Result<(RecordingHandle, Option<ActivityFeed>)> {
         let perms = self.check_permissions();
-        if !perms.input_monitoring {
+        if !perms.accessibility && !perms.input_monitoring {
             anyhow::bail!(
-                "Missing input monitoring permission. \
-                 Add user to 'input' group: sudo usermod -aG input $USER"
+                "No permissions available. Need either:\n\
+                 - AT-SPI2 (accessibility): install at-spi2-core\n\
+                 - evdev (input monitoring): sudo usermod -aG input $USER"
             );
         }
 
@@ -183,18 +184,25 @@ impl UiRecorder {
         let current_app = Arc::new(Mutex::new(None::<String>));
         let current_window = Arc::new(Mutex::new(None::<String>));
 
-        // Thread 1: evdev input monitoring
-        let tx1 = tx.clone();
-        let stop1 = stop.clone();
-        let config1 = self.config.clone();
-        let app1 = current_app.clone();
-        let window1 = current_window.clone();
-        let feed1 = activity_feed.clone();
-        threads.push(thread::spawn(move || {
-            run_evdev_monitor(tx1, stop1, start_time, config1, app1, window1, feed1);
-        }));
+        // Thread 1: evdev input monitoring (optional — gracefully degrade without it)
+        if perms.input_monitoring {
+            let tx1 = tx.clone();
+            let stop1 = stop.clone();
+            let config1 = self.config.clone();
+            let app1 = current_app.clone();
+            let window1 = current_window.clone();
+            let feed1 = activity_feed.clone();
+            threads.push(thread::spawn(move || {
+                run_evdev_monitor(tx1, stop1, start_time, config1, app1, window1, feed1);
+            }));
+        } else {
+            warn!(
+                "evdev not available (/dev/input not readable). \
+                 Keyboard/mouse capture disabled. Window tracking and clipboard still active."
+            );
+        }
 
-        // Thread 2: App/window observer
+        // Thread 2: App/window observer (always runs — uses xdotool, no evdev needed)
         let tx2 = tx.clone();
         let stop2 = stop.clone();
         let config2 = self.config.clone();
