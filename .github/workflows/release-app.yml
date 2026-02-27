@@ -803,13 +803,17 @@ jobs:
           # Explicitly set trust for root CA and intermediate CAs.
           # This is critical on self-hosted runners (e.g. Mac Mini) where
           # SystemRootCertificates.keychain may not be accessible to codesign.
+          # IMPORTANT: Use timeout because `security add-trusted-cert` hangs
+          # indefinitely on GH-hosted runners (no SecurityAgent/GUI session).
+          # On GH-hosted runners this will timeout and that's fine — they have
+          # Apple Root CA in SystemRootCertificates.keychain already.
           echo "=== Setting trust policies ==="
-          security add-trusted-cert -r trustRoot -p codeSign -k "$BUILD_KC" \
-            ~/apple-certs/AppleRootCA.cer 2>&1 || echo "  (trust AppleRootCA: already set)"
-          security add-trusted-cert -r unspecified -p codeSign -k "$BUILD_KC" \
-            ~/apple-certs/DeveloperIDCA.cer 2>&1 || echo "  (trust DeveloperIDCA: already set)"
-          security add-trusted-cert -r unspecified -p codeSign -k "$BUILD_KC" \
-            ~/apple-certs/DeveloperIDG2CA.cer 2>&1 || echo "  (trust DeveloperIDG2CA: already set)"
+          timeout 10 security add-trusted-cert -r trustRoot -p codeSign -k "$BUILD_KC" \
+            ~/apple-certs/AppleRootCA.cer 2>&1 || echo "  (trust AppleRootCA: skipped or already set)"
+          timeout 10 security add-trusted-cert -r unspecified -p codeSign -k "$BUILD_KC" \
+            ~/apple-certs/DeveloperIDCA.cer 2>&1 || echo "  (trust DeveloperIDCA: skipped or already set)"
+          timeout 10 security add-trusted-cert -r unspecified -p codeSign -k "$BUILD_KC" \
+            ~/apple-certs/DeveloperIDG2CA.cer 2>&1 || echo "  (trust DeveloperIDG2CA: skipped or already set)"
 
           # Ensure login keychain + System Roots are in the search list
           security list-keychains -d user -s "$BUILD_KC" \
