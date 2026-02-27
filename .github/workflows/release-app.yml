@@ -969,29 +969,38 @@ jobs:
           AWS_DEFAULT_REGION: auto
           R2_ENDPOINT: https://${{ secrets.CLOUDFLARE_ACCOUNT_ID }}.r2.cloudflarestorage.com
         run: |
-          # Upload helper with retry and large multipart threshold to avoid
-          # R2 TLS failures (SSLV3_ALERT_BAD_RECORD_MAC) on self-hosted runners.
-          # Setting multipart_threshold to 500MB forces single-part upload for
-          # tar.gz (~200MB) and DMG files, avoiding the flaky multipart path.
-          export AWS_CONFIG_FILE=$(mktemp)
-          cat > "$AWS_CONFIG_FILE" <<AWSCFG
-          [default]
-          s3 =
-            multipart_threshold = 500MB
-            max_concurrent_requests = 1
-          AWSCFG
-
+          # Upload helper: tries aws s3 cp first, falls back to curl with
+          # presigned URL. The MacBook self-hosted runner has persistent TLS
+          # failures (SSLV3_ALERT_BAD_RECORD_MAC) with aws cli's Python SSL,
+          # but curl uses macOS SecureTransport which works reliably.
           upload_with_retry() {
             local src="$1" dst="$2"
-            for attempt in 1 2 3 4 5; do
+            local bucket_path="${dst#s3://}"
+            local r2_key="${bucket_path#*/}"
+            local bucket="${bucket_path%%/*}"
+
+            # Try aws cli first (2 attempts)
+            for attempt in 1 2; do
               if aws s3 cp "$src" "$dst" --endpoint-url "$R2_ENDPOINT" 2>&1; then
-                echo "  ✅ $(basename "$src")"
+                echo "  ✅ $(basename "$src") (aws)"
                 return 0
               fi
-              echo "  ⚠️ attempt $attempt failed for $(basename "$src"), retrying in $((attempt * 10))s..."
+              echo "  ⚠️ aws attempt $attempt failed for $(basename "$src")"
+              sleep 5
+            done
+
+            # Fallback: presigned URL + curl (macOS SecureTransport TLS)
+            echo "  🔄 falling back to curl for $(basename "$src")..."
+            for attempt in 1 2 3; do
+              PRESIGNED=$(aws s3 presign "$dst" --endpoint-url "$R2_ENDPOINT" --expires-in 3600 2>/dev/null)
+              if [ -n "$PRESIGNED" ] && curl --retry 3 --retry-delay 5 -sf -T "$src" "$PRESIGNED" 2>&1; then
+                echo "  ✅ $(basename "$src") (curl)"
+                return 0
+              fi
+              echo "  ⚠️ curl attempt $attempt failed for $(basename "$src")"
               sleep $((attempt * 10))
             done
-            echo "  ❌ failed to upload $(basename "$src") after 5 attempts"
+            echo "  ❌ failed to upload $(basename "$src") after all attempts"
             return 1
           }
 
@@ -1146,25 +1155,27 @@ jobs:
           AWS_DEFAULT_REGION: auto
           R2_ENDPOINT: https://${{ secrets.CLOUDFLARE_ACCOUNT_ID }}.r2.cloudflarestorage.com
         run: |
-          export AWS_CONFIG_FILE=$(mktemp)
-          cat > "$AWS_CONFIG_FILE" <<AWSCFG
-          [default]
-          s3 =
-            multipart_threshold = 500MB
-            max_concurrent_requests = 1
-          AWSCFG
-
           upload_with_retry() {
             local src="$1" dst="$2"
-            for attempt in 1 2 3 4 5; do
+            for attempt in 1 2; do
               if aws s3 cp "$src" "$dst" --endpoint-url "$R2_ENDPOINT" 2>&1; then
-                echo "  ✅ $(basename "$src")"
+                echo "  ✅ $(basename "$src") (aws)"
                 return 0
               fi
-              echo "  ⚠️ attempt $attempt failed for $(basename "$src"), retrying in $((attempt * 10))s..."
+              echo "  ⚠️ aws attempt $attempt failed for $(basename "$src")"
+              sleep 5
+            done
+            echo "  🔄 falling back to curl for $(basename "$src")..."
+            for attempt in 1 2 3; do
+              PRESIGNED=$(aws s3 presign "$dst" --endpoint-url "$R2_ENDPOINT" --expires-in 3600 2>/dev/null)
+              if [ -n "$PRESIGNED" ] && curl --retry 3 --retry-delay 5 -sf -T "$src" "$PRESIGNED" 2>&1; then
+                echo "  ✅ $(basename "$src") (curl)"
+                return 0
+              fi
+              echo "  ⚠️ curl attempt $attempt failed for $(basename "$src")"
               sleep $((attempt * 10))
             done
-            echo "  ❌ failed to upload $(basename "$src") after 5 attempts"
+            echo "  ❌ failed to upload $(basename "$src") after all attempts"
             return 1
           }
           VERSION=$(grep '^version = ' apps/screenpipe-app-tauri/src-tauri/Cargo.toml | sed 's/version = "\(.*\)"/\1/')
