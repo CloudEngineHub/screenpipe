@@ -537,18 +537,18 @@ impl AudioManager {
                     None
                 };
 
-                // Batch mode: defer transcription until meeting ends.
+                // Batch mode: defer transcription during audio sessions (meetings, YouTube, etc).
                 // Audio is already persisted to disk + DB above.
-                // When meeting ends, reconciliation will transcribe all untranscribed chunks.
+                // When the session ends, reconciliation will transcribe all untranscribed chunks.
                 if is_batch_mode {
                     if let Some(ref meeting) = meeting_detector {
-                        let was_in_meeting = meeting.is_in_meeting();
+                        let was_in_session = meeting.is_in_audio_session();
                         meeting.check_grace_period().await;
-                        let now_in_meeting = meeting.is_in_meeting();
+                        let now_in_session = meeting.is_in_audio_session();
 
-                        if was_in_meeting && !now_in_meeting {
-                            // Meeting just ended — trigger immediate reconciliation
-                            info!("batch mode: meeting ended, transcribing accumulated audio");
+                        if was_in_session && !now_in_session {
+                            // Audio session just ended — trigger immediate reconciliation
+                            info!("batch mode: audio session ended, transcribing accumulated audio");
                             let count = super::reconciliation::reconcile_untranscribed(
                                 &db,
                                 &whisper_context,
@@ -558,11 +558,11 @@ impl AudioManager {
                                 &vocabulary,
                             )
                             .await;
-                            info!("batch mode: transcribed {} chunks after meeting end", count);
-                        } else if now_in_meeting {
-                            debug!("batch mode: in meeting, deferring transcription");
+                            info!("batch mode: transcribed {} chunks after session end", count);
+                        } else if now_in_session {
+                            debug!("batch mode: in audio session, deferring transcription");
                         } else {
-                            // Not in a meeting — transcribe immediately like realtime
+                            // Not in an audio session — transcribe immediately like realtime
                             if let Err(e) = process_audio_input(
                                 audio.clone(),
                                 vad_engine.clone(),
