@@ -597,9 +597,8 @@ const AISection = ({
         />
       )}
 
-      {isApiKeyRequired &&
-        (settingsPreset?.provider === "openai" ||
-          settingsPreset?.provider === "custom") && (
+      {(settingsPreset?.provider === "custom" || (isApiKeyRequired &&
+        settingsPreset?.provider === "openai")) && (
           <div className="w-full">
             <div className="flex flex-col gap-4 mb-4 w-full">
               <Label htmlFor="aiApiKey" className="flex items-center gap-1">

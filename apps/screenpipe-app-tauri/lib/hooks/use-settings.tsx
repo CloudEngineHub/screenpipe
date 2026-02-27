@@ -48,7 +48,7 @@ export type AIPreset = {
 	  }
 	| {
 			provider: "custom";
-			apiKey?: string;
+			apiKey: string;
 	  }
 	| {
 			provider: "pi";
