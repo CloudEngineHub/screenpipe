@@ -60,6 +60,10 @@ pub async fn reconcile_untranscribed(
             continue;
         }
 
+        // Extract device name and type from file path.
+        // Format: .../Device Name (output)_2026-02-27_23-15-38.mp4
+        let (device_name, is_input) = extract_device_from_path(&chunk.file_path);
+
         // Decode audio from file (blocking ffmpeg call — run off the async runtime)
         let path_owned = chunk.file_path.clone();
         let (samples, sample_rate) = match tokio::task::spawn_blocking(move || {
@@ -100,7 +104,7 @@ pub async fn reconcile_untranscribed(
         let text = match stt(
             &samples,
             sample_rate,
-            "unknown",
+            &device_name,
             engine.clone(),
             deepgram_api_key.clone(),
             languages.clone(),
@@ -128,8 +132,8 @@ pub async fn reconcile_untranscribed(
                 chunk.id,
                 &text,
                 &engine_name,
-                "unknown",
-                false,
+                &device_name,
+                is_input,
                 chunk.timestamp,
                 Some(duration_secs),
             )
@@ -149,4 +153,25 @@ pub async fn reconcile_untranscribed(
     }
 
     success_count
+}
+
+/// Extract device name and is_input from an audio file path.
+/// Path format: `.../Device Name (output)_2026-02-27_23-15-38.mp4`
+/// Returns (device_name, is_input).
+fn extract_device_from_path(file_path: &str) -> (String, bool) {
+    let filename = Path::new(file_path)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("unknown");
+
+    // Split on first '_2' to separate device name from timestamp
+    // e.g. "Display 3 (output)_2026-02-27_23-15-38" → "Display 3 (output)"
+    let device_part = if let Some(idx) = filename.find("_2") {
+        &filename[..idx]
+    } else {
+        filename
+    };
+
+    let is_input = device_part.contains("(input)");
+    (device_part.to_string(), is_input)
 }
