@@ -291,10 +291,11 @@ impl PiExecutor {
     ) -> Result<AgentOutput> {
         let mut cmd = build_async_command(pi_path);
         cmd.current_dir(working_dir);
-        cmd.arg("-p").arg(prompt);
+        // Flags MUST come before -p on Windows (see spawn_pi_streaming comment)
         cmd.arg("--no-session");
         cmd.arg("--provider").arg(resolved_provider);
         cmd.arg("--model").arg(model);
+        cmd.arg("-p").arg(prompt);
 
         if let Some(ref token) = self.user_token {
             cmd.env("SCREENPIPE_API_KEY", token);
@@ -378,11 +379,14 @@ impl PiExecutor {
     ) -> Result<AgentOutput> {
         let mut cmd = build_async_command(pi_path);
         cmd.current_dir(working_dir);
-        cmd.arg("-p").arg(prompt);
+        // Flags MUST come before -p on Windows: cmd.exe /C passes everything
+        // as a single string, and the long prompt text can break arg parsing
+        // if flags come after it.
         cmd.arg("--mode").arg("json");
         cmd.arg("--no-session");
         cmd.arg("--provider").arg(resolved_provider);
         cmd.arg("--model").arg(model);
+        cmd.arg("-p").arg(prompt);
 
         if let Some(ref token) = self.user_token {
             cmd.env("SCREENPIPE_API_KEY", token);
