@@ -786,6 +786,14 @@ jobs:
           security import ~/apple-certs/AppleWWDRCAG2.cer \
             -t cert -k "$BUILD_KC" 2>/dev/null || true
 
+          # Developer ID Certification Authority (original, for pre-2024 certs)
+          if [ ! -f ~/apple-certs/DeveloperIDCA.cer ]; then
+            curl -sL -o ~/apple-certs/DeveloperIDCA.cer \
+              "https://www.apple.com/certificateauthority/DeveloperIDCA.cer"
+          fi
+          security import ~/apple-certs/DeveloperIDCA.cer \
+            -t cert -k "$BUILD_KC" 2>/dev/null || true
+
           # Developer ID Certification Authority G2
           if [ ! -f ~/apple-certs/DeveloperIDG2CA.cer ]; then
             curl -sL -o ~/apple-certs/DeveloperIDG2CA.cer \
@@ -795,9 +803,11 @@ jobs:
             -t cert -k "$BUILD_KC" 2>/dev/null || true
 
           # Ensure login keychain + System Roots are in the search list
+          # Include SystemRootCertificates.keychain for the Apple Root CA trust anchor
           security list-keychains -d user -s "$BUILD_KC" \
             "$HOME/Library/Keychains/login.keychain-db" \
-            "/Library/Keychains/System.keychain"
+            "/Library/Keychains/System.keychain" \
+            "/System/Library/Keychains/SystemRootCertificates.keychain"
 
           # Verify signing identity is available
           echo "=== Keychain search list ==="
