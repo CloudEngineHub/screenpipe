@@ -1133,7 +1133,7 @@ const AISection = ({
                     <div key={key} className="flex items-start gap-2">
                       <div className="flex items-center gap-2 min-w-[180px]">
                         {result.status === "pass" ? (
-                          <CheckCircle2 className="h-4 w-4 text-green-500 shrink-0" />
+                          <CheckCircle2 className="h-4 w-4 text-foreground shrink-0" />
                         ) : result.status === "fail" ? (
                           <XCircle className="h-4 w-4 text-destructive shrink-0" />
                         ) : result.status === "running" ? (
