@@ -253,6 +253,81 @@ Note: `"terminal"` matches `WindowsTerminal.exe` but NOT `cmd.exe` or `powershel
 - [ ] **Empty accessibility + empty OCR** — app with no tree text and OCR failure. frame stored with NULL text. no crash.
 - [ ] **ocr_text table populated** — `SELECT COUNT(*) FROM ocr_text` should be non-zero after a few minutes of use on Windows.
 
+#### Windows text extraction — untested / unknown apps
+
+These apps are common on Windows but have **never been tested** with the event-driven pipeline. We don't know if their accessibility tree returns useful text or just chrome. Each needs manual verification: open the app, use it for a few minutes, then `curl "http://localhost:3030/search?app_name=<name>&limit=3"` and check if the text is meaningful.
+
+**Status legend:** `?` = untested, `OK` = verified good, `CHROME` = only returns chrome, `EMPTY` = no text, `OCR-NEEDED` = should be added to `app_prefers_ocr`
+
+| App | Status | a11y text quality | Notes |
+|---|---|---|---|
+| **Browsers** | | | |
+| Chrome | OK | good (full page content) | 2778ch avg, rich a11y tree |
+| Edge | ? | probably good | same Chromium UIA as Chrome |
+| Firefox | ? | unknown | different a11y engine than Chromium |
+| Brave / Vivaldi / Arc | ? | probably good | Chromium-based, needs verification |
+| **Code editors** | | | |
+| VS Code | ? | unknown | Electron, should have good UIA |
+| JetBrains (IntelliJ, etc) | ? | unknown | Java Swing/AWT, UIA quality varies |
+| Sublime Text | ? | unknown | custom UI, may need OCR fallback |
+| Cursor | ? | unknown | Electron fork of VS Code |
+| Zed | ? | unknown | custom GPU renderer, a11y unknown |
+| **Terminals** | | | |
+| WezTerm | CHROME | chrome only ("System Minimize...") | `app_prefers_ocr` = true, OCR works |
+| Windows Terminal | ? | unknown | matches `"terminal"` in `app_prefers_ocr` |
+| cmd.exe | ? | unknown | NOT matched by `app_prefers_ocr` |
+| powershell.exe | ? | unknown | NOT matched by `app_prefers_ocr` |
+| Git Bash (mintty) | ? | unknown | NOT matched by `app_prefers_ocr` |
+| **Communication** | | | |
+| Discord | ? | unknown | Electron, old OCR data exists |
+| Slack | ? | unknown | Electron |
+| Teams | ? | unknown | Electron/WebView2 |
+| Zoom | ? | unknown | custom UI |
+| Telegram | ? | unknown | Qt-based |
+| WhatsApp | ? | unknown | Electron |
+| **Productivity** | | | |
+| Notion | ? | unknown | Electron |
+| Obsidian | ? | unknown | Electron |
+| Word / Excel / PowerPoint | ? | unknown | native Win32, historically good UIA |
+| Outlook | ? | unknown | mixed native/web |
+| OneNote | ? | unknown | UWP, should have good UIA |
+| **Media / Creative** | | | |
+| Figma | ? | unknown | Electron + canvas, likely poor a11y on canvas |
+| Spotify | ? | unknown | Electron/CEF |
+| VLC | ? | unknown | Qt-based |
+| Adobe apps (Photoshop, etc) | ? | unknown | custom UI, historically poor a11y |
+| **System / Utilities** | | | |
+| Explorer | OK | good | file names, paths, status bar |
+| Settings | ? | unknown | UWP, should be good |
+| Task Manager | ? | unknown | UWP on Win11 |
+| Notepad | ? | unknown | should have excellent UIA |
+| **Games / GPU-rendered** | | | |
+| Any game | ? | likely empty | GPU-rendered, no UIA tree. should fall to OCR |
+| Electron w/ disabled a11y | ? | likely empty | some Electron apps disable a11y |
+
+**Priority to test (most common user apps):**
+1. VS Code — most developers will have this open
+2. Discord / Slack — always running in background
+3. Windows Terminal / cmd.exe / powershell.exe — verify terminal detection
+4. Edge / Firefox — browser is primary use
+5. Notion / Obsidian — knowledge workers
+6. Office apps — enterprise users
+
+**How to verify an app:**
+```bash
+# 1. Open the app, use it for 2 minutes
+# 2. Check what was captured:
+curl "http://localhost:3030/search?app_name=<exe_name>&limit=3&content_type=all"
+# 3. If text is only chrome (System/Minimize/Close), it may need adding to app_prefers_ocr
+# 4. If text is empty and screenshots exist, OCR fallback should kick in
+# 5. Update this table with findings
+```
+
+**Apps that may need adding to `app_prefers_ocr` list:**
+- If cmd.exe / powershell.exe return chrome-only text, add `"cmd"` and `"powershell"` to the list
+- If mintty (Git Bash) returns chrome-only, add `"mintty"`
+- Any app where the accessibility tree consistently returns only window chrome but screenshots contain readable text
+
 ### 15. CI / release
 
 commits: `8f334c0a`, `fda40d2c`
