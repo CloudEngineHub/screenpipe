@@ -46,6 +46,7 @@ import { type CustomTemplate } from "@/lib/summary-templates";
 import { usePipes } from "@/lib/hooks/use-pipes";
 
 const SCREENPIPE_API = "http://localhost:3030";
+const PI_CHAT_SESSION = "chat";
 
 interface MentionSuggestion {
   tag: string;
@@ -836,7 +837,7 @@ export function StandaloneChat({ className }: { className?: string } = {}) {
     // Abort any ongoing Pi processing before switching
     if (isLoading || isStreaming) {
       try {
-        await commands.piAbort();
+        await commands.piAbort(PI_CHAT_SESSION);
       } catch (e) {
         console.warn("[Pi] Failed to abort:", e);
       }
@@ -884,9 +885,9 @@ export function StandaloneChat({ className }: { className?: string } = {}) {
     if (piInfo?.running) {
       try {
         if (isLoading || isStreaming) {
-          await commands.piAbort();
+          await commands.piAbort(PI_CHAT_SESSION);
         }
-        await commands.piNewSession();
+        await commands.piNewSession(PI_CHAT_SESSION);
       } catch (e) {
         console.warn("[Pi] Failed to reset session:", e);
       }
@@ -1056,10 +1057,10 @@ export function StandaloneChat({ className }: { className?: string } = {}) {
             try {
               // Abort any in-flight processing, then reset session
               // Always abort — Pi may be processing even if our ref was cleared
-              await commands.piAbort();
+              await commands.piAbort(PI_CHAT_SESSION);
               // Wait for Pi to process the abort before sending new_session
               await new Promise(r => setTimeout(r, 500));
-              await commands.piNewSession();
+              await commands.piNewSession(PI_CHAT_SESSION);
               // Wait for Pi to process the session reset before sending prompt
               await new Promise(r => setTimeout(r, 500));
             } catch (e) {
@@ -1083,7 +1084,7 @@ export function StandaloneChat({ className }: { className?: string } = {}) {
             const start = Date.now();
             while (Date.now() - start < maxMs) {
               try {
-                const info = await commands.piInfo();
+                const info = await commands.piInfo(PI_CHAT_SESSION);
                 if (info.status === "ok" && info.data.running) {
                   setPiInfo(info.data);
                   return true;
@@ -1383,7 +1384,7 @@ export function StandaloneChat({ className }: { className?: string } = {}) {
   useEffect(() => {
     const checkPi = async () => {
       try {
-        const result = await commands.piInfo();
+        const result = await commands.piInfo(PI_CHAT_SESSION);
         if (result.status === "ok") {
           setPiInfo(result.data);
         }
@@ -1395,7 +1396,7 @@ export function StandaloneChat({ className }: { className?: string } = {}) {
     // Keep polling Pi status — recovers from stale termination events and transient failures
     const interval = setInterval(async () => {
       try {
-        const result = await commands.piInfo();
+        const result = await commands.piInfo(PI_CHAT_SESSION);
         if (result.status === "ok") {
           setPiInfo(result.data);
         }
@@ -1782,7 +1783,9 @@ export function StandaloneChat({ className }: { className?: string } = {}) {
     const setup = async () => {
       unlistenEvent = await listen<any>("pi_event", (event) => {
         if (!mounted) return;
-        handlePiEventData(event.payload);
+        const { sessionId, event: piEvent } = event.payload;
+        if (sessionId !== PI_CHAT_SESSION) return;
+        handlePiEventData(piEvent);
       });
 
       // Listen for pipe execution events (only when actively watching a pipe)
@@ -1797,13 +1800,14 @@ export function StandaloneChat({ className }: { className?: string } = {}) {
         handlePiEventData(piEvent);
       });
 
-      unlistenTerminated = await listen<number>("pi_terminated", (event) => {
+      unlistenTerminated = await listen<any>("pi_terminated", (event) => {
         if (!mounted) return;
+        const { sessionId, pid: terminatedPid } = event.payload;
+        if (sessionId !== PI_CHAT_SESSION) return;
         if (piStoppedIntentionallyRef.current) {
           piStoppedIntentionallyRef.current = false;
           return;
         }
-        const terminatedPid = event.payload;
         console.log("[Pi] Process terminated, pid:", terminatedPid);
 
         // If a message was in flight, mark it as errored so the UI doesn't stay stuck
@@ -1829,7 +1833,7 @@ export function StandaloneChat({ className }: { className?: string } = {}) {
           if (!mounted) return;
           // Check if a newer Pi process is already running (race: stop → start → terminated)
           try {
-            const result = await commands.piInfo();
+            const result = await commands.piInfo(PI_CHAT_SESSION);
             if (result.status === "ok" && result.data.running && result.data.pid !== terminatedPid) {
               console.log("[Pi] Stale termination for pid", terminatedPid, "— newer pid", result.data.pid, "is running");
               setPiInfo(result.data);
@@ -1843,7 +1847,7 @@ export function StandaloneChat({ className }: { className?: string } = {}) {
               const providerConfig = buildProviderConfig();
               const home = await homeDir();
               const dir = await join(home, ".screenpipe", "pi-chat");
-              const result = await commands.piStart(dir, settings.user?.token ?? null, providerConfig);
+              const result = await commands.piStart(PI_CHAT_SESSION, dir, settings.user?.token ?? null, providerConfig);
               if (result.status === "ok") {
                 setPiInfo(result.data);
                 piSessionSyncedRef.current = false;
@@ -2032,7 +2036,7 @@ export function StandaloneChat({ className }: { className?: string } = {}) {
         const providerConfig = buildProviderConfig();
         const home = await homeDir();
         const dir = await join(home, ".screenpipe", "pi-chat");
-        const result = await commands.piStart(dir, settings.user?.token ?? null, providerConfig);
+        const result = await commands.piStart(PI_CHAT_SESSION, dir, settings.user?.token ?? null, providerConfig);
         if (result.status === "ok" && result.data.running) {
           setPiInfo(result.data);
           piSessionSyncedRef.current = false;
@@ -2165,6 +2169,7 @@ export function StandaloneChat({ className }: { className?: string } = {}) {
       }
 
       const result = await commands.piPrompt(
+        PI_CHAT_SESSION,
         promptMessage,
         piImages.length > 0 ? piImages : null,
       );
@@ -2348,7 +2353,7 @@ export function StandaloneChat({ className }: { className?: string } = {}) {
 
   const handleStop = async () => {
     try {
-      await commands.piAbort();
+      await commands.piAbort(PI_CHAT_SESSION);
     } catch (e) {
       console.warn("[Pi] Failed to abort:", e);
     }

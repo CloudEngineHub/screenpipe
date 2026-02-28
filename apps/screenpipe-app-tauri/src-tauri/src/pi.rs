@@ -10,6 +10,7 @@ use screenpipe_core::agents::pi::screenpipe_cloud_models;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use specta::Type;
+use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
 use std::process::{Child, ChildStdin, Command, Stdio};
@@ -60,9 +61,22 @@ fn build_command_for_path(path: &str) -> Command {
 const PI_PACKAGE: &str = "@mariozechner/pi-coding-agent@0.51.1";
 const SCREENPIPE_API_URL: &str = "https://api.screenpi.pe/v1";
 
-/// State for managing the Pi sidecar process
+/// Pool of Pi sessions — each session_id gets its own PiManager/process.
+pub struct PiPool {
+    pub sessions: HashMap<String, PiManager>,
+}
+
+impl PiPool {
+    pub fn new() -> Self {
+        Self {
+            sessions: HashMap::new(),
+        }
+    }
+}
+
+/// State for managing multiple Pi sidecar processes
 #[derive(Clone)]
-pub struct PiState(pub Arc<Mutex<Option<PiManager>>>);
+pub struct PiState(pub Arc<Mutex<PiPool>>);
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
@@ -155,7 +169,7 @@ impl PiManager {
         }
     }
 
-    pub fn snapshot(&mut self) -> PiInfo {
+    pub fn snapshot(&mut self, session_id: &str) -> PiInfo {
         let running = self.check_alive();
         let pid = self.child.as_ref().map(|c| c.id());
 
@@ -163,7 +177,7 @@ impl PiManager {
             running,
             project_dir: self.project_dir.clone(),
             pid,
-            session_id: None,
+            session_id: Some(session_id.to_string()),
         }
     }
 
@@ -491,10 +505,11 @@ fn ensure_pi_config(user_token: Option<&str>, provider_config: Option<&PiProvide
 /// Get Pi info
 #[tauri::command]
 #[specta::specta]
-pub async fn pi_info(state: State<'_, PiState>) -> Result<PiInfo, String> {
-    let mut manager = state.0.lock().await;
-    match manager.as_mut() {
-        Some(m) => Ok(m.snapshot()),
+pub async fn pi_info(state: State<'_, PiState>, session_id: Option<String>) -> Result<PiInfo, String> {
+    let sid = session_id.unwrap_or_else(|| "chat".to_string());
+    let mut pool = state.0.lock().await;
+    match pool.sessions.get_mut(&sid) {
+        Some(m) => Ok(m.snapshot(&sid)),
         None => Ok(PiInfo::default()),
     }
 }
@@ -502,16 +517,17 @@ pub async fn pi_info(state: State<'_, PiState>) -> Result<PiInfo, String> {
 /// Stop the Pi sidecar
 #[tauri::command]
 #[specta::specta]
-pub async fn pi_stop(state: State<'_, PiState>) -> Result<PiInfo, String> {
-    info!("Stopping pi sidecar");
+pub async fn pi_stop(state: State<'_, PiState>, session_id: Option<String>) -> Result<PiInfo, String> {
+    let sid = session_id.unwrap_or_else(|| "chat".to_string());
+    info!("Stopping pi sidecar for session: {}", sid);
 
-    let mut manager = state.0.lock().await;
-    if let Some(m) = manager.as_mut() {
+    let mut pool = state.0.lock().await;
+    if let Some(m) = pool.sessions.get_mut(&sid) {
         m.stop();
     }
 
-    match manager.as_mut() {
-        Some(m) => Ok(m.snapshot()),
+    match pool.sessions.get_mut(&sid) {
+        Some(m) => Ok(m.snapshot(&sid)),
         None => Ok(PiInfo::default()),
     }
 }
@@ -522,11 +538,13 @@ pub async fn pi_stop(state: State<'_, PiState>) -> Result<PiInfo, String> {
 pub async fn pi_start(
     app: AppHandle,
     state: State<'_, PiState>,
+    session_id: Option<String>,
     project_dir: String,
     user_token: Option<String>,
     provider_config: Option<PiProviderConfig>,
 ) -> Result<PiInfo, String> {
-    pi_start_inner(app, &state, project_dir, user_token, provider_config).await
+    let sid = session_id.unwrap_or_else(|| "chat".to_string());
+    pi_start_inner(app, &state, &sid, project_dir, user_token, provider_config).await
 }
 
 /// Kill orphan Pi RPC processes left over from a previous app crash.
@@ -650,10 +668,14 @@ fn resolve_screenpipe_model(requested: &str, provider: &str) -> String {
     requested.to_string()
 }
 
+/// Maximum number of concurrent Pi sessions before evicting old ones.
+const MAX_PI_SESSIONS: usize = 4;
+
 /// Core Pi start logic — callable from both Tauri commands and Rust boot code.
 pub async fn pi_start_inner(
     app: AppHandle,
     state: &PiState,
+    session_id: &str,
     project_dir: String,
     user_token: Option<String>,
     provider_config: Option<PiProviderConfig>,
@@ -691,29 +713,48 @@ pub async fn pi_start_inner(
         None => ("screenpipe".to_string(), "claude-haiku-4-5".to_string()),
     };
 
-    let mut manager_guard = state.0.lock().await;
+    let sid = session_id.to_string();
+    let mut pool = state.0.lock().await;
 
-    // Initialize manager if needed
-    if manager_guard.is_none() {
-        *manager_guard = Some(PiManager::new(app.clone()));
-    }
-
-    // Stop any existing instance
-    let managed_alive = if let Some(m) = manager_guard.as_mut() {
+    // Stop existing instance for this session if running
+    let mut any_alive = false;
+    if let Some(m) = pool.sessions.get_mut(&sid) {
         if m.is_running() {
             let old_pid = m.child.as_ref().map(|c| c.id());
-            info!("Stopping existing pi instance (pid {:?}) to start new one", old_pid);
+            info!("Stopping existing pi instance (pid {:?}) for session '{}' to start new one", old_pid, sid);
             m.stop();
-            false
-        } else {
-            false
         }
-    } else {
-        false
-    };
+    }
 
-    // Kill orphan Pi processes from previous crashes before spawning a new one
-    kill_orphan_pi_processes(managed_alive);
+    // Check if any session has a live process (for orphan cleanup decision)
+    for m in pool.sessions.values_mut() {
+        if m.is_running() {
+            any_alive = true;
+            break;
+        }
+    }
+
+    // Only kill orphans when pool has no live sessions (app startup scenario)
+    kill_orphan_pi_processes(any_alive);
+
+    // Evict least-recently-active non-"chat" session if at capacity
+    if pool.sessions.len() >= MAX_PI_SESSIONS && !pool.sessions.contains_key(&sid) {
+        let evict_key = pool
+            .sessions
+            .iter()
+            .filter(|(k, _)| k.as_str() != "chat" && k.as_str() != sid.as_str())
+            .min_by_key(|(_, m)| m.last_activity)
+            .map(|(k, _)| k.clone());
+        if let Some(key) = evict_key {
+            info!("Evicting Pi session '{}' to make room for '{}'", key, sid);
+            if let Some(mut m) = pool.sessions.remove(&key) {
+                m.stop();
+            }
+        }
+    }
+
+    // Insert a fresh PiManager for this session
+    pool.sessions.insert(sid.clone(), PiManager::new(app.clone()));
 
     // Find pi executable — if not found, wait for background install (up to 60s)
     let pi_path = match find_pi_executable() {
@@ -831,9 +872,9 @@ pub async fn pi_start_inner(
     // Take stderr for logging
     let stderr = child.stderr.take();
 
-    // Update manager
+    // Update manager for this session
     let terminated_emitted = Arc::new(AtomicBool::new(false));
-    if let Some(m) = manager_guard.as_mut() {
+    if let Some(m) = pool.sessions.get_mut(&sid) {
         m.child = Some(child);
         m.stdin = Some(stdin);
         m.project_dir = Some(project_dir.clone());
@@ -843,14 +884,14 @@ pub async fn pi_start_inner(
     }
 
     // Snapshot the state BEFORE dropping the lock, so we don't hold it during I/O
-    let snapshot = match manager_guard.as_mut() {
-        Some(m) => m.snapshot(),
+    let snapshot = match pool.sessions.get_mut(&sid) {
+        Some(m) => m.snapshot(&sid),
         None => PiInfo::default(),
     };
 
     // Drop the lock before spawning reader threads — this is critical to prevent
     // queued pi_start calls from stacking behind a 500ms sleep while holding the lock
-    drop(manager_guard);
+    drop(pool);
 
     // Readiness signal — stdout reader notifies when first JSON line arrives,
     // so pi_start_inner can return without a blind 1500ms sleep.
@@ -860,9 +901,10 @@ pub async fn pi_start_inner(
     // Spawn stdout reader thread — this is the SOLE emitter of `pi_terminated`.
     let app_handle = app.clone();
     let terminated_guard = terminated_emitted.clone();
+    let sid_clone = sid.clone();
     std::thread::spawn(move || {
         let reader = BufReader::new(stdout);
-        info!("Pi stdout reader started (pid: {})", pid);
+        info!("Pi stdout reader started (pid: {}, session: {})", pid, sid_clone);
         let mut line_count = 0u64;
         let mut ready_signalled = false;
         for line in reader.lines() {
@@ -872,7 +914,7 @@ pub async fn pi_start_inner(
                     let event_type = serde_json::from_str::<Value>(&line)
                         .ok()
                         .and_then(|v| v.get("type").and_then(|t| t.as_str()).map(|s| s.to_string()));
-                    debug!("Pi stdout #{} (pid {}): type={}", line_count, pid,
+                    debug!("Pi stdout #{} (pid {}, session {}): type={}", line_count, pid, sid_clone,
                         event_type.as_deref().unwrap_or("non-json"));
 
                     // Signal readiness on first successful JSON line
@@ -883,10 +925,11 @@ pub async fn pi_start_inner(
                         }
                     }
 
-                    // Try to parse as JSON and emit event
+                    // Try to parse as JSON and emit event tagged with sessionId
                     match serde_json::from_str::<Value>(&line) {
                         Ok(event) => {
-                            if let Err(e) = app_handle.emit("pi_event", &event) {
+                            let tagged = json!({ "sessionId": sid_clone, "event": event });
+                            if let Err(e) = app_handle.emit("pi_event", &tagged) {
                                 error!("Failed to emit pi_event: {}", e);
                             }
                         }
@@ -906,10 +949,10 @@ pub async fn pi_start_inner(
                 }
             }
         }
-        info!("Pi stdout reader ended (pid: {}), processed {} lines", pid, line_count);
+        info!("Pi stdout reader ended (pid: {}, session: {}), processed {} lines", pid, sid_clone, line_count);
         // Only emit once per session — overlapping sessions could race
         if terminated_guard.compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire).is_ok() {
-            let _ = app_handle.emit("pi_terminated", pid);
+            let _ = app_handle.emit("pi_terminated", json!({ "sessionId": sid_clone, "pid": pid }));
         } else {
             debug!("Pi stdout reader: pi_terminated already emitted for this session, skipping");
         }
@@ -919,17 +962,19 @@ pub async fn pi_start_inner(
     // configurations, so parse and forward them like stdout.
     if let Some(stderr) = stderr {
         let app_handle = app.clone();
+        let sid_stderr = sid.clone();
         std::thread::spawn(move || {
             let reader = BufReader::new(stderr);
-            info!("Pi stderr reader started");
+            info!("Pi stderr reader started (session: {})", sid_stderr);
             for line in reader.lines() {
                 match line {
                     Ok(line) => {
                         // Try to parse as JSON RPC event and forward like stdout
                         if let Ok(event) = serde_json::from_str::<Value>(&line) {
                             let event_type = event.get("type").and_then(|t| t.as_str()).unwrap_or("?");
-                            debug!("Pi stderr JSON: type={}", event_type);
-                            if let Err(e) = app_handle.emit("pi_event", &event) {
+                            debug!("Pi stderr JSON (session {}): type={}", sid_stderr, event_type);
+                            let tagged = json!({ "sessionId": sid_stderr, "event": event });
+                            if let Err(e) = app_handle.emit("pi_event", &tagged) {
                                 error!("Failed to emit pi_event from stderr: {}", e);
                             }
                             if let Err(e) = app_handle.emit("pi_output", &line) {
@@ -947,7 +992,7 @@ pub async fn pi_start_inner(
                     }
                 }
             }
-            info!("Pi stderr reader ended");
+            info!("Pi stderr reader ended (session: {})", sid_stderr);
         });
     }
 
@@ -962,8 +1007,8 @@ pub async fn pi_start_inner(
         }
     }
     {
-        let mut manager_guard = state.0.lock().await;
-        if let Some(m) = manager_guard.as_mut() {
+        let mut pool = state.0.lock().await;
+        if let Some(m) = pool.sessions.get_mut(&sid) {
             if let Some(ref mut child) = m.child {
                 match child.try_wait() {
                     Ok(Some(status)) => {
@@ -1002,12 +1047,14 @@ pub struct PiImageContent {
 #[specta::specta]
 pub async fn pi_prompt(
     state: State<'_, PiState>,
+    session_id: Option<String>,
     message: String,
     images: Option<Vec<PiImageContent>>,
 ) -> Result<(), String> {
-    let mut manager = state.0.lock().await;
-    let m = manager.as_mut().ok_or("Pi not initialized")?;
-    
+    let sid = session_id.unwrap_or_else(|| "chat".to_string());
+    let mut pool = state.0.lock().await;
+    let m = pool.sessions.get_mut(&sid).ok_or("Pi not initialized")?;
+
     if !m.is_running() {
         return Err("Pi is not running".to_string());
     }
@@ -1029,10 +1076,11 @@ pub async fn pi_prompt(
 /// Abort current Pi operation
 #[tauri::command]
 #[specta::specta]
-pub async fn pi_abort(state: State<'_, PiState>) -> Result<(), String> {
-    let mut manager = state.0.lock().await;
-    let m = manager.as_mut().ok_or("Pi not initialized")?;
-    
+pub async fn pi_abort(state: State<'_, PiState>, session_id: Option<String>) -> Result<(), String> {
+    let sid = session_id.unwrap_or_else(|| "chat".to_string());
+    let mut pool = state.0.lock().await;
+    let m = pool.sessions.get_mut(&sid).ok_or("Pi not initialized")?;
+
     if !m.is_running() {
         return Err("Pi is not running".to_string());
     }
@@ -1043,10 +1091,11 @@ pub async fn pi_abort(state: State<'_, PiState>) -> Result<(), String> {
 /// Start a new Pi session (clears conversation history)
 #[tauri::command]
 #[specta::specta]
-pub async fn pi_new_session(state: State<'_, PiState>) -> Result<(), String> {
-    let mut manager = state.0.lock().await;
-    let m = manager.as_mut().ok_or("Pi not initialized")?;
-    
+pub async fn pi_new_session(state: State<'_, PiState>, session_id: Option<String>) -> Result<(), String> {
+    let sid = session_id.unwrap_or_else(|| "chat".to_string());
+    let mut pool = state.0.lock().await;
+    let m = pool.sessions.get_mut(&sid).ok_or("Pi not initialized")?;
+
     if !m.is_running() {
         return Err("Pi is not running".to_string());
     }
@@ -1130,8 +1179,9 @@ pub async fn pi_install(app: AppHandle) -> Result<(), String> {
 /// Cleanup function to be called on app exit
 pub async fn cleanup_pi(state: &PiState) {
     info!("Cleaning up pi on app exit");
-    let mut manager = state.0.lock().await;
-    if let Some(m) = manager.as_mut() {
+    let mut pool = state.0.lock().await;
+    for (sid, m) in pool.sessions.iter_mut() {
+        info!("Stopping Pi session '{}' on cleanup", sid);
         m.stop();
     }
 }

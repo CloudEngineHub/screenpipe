@@ -175,7 +175,7 @@ pulseaudio = ["screenpipe-audio/pulseaudio"]
 vulkan = ["screenpipe-audio/vulkan"]
 mkl = []
 cargo-clippy = []
-default = ["custom-protocol", "qwen3-asr", "coreml", "directml"]
+default = ["custom-protocol", "qwen3-asr"]
 
 # DO NOT REMOVE!!
 custom-protocol = ["tauri/custom-protocol"]

@@ -1285,7 +1285,7 @@ async fn main() {
         handle: Arc::new(tokio::sync::Mutex::new(None)),
         is_starting: Arc::new(AtomicBool::new(false)),
     };
-    let pi_state = pi::PiState(Arc::new(tokio::sync::Mutex::new(None)));
+    let pi_state = pi::PiState(Arc::new(tokio::sync::Mutex::new(pi::PiPool::new())));
     let reminders_state = reminders::RemindersState::new();
     let suggestions_state = suggestions::SuggestionsState::new();
     #[allow(clippy::single_match)]
