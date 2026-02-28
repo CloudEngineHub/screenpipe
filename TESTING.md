@@ -206,7 +206,7 @@ commits: `2f6b2af5`, `ea7f1f61`, `5cb100ea`
 
 ### 14. Windows-specific
 
-commits: `eea0c865`, `fe9060db`, `c99c3967`, `aeaa446b`
+commits: `eea0c865`, `fe9060db`, `c99c3967`, `aeaa446b`, `5a219688`, `caae1ebc`, `67caf1d1`
 
 - [ ] **COM thread conflict** — audio and vision threads don't conflict on COM initialization (`eea0c865`).
 - [ ] **high-DPI display (150%, 200%)** — OCR captures at correct resolution.
@@ -216,6 +216,42 @@ commits: `eea0c865`, `fe9060db`, `c99c3967`, `aeaa446b`
 - [ ] **Windows taskbar icon** — The app should display a taskbar icon on Windows.
 - [ ] **Windows audio transcription accuracy** — On Windows, verify improved audio transcription accuracy due to native Silero VAD frame size and lower speech threshold.
 - [ ] **Windows multi-line pipe prompts** — Multi-line pipe prompts should be preserved on Windows.
+
+#### Windows text extraction matrix (accessibility vs OCR)
+
+The event-driven pipeline (`paired_capture.rs`) decides per-frame whether to use accessibility tree text or OCR. Terminal apps force OCR because their accessibility tree only returns window chrome.
+
+commits: `5a219688` (wire up Windows OCR), `caae1ebc` (prefer OCR for terminals), `67caf1d1` (no chrome fallback)
+
+**App categories and expected behavior:**
+
+| App category | Examples | `app_prefers_ocr` | Text source | Expected text |
+|---|---|---|---|---|
+| Browser | Chrome, Edge, Firefox | false | Accessibility | Full page content + chrome |
+| Code editor | VS Code, Fleet | false | Accessibility | Editor content, tabs, sidebar |
+| Terminal (listed) | WezTerm, Windows Terminal, Alacritty | true | Windows OCR | Terminal buffer content via screenshot |
+| Terminal (unlisted) | cmd.exe, powershell.exe | false | Accessibility | Whatever UIA exposes (may be limited) |
+| System UI | Explorer, taskbar, Settings | false | Accessibility | UI labels, text fields |
+| Games / low-a11y apps | Games, Electron w/o a11y | false | Windows OCR (fallback) | OCR from screenshot |
+| Lock screen | LockApp.exe | false | Accessibility | Time, date, battery |
+
+**Terminal detection list** (`app_prefers_ocr` matches, case-insensitive):
+`wezterm`, `iterm`, `terminal`, `alacritty`, `kitty`, `hyper`, `warp`, `ghostty`
+
+Note: `"terminal"` matches `WindowsTerminal.exe` but NOT `cmd.exe` or `powershell.exe`.
+
+**Test checklist:**
+
+- [ ] **WezTerm OCR capture** — open WezTerm, type commands. search for terminal content within 30s. should return OCR text, NOT "System Minimize Restore Close" chrome.
+- [ ] **Windows Terminal OCR** — same test with Windows Terminal.
+- [ ] **Chrome accessibility** — open Chrome, browse a page. search returns page content from accessibility tree.
+- [ ] **VS Code accessibility** — open VS Code with a file. search returns code content.
+- [ ] **Game/no-a11y OCR fallback** — open an app with poor accessibility. OCR should run and extract text from screenshot.
+- [ ] **OCR engine name** — query DB: OCR entries should have engine `WindowsNative` (not `AppleNative`).
+- [ ] **Failed OCR = no noise** — if OCR fails for a terminal, the frame should have NULL text, not chrome like "System Minimize Restore Close".
+- [ ] **Non-terminal chrome-only** — rare case where a normal app returns only chrome from accessibility. stored as-is (acceptable, no OCR fallback triggered).
+- [ ] **Empty accessibility + empty OCR** — app with no tree text and OCR failure. frame stored with NULL text. no crash.
+- [ ] **ocr_text table populated** — `SELECT COUNT(*) FROM ocr_text` should be non-zero after a few minutes of use on Windows.
 
 ### 15. CI / release
 
@@ -284,7 +320,7 @@ commits: `fc830b43`
 run section 1 and 2 completely. these are the most fragile.
 
 ### before merging vision/OCR changes
-run section 3 and 5 completely.
+run section 3, 5, and 14 (Windows text extraction matrix) completely.
 
 ### before merging audio changes
 run section 4 completely.
