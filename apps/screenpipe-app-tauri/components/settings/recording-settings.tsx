@@ -1038,9 +1038,8 @@ Your screen is a pipe. Everything you see, hear, and type flows through it. Scre
         </Card>
         )}
 
-        {/* Transcription Mode - only for local Whisper engines */}
-        {!settings.disableAudio && settings.audioTranscriptionEngine !== "deepgram" &&
-         settings.audioTranscriptionEngine !== "screenpipe-cloud" &&
+        {/* Transcription Mode - available for all engines except disabled */}
+        {!settings.disableAudio &&
          settings.audioTranscriptionEngine !== "disabled" && (
           <Card className="border-border bg-card">
             <CardContent className="px-3 py-2.5">
