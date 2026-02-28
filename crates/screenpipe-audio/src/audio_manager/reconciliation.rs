@@ -11,7 +11,7 @@ use tracing::{debug, error, warn};
 use whisper_rs::WhisperContext;
 
 use crate::core::engine::AudioTranscriptionEngine;
-use crate::transcription::stt::stt;
+use crate::transcription::stt::{stt, AlternateSttEngine};
 use crate::transcription::VocabularyEntry;
 use crate::utils::ffmpeg::read_audio_from_file;
 
@@ -33,6 +33,7 @@ pub async fn reconcile_untranscribed(
     deepgram_api_key: Option<String>,
     languages: Vec<Language>,
     vocabulary: &[VocabularyEntry],
+    alternate_stt: Option<AlternateSttEngine>,
 ) -> usize {
     let since = chrono::Utc::now() - chrono::Duration::hours(24);
     let chunks = match db.get_untranscribed_chunks(since, 50).await {
@@ -140,7 +141,7 @@ pub async fn reconcile_untranscribed(
             languages.clone(),
             &mut state,
             vocabulary,
-            None,
+            alternate_stt.clone(),
         )
         .await
         {

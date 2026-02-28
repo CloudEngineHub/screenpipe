@@ -80,6 +80,8 @@ pub struct AudioManager {
     /// Shared WhisperContext for re-transcription requests.
     /// Set after the model is loaded in start_audio_receiver_handler.
     whisper_context: Arc<RwLock<Option<Arc<WhisperContext>>>>,
+    /// Shared alternate STT engine (Qwen3-ASR GGML) for reconciliation.
+    alternate_stt: Arc<RwLock<Option<crate::transcription::stt::AlternateSttEngine>>>,
 }
 
 /// Result of checking / restarting the two central handler tasks.
@@ -146,6 +148,7 @@ impl AudioManager {
             transcription_paused: Arc::new(AtomicBool::new(false)),
             on_transcription_insert: None,
             whisper_context: Arc::new(RwLock::new(None)),
+            alternate_stt: Arc::new(RwLock::new(None)),
         };
 
         Ok(manager)
@@ -179,6 +182,7 @@ impl AudioManager {
         if self.options.read().await.transcription_mode == TranscriptionMode::Batch {
             let db = self.db.clone();
             let whisper_ctx_ref = self.whisper_context.clone();
+            let alt_stt_ref = self.alternate_stt.clone();
             let options = self.options.clone();
             tokio::spawn(async move {
                 // Wait for Whisper model to load + initial recordings
@@ -191,8 +195,9 @@ impl AudioManager {
                         let langs = opts.languages.clone();
                         let vocab = opts.vocabulary.clone();
                         drop(opts);
+                        let alt_stt = alt_stt_ref.read().await.clone();
                         let count = super::reconciliation::reconcile_untranscribed(
-                            &db, ctx, engine, key, langs, &vocab,
+                            &db, ctx, engine, key, langs, &vocab, alt_stt,
                         )
                         .await;
                         if count > 0 {
@@ -413,6 +418,7 @@ impl AudioManager {
         let context_param = create_whisper_context_parameters(audio_transcription_engine.clone())?;
         let meeting_detector = self.meeting_detector.clone();
         let db = self.db.clone();
+        let shared_alternate_stt = self.alternate_stt.clone();
 
         let quantized_path = {
             let mut rx = self.stt_model_path.clone();
@@ -488,6 +494,9 @@ impl AudioManager {
             }
         };
 
+        // Store in shared field so reconciliation can access it
+        *shared_alternate_stt.write().await = alternate_stt.clone();
+
         Ok(tokio::spawn(async move {
             while let Ok(audio) = whisper_receiver.recv() {
                 debug!("received audio from device: {:?}", audio.device.name);
@@ -556,6 +565,7 @@ impl AudioManager {
                                 deepgram_api_key.clone(),
                                 languages.clone(),
                                 &vocabulary,
+                                alternate_stt.clone(),
                             )
                             .await;
                             info!("batch mode: transcribed {} chunks after session end", count);
