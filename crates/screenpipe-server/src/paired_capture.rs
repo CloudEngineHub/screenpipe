@@ -117,23 +117,39 @@ pub async fn paired_capture(
 
     // Only run OCR when accessibility tree returned no text or app prefers OCR
     let (ocr_text, ocr_text_json) = if !has_accessibility_text {
-        let image_for_ocr = ctx.image.clone();
-        let ocr_result = tokio::task::spawn_blocking(move || {
-            #[cfg(target_os = "macos")]
-            {
-                let (text, json, _confidence) =
-                    screenpipe_vision::perform_ocr_apple(&image_for_ocr, &[]);
-                (text, json)
+        // Windows native OCR is async, so call it directly (not inside spawn_blocking)
+        #[cfg(target_os = "windows")]
+        {
+            match screenpipe_vision::perform_ocr_windows(&ctx.image).await {
+                Ok((text, json, _confidence)) => (text, json),
+                Err(e) => {
+                    warn!("windows OCR failed: {}", e);
+                    (String::new(), "[]".to_string())
+                }
             }
-            #[cfg(not(target_os = "macos"))]
-            {
-                let _ = image_for_ocr;
-                (String::new(), "[]".to_string())
-            }
-        })
-        .await
-        .unwrap_or_else(|_| (String::new(), "[]".to_string()));
-        ocr_result
+        }
+        // Apple and Tesseract OCR are sync, use spawn_blocking
+        #[cfg(not(target_os = "windows"))]
+        {
+            let image_for_ocr = ctx.image.clone();
+            let ocr_result = tokio::task::spawn_blocking(move || {
+                #[cfg(target_os = "macos")]
+                {
+                    let (text, json, _confidence) =
+                        screenpipe_vision::perform_ocr_apple(&image_for_ocr, &[]);
+                    (text, json)
+                }
+                #[cfg(not(target_os = "macos"))]
+                {
+                    let (text, json, _confidence) =
+                        screenpipe_vision::perform_ocr_tesseract(&image_for_ocr, vec![]);
+                    (text, json)
+                }
+            })
+            .await
+            .unwrap_or_else(|_| (String::new(), "[]".to_string()));
+            ocr_result
+        }
     } else {
         (String::new(), "[]".to_string())
     };
@@ -194,11 +210,18 @@ pub async fn paired_capture(
     };
 
     // Insert snapshot frame + OCR text positions in a single transaction.
+    let ocr_engine_name = if cfg!(target_os = "macos") {
+        "AppleNative"
+    } else if cfg!(target_os = "windows") {
+        "WindowsNative"
+    } else {
+        "Tesseract"
+    };
     let ocr_data = if !sanitized_ocr_text.is_empty() {
         Some((
             sanitized_ocr_text.as_str(),
             sanitized_ocr_json.as_str(),
-            "AppleNative",
+            ocr_engine_name,
         ))
     } else {
         None
