@@ -17,7 +17,7 @@ oasgen = { workspace = true }
 screenpipe-events = { path = "../screenpipe-events" }
 screenpipe-vision = { path = "../screenpipe-vision" }
 screenpipe-audio = { path = "../screenpipe-audio" }
-stt = { git = "https://github.com/screenpipe/stt.git", rev = "7d14f76", default-features = false, features = ["qwen3-asr-ggml"], optional = true }
+stt = { git = "https://github.com/screenpipe/audiopipe.git", rev = "bf38610", default-features = false, features = ["qwen3-asr-ggml"], optional = true }
 screenpipe-core = { path = "../screenpipe-core", features = ["security", "cloud-sync"] }
 screenpipe-db = { path = "../screenpipe-db" }
 screenpipe-accessibility = { path = "../screenpipe-accessibility", features = ["db"] }

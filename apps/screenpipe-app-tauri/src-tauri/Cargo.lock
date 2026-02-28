@@ -7333,7 +7333,7 @@ dependencies = [
 [[package]]
 name = "qwen3-asr-sys"
 version = "0.1.0"
-source = "git+https://github.com/screenpipe/stt.git?rev=7d14f76#7d14f769ad67367492c2c743650ccdeac7623416"
+source = "git+https://github.com/screenpipe/audiopipe.git?rev=bf38610#bf38610d6a30cf6ce4e75d506c6b39ad1b25d9c1"
 dependencies = [
  "cc",
  "cmake",
@@ -8210,7 +8210,7 @@ dependencies = [
 
 [[package]]
 name = "screenpipe-app"
-version = "2.0.612"
+version = "2.0.613"
 dependencies = [
  "anyhow",
  "arboard",
@@ -9718,7 +9718,7 @@ dependencies = [
 [[package]]
 name = "stt"
 version = "0.1.0"
-source = "git+https://github.com/screenpipe/stt.git?rev=7d14f76#7d14f769ad67367492c2c743650ccdeac7623416"
+source = "git+https://github.com/screenpipe/audiopipe.git?rev=bf38610#bf38610d6a30cf6ce4e75d506c6b39ad1b25d9c1"
 dependencies = [
  "hf-hub 0.4.3",
  "qwen3-asr-sys",
