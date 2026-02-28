@@ -117,7 +117,7 @@ tokio-tungstenite = "0.24"
 criterion = { workspace = true }
 
 [features]
-default = []
+default = ["qwen3-asr"]
 metal = ["screenpipe-audio/metal"]
 cuda = ["screenpipe-audio/cuda"]
 vulkan = ["screenpipe-audio/vulkan"]

@@ -1,6 +1,6 @@
 [package]
 name = "screenpipe-app"
-version = "2.0.602"
+version = "2.0.603"
 description = "24/7 memory for your desktop. 100% local."
 authors = ["you"]
 license = ""
@@ -175,7 +175,7 @@ pulseaudio = ["screenpipe-audio/pulseaudio"]
 vulkan = ["screenpipe-audio/vulkan"]
 mkl = []
 cargo-clippy = []
-default = ["custom-protocol"]
+default = ["custom-protocol", "qwen3-asr"]
 
 # DO NOT REMOVE!!
 custom-protocol = ["tauri/custom-protocol"]
