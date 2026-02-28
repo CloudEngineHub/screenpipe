@@ -184,6 +184,28 @@ impl PipeStore for SqlitePipeStore {
 
         Ok(())
     }
+
+    async fn cleanup_old_executions(&self, keep_per_pipe: i32) -> Result<u32> {
+        // Delete all rows except the newest `keep_per_pipe` per pipe_name.
+        // Uses a CTE to find the cutoff id per pipe.
+        let result = sqlx::query(
+            r#"DELETE FROM pipe_executions
+               WHERE id NOT IN (
+                   SELECT id FROM (
+                       SELECT id, ROW_NUMBER() OVER (
+                           PARTITION BY pipe_name ORDER BY id DESC
+                       ) AS rn
+                       FROM pipe_executions
+                   )
+                   WHERE rn <= ?
+               )"#,
+        )
+        .bind(keep_per_pipe)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(result.rows_affected() as u32)
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -569,6 +591,50 @@ mod tests {
         let state = store.get_scheduler_state("my-pipe").await.unwrap().unwrap();
         assert_eq!(state.consecutive_failures, 0);
         assert!(state.last_success_at.is_some());
+    }
+
+    #[tokio::test]
+    async fn test_cleanup_old_executions() {
+        let store = setup_test_store().await;
+
+        // Create 5 executions for pipe-a and 3 for pipe-b
+        for _ in 0..5 {
+            store
+                .create_execution("pipe-a", "scheduled", "m", None)
+                .await
+                .unwrap();
+        }
+        for _ in 0..3 {
+            store
+                .create_execution("pipe-b", "scheduled", "m", None)
+                .await
+                .unwrap();
+        }
+
+        // Keep only 2 per pipe — should delete 3 from pipe-a and 1 from pipe-b
+        let deleted = store.cleanup_old_executions(2).await.unwrap();
+        assert_eq!(deleted, 4);
+
+        let execs_a = store.get_executions("pipe-a", 10).await.unwrap();
+        assert_eq!(execs_a.len(), 2);
+
+        let execs_b = store.get_executions("pipe-b", 10).await.unwrap();
+        assert_eq!(execs_b.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_cleanup_noop_when_under_limit() {
+        let store = setup_test_store().await;
+        store
+            .create_execution("pipe-a", "manual", "m", None)
+            .await
+            .unwrap();
+
+        let deleted = store.cleanup_old_executions(50).await.unwrap();
+        assert_eq!(deleted, 0);
+
+        let execs = store.get_executions("pipe-a", 10).await.unwrap();
+        assert_eq!(execs.len(), 1);
     }
 
     #[tokio::test]

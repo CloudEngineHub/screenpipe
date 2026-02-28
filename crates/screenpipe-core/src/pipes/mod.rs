@@ -189,6 +189,10 @@ pub trait PipeStore: Send + Sync {
 
     /// Update scheduler state after a run.
     async fn upsert_scheduler_state(&self, pipe_name: &str, success: bool) -> Result<()>;
+
+    /// Delete old executions, keeping only the newest `keep_per_pipe` per pipe.
+    /// Returns the number of rows deleted.
+    async fn cleanup_old_executions(&self, keep_per_pipe: i32) -> Result<u32>;
 }
 
 // ---------------------------------------------------------------------------
@@ -413,7 +417,8 @@ impl PipeManager {
         self.on_output_line = Some(cb);
     }
 
-    /// Mark orphaned 'running' executions as failed on startup.
+    /// Mark orphaned 'running' executions as failed on startup,
+    /// then prune old executions (keep 50 per pipe).
     pub async fn startup_recovery(&self) {
         if let Some(ref store) = self.store {
             match store.mark_orphaned_running().await {
@@ -427,6 +432,24 @@ impl PipeManager {
                 }
                 Err(e) => {
                     warn!("startup recovery failed: {}", e);
+                }
+            }
+            // Prune old executions to prevent DB bloat
+            self.cleanup_executions().await;
+        }
+    }
+
+    /// Delete old pipe executions, keeping only the newest 50 per pipe.
+    pub async fn cleanup_executions(&self) {
+        if let Some(ref store) = self.store {
+            match store.cleanup_old_executions(50).await {
+                Ok(count) => {
+                    if count > 0 {
+                        info!("pipe cleanup: deleted {} old executions", count);
+                    }
+                }
+                Err(e) => {
+                    warn!("pipe cleanup failed: {}", e);
                 }
             }
         }
@@ -893,8 +916,8 @@ impl PipeManager {
                             .finish_execution(
                                 id,
                                 status,
-                                &output.stdout,
-                                &output.stderr,
+                                &truncate_string(&output.stdout, 50_000),
+                                &truncate_string(&output.stderr, 10_000),
                                 None,
                                 error_type.as_deref(),
                                 error_message.as_deref(),
@@ -1219,8 +1242,8 @@ impl PipeManager {
                         .finish_execution(
                             id,
                             status,
-                            &output.stdout,
-                            &output.stderr,
+                            &truncate_string(&output.stdout, 50_000),
+                            &truncate_string(&output.stderr, 10_000),
                             None,
                             error_type.as_deref(),
                             error_message.as_deref(),
@@ -1602,6 +1625,7 @@ impl PipeManager {
         tokio::spawn(async move {
             info!("pipe scheduler started");
             let mut last_run: HashMap<String, DateTime<Utc>> = HashMap::new();
+            let mut last_cleanup = Instant::now();
 
             // Load last_run from DB on first tick
             if let Some(ref store) = store {
@@ -1861,8 +1885,8 @@ impl PipeManager {
                                         .finish_execution(
                                             id,
                                             status,
-                                            &output.stdout,
-                                            &output.stderr,
+                                            &truncate_string(&output.stdout, 50_000),
+                                            &truncate_string(&output.stderr, 10_000),
                                             None,
                                             error_type.as_deref(),
                                             error_message.as_deref(),
@@ -1987,6 +2011,20 @@ impl PipeManager {
                             cb(&name_for_cb, success, duration_secs);
                         }
                     });
+                }
+
+                // Daily cleanup: prune old executions every 24h
+                if last_cleanup.elapsed() >= std::time::Duration::from_secs(86400) {
+                    if let Some(ref store) = store {
+                        match store.cleanup_old_executions(50).await {
+                            Ok(count) if count > 0 => {
+                                info!("scheduler cleanup: deleted {} old executions", count);
+                            }
+                            Err(e) => warn!("scheduler cleanup failed: {}", e),
+                            _ => {}
+                        }
+                    }
+                    last_cleanup = Instant::now();
                 }
 
                 // Sleep 30s between checks
