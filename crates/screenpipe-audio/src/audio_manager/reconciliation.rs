@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use screenpipe_core::Language;
 use screenpipe_db::{DatabaseManager, UntranscribedChunk};
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, warn};
 use whisper_rs::WhisperContext;
 
 use crate::core::engine::AudioTranscriptionEngine;
@@ -47,14 +47,14 @@ pub async fn reconcile_untranscribed(
         return 0;
     }
 
-    info!(
+    debug!(
         "reconciliation: found {} untranscribed audio chunks",
         chunks.len()
     );
 
     // Group consecutive chunks by device for batched transcription.
     let batches = group_chunks_by_device(&chunks);
-    info!(
+    debug!(
         "reconciliation: grouped into {} batches (max {}×30s each)",
         batches.len(),
         MAX_BATCH_CHUNKS
@@ -74,8 +74,8 @@ pub async fn reconcile_untranscribed(
             let path = Path::new(&chunk.file_path);
             if !path.exists() {
                 warn!(
-                    "reconciliation: audio file missing, skipping chunk {}: {}",
-                    chunk.id, chunk.file_path
+                    "reconciliation: audio file missing, skipping chunk {}",
+                    chunk.id
                 );
                 continue;
             }

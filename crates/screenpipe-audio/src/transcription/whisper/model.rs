@@ -2,7 +2,7 @@ use crate::core::engine::AudioTranscriptionEngine;
 use anyhow::Result;
 use hf_hub::{api::sync::Api, Cache, Repo, RepoType};
 use std::{path::PathBuf, sync::Arc};
-use tracing::info;
+use tracing::{debug, info};
 use whisper_rs::WhisperContextParameters;
 
 pub fn download_whisper_model(engine: Arc<AudioTranscriptionEngine>) -> Result<PathBuf> {
@@ -31,7 +31,7 @@ pub fn download_whisper_model(engine: Arc<AudioTranscriptionEngine>) -> Result<P
     let cache_repo = cache.repo(repo.clone());
 
     if let Some(model_path) = cache_repo.get(model_name) {
-        info!("model found at {:?}", model_path);
+        debug!("model found at {:?}", model_path);
         return Ok(model_path);
     }
 

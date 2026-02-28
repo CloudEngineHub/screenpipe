@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, LogicalSize, Manager, Size, WebviewUrl, WebviewWindow, WebviewWindowBuilder, Wry};
 #[cfg(target_os = "macos")]
 use tauri_nspanel::ManagerExt;
-use tracing::{error, info};
+use tracing::{debug, error, info};
 #[cfg(target_os = "macos")]
 use tauri_nspanel::WebviewWindowExt;
 
@@ -975,7 +975,7 @@ impl ShowRewindWindow {
             return Ok(window);
         }
 
-        info!("showing window: {:?} (not found)", id.label());
+        debug!("showing window: {:?} (not found)", id.label());
 
 
         let window = match self {

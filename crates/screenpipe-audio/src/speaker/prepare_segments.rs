@@ -6,7 +6,7 @@ use crate::{
 use anyhow::Result;
 use std::{path::PathBuf, sync::Arc, sync::Mutex as StdMutex};
 use tokio::sync::Mutex;
-use tracing::{error, info};
+use tracing::{debug, error};
 use vad_rs::VadStatus;
 
 use super::{
@@ -75,7 +75,7 @@ pub async fn prepare_segments(
     }
 
     let speech_ratio = speech_frame_count as f32 / total_frames as f32;
-    info!(
+    debug!(
         "device: {}, speech ratio: {}, min_speech_ratio: {}, audio_frames: {}, speech_frames: {}",
         device,
         speech_ratio,

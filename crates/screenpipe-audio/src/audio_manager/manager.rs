@@ -490,7 +490,7 @@ impl AudioManager {
 
         Ok(tokio::spawn(async move {
             while let Ok(audio) = whisper_receiver.recv() {
-                info!("Received audio from device: {:?}", audio.device.name);
+                debug!("received audio from device: {:?}", audio.device.name);
 
                 // Audio-based call detection: update meeting detector with speech activity
                 if let Some(ref meeting) = meeting_detector {
