@@ -838,6 +838,34 @@ impl DatabaseManager {
         Ok(rows)
     }
 
+    /// Get audio chunks by explicit IDs (used by re-transcribe when frontend sends chunk IDs).
+    pub async fn get_audio_chunks_by_ids(
+        &self,
+        ids: &[i64],
+    ) -> Result<Vec<AudioChunkInfo>, sqlx::Error> {
+        if ids.is_empty() {
+            return Ok(vec![]);
+        }
+        // Build placeholder list: (?1, ?2, ?3, ...)
+        let placeholders: Vec<String> = (1..=ids.len()).map(|i| format!("?{}", i)).collect();
+        let sql = format!(
+            r#"SELECT ac.id, ac.file_path, at.transcription, at.transcription_engine,
+                      at.offset_index, COALESCE(at.timestamp, ac.timestamp) as timestamp,
+                      at.device, at.is_input_device
+               FROM audio_chunks ac
+               LEFT JOIN audio_transcriptions at ON ac.id = at.audio_chunk_id
+               WHERE ac.id IN ({})
+               ORDER BY ac.timestamp ASC"#,
+            placeholders.join(", ")
+        );
+        let mut query = sqlx::query_as::<_, AudioChunkInfo>(&sql);
+        for id in ids {
+            query = query.bind(id);
+        }
+        let rows = query.fetch_all(&self.pool).await?;
+        Ok(rows)
+    }
+
     pub async fn insert_speaker(&self, embedding: &[f32]) -> Result<Speaker, SqlxError> {
         let mut tx = self.begin_immediate_with_retry().await?;
 

@@ -13,14 +13,17 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::path::Path;
 use std::sync::Arc;
-use tracing::{debug, error, info};
+use tracing::{error, info};
 
 use crate::server::AppState;
 
 #[derive(Debug, Deserialize)]
 pub struct RetranscribeRequest {
-    pub start: DateTime<Utc>,
-    pub end: DateTime<Utc>,
+    /// Explicit chunk IDs to retranscribe (preferred — avoids timestamp mismatches)
+    pub audio_chunk_ids: Option<Vec<i64>>,
+    /// Fallback: time range to query chunks (used when audio_chunk_ids is absent)
+    pub start: Option<DateTime<Utc>>,
+    pub end: Option<DateTime<Utc>>,
     /// Optional engine override: "whisper-large-v3", "deepgram", etc.
     pub engine: Option<String>,
     /// Custom vocabulary for this re-transcription
@@ -50,29 +53,40 @@ pub async fn retranscribe_handler(
     State(state): State<Arc<AppState>>,
     Json(request): Json<RetranscribeRequest>,
 ) -> Response {
-    info!(
-        "retranscribe request: {} to {}",
-        request.start, request.end
-    );
-
-    // 1. Query audio chunks in range
-    let chunks = match state
-        .db
-        .get_audio_chunks_in_range(request.start, request.end)
-        .await
-    {
-        Ok(c) => c,
-        Err(e) => {
-            error!("failed to query audio chunks: {}", e);
-            return error_response(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("db query failed: {}", e),
-            );
+    // 1. Query audio chunks — by explicit IDs (preferred) or time range (fallback)
+    let chunks = if let Some(ref ids) = request.audio_chunk_ids {
+        info!("retranscribe request: {} explicit chunk IDs", ids.len());
+        match state.db.get_audio_chunks_by_ids(ids).await {
+            Ok(c) => c,
+            Err(e) => {
+                error!("failed to query audio chunks by IDs: {}", e);
+                return error_response(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("db query failed: {}", e),
+                );
+            }
         }
+    } else if let (Some(start), Some(end)) = (request.start, request.end) {
+        info!("retranscribe request: {} to {}", start, end);
+        match state.db.get_audio_chunks_in_range(start, end).await {
+            Ok(c) => c,
+            Err(e) => {
+                error!("failed to query audio chunks: {}", e);
+                return error_response(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("db query failed: {}", e),
+                );
+            }
+        }
+    } else {
+        return error_response(
+            StatusCode::BAD_REQUEST,
+            "must provide audio_chunk_ids or start+end time range".into(),
+        );
     };
 
     if chunks.is_empty() {
-        info!("retranscribe: no audio chunks found in range");
+        info!("retranscribe: no audio chunks found");
         return JsonResponse(json!({
             "chunks_processed": 0,
             "transcriptions": []
@@ -80,7 +94,7 @@ pub async fn retranscribe_handler(
         .into_response();
     }
 
-    debug!("retranscribe: found {} raw rows (may include dupes)", chunks.len());
+    info!("retranscribe: found {} raw rows (may include dupes)", chunks.len());
 
     // 2. Get transcription config from audio manager
     let audio_manager = &state.audio_manager;

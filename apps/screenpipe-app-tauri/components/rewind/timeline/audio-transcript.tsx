@@ -421,21 +421,22 @@ export function AudioTranscript({
 	const handleRetranscribe = useCallback(async () => {
 		if (isRetranscribing) return; // prevent double-submit
 		const data = tabMode === "meeting" ? meetingConversationData : conversationData;
-		if (!data.items.length || !data.timeRange) return;
+		if (!data.items.length) return;
 
 		setShowRetranscribeDialog(false);
 		setIsRetranscribing(true);
 
 		try {
+			// Collect unique audio_chunk_ids from visible items (avoids timestamp mismatch)
+			const chunkIds = [...new Set(data.items.map((item) => item.audio.audio_chunk_id))];
 			const body: Record<string, unknown> = {
-				start: data.timeRange.start.toISOString(),
-				end: data.timeRange.end.toISOString(),
+				audio_chunk_ids: chunkIds,
 			};
 			if (retranscribePrompt.trim()) {
 				body.prompt = retranscribePrompt.trim();
 			}
 
-			console.log("[retranscribe] request:", JSON.stringify(body));
+			console.log("[retranscribe] request:", chunkIds.length, "chunks");
 
 			const res = await fetch("http://localhost:3030/audio/retranscribe", {
 				method: "POST",
@@ -730,15 +731,20 @@ export function AudioTranscript({
 							<TooltipContent side="bottom"><p>{copied ? "copied!" : "copy"}</p></TooltipContent>
 						</Tooltip>
 						<DropdownMenu>
-							<DropdownMenuTrigger asChild>
-								<Button variant="ghost" size="sm" className="h-6 w-6 p-0">
-									{isRetranscribing ? (
-										<Loader2 className="h-3 w-3 animate-spin" />
-									) : (
-										<MoreVertical className="h-3 w-3" />
-									)}
-								</Button>
-							</DropdownMenuTrigger>
+							<Tooltip>
+								<TooltipTrigger asChild>
+									<DropdownMenuTrigger asChild>
+										<Button variant="ghost" size="sm" className="h-6 w-6 p-0">
+											{isRetranscribing ? (
+												<Loader2 className="h-3 w-3 animate-spin" />
+											) : (
+												<MoreVertical className="h-3 w-3" />
+											)}
+										</Button>
+									</DropdownMenuTrigger>
+								</TooltipTrigger>
+								<TooltipContent side="bottom"><p>{isRetranscribing ? "retranscribing..." : "more"}</p></TooltipContent>
+							</Tooltip>
 							<DropdownMenuContent align="end" className="w-44">
 								<DropdownMenuItem
 									onClick={() => setShowRetranscribeDialog(true)}
@@ -798,6 +804,14 @@ export function AudioTranscript({
 					WebkitOverflowScrolling: "touch",
 				}}
 			>
+				{/* Retranscribing banner */}
+				{isRetranscribing && (
+					<div className="flex items-center gap-2 px-3 py-2 border-b border-border bg-muted/50 text-xs text-muted-foreground">
+						<Loader2 className="h-3 w-3 animate-spin shrink-0" />
+						<span>retranscribing audio — this may take a moment...</span>
+					</div>
+				)}
+
 				{tabMode === "meeting" && activeMeeting ? (
 					// Full meeting transcript view
 					<div className="p-3 pb-14 space-y-0">
@@ -859,6 +873,7 @@ export function AudioTranscript({
 														playing === item.audio.audio_file_path
 													}
 													startOffsetSecs={item.audio.start_offset}
+													highlighted={transcriptionOverrides.has(item.audio.audio_chunk_id)}
 													onPlay={() =>
 														handlePlay(item.audio.audio_file_path)
 													}
@@ -914,6 +929,7 @@ export function AudioTranscript({
 											isFirstInGroup={item.isFirstInGroup}
 											isPlaying={playing === item.audio.audio_file_path}
 											startOffsetSecs={item.audio.start_offset}
+											highlighted={transcriptionOverrides.has(item.audio.audio_chunk_id)}
 											onPlay={() => handlePlay(item.audio.audio_file_path)}
 											onSpeakerAssigned={(newId, newName) =>
 												handleSpeakerAssigned(
@@ -949,10 +965,16 @@ export function AudioTranscript({
 						<DialogTitle className="text-sm">retranscribe audio</DialogTitle>
 					</DialogHeader>
 					<div className="space-y-3">
-						<p className="text-xs text-muted-foreground">
-							re-run speech-to-text on all audio chunks in the current view.
-							optionally provide a prompt to guide transcription (e.g. speaker names, technical terms, language).
-						</p>
+						{(() => {
+							const data = tabMode === "meeting" ? meetingConversationData : conversationData;
+							const chunkCount = new Set(data.items.map((item) => item.audio.audio_chunk_id)).size;
+							return (
+								<p className="text-xs text-muted-foreground">
+									re-run speech-to-text on {chunkCount} audio chunk{chunkCount !== 1 ? "s" : ""}.
+									optionally provide a prompt to guide transcription (e.g. speaker names, technical terms).
+								</p>
+							);
+						})()}
 						<Input
 							placeholder="optional prompt (e.g. 'speakers: marc, ben. topic: AI startups')"
 							value={retranscribePrompt}
@@ -961,6 +983,7 @@ export function AudioTranscript({
 								if (e.key === "Enter") handleRetranscribe();
 							}}
 							className="text-xs"
+							autoFocus
 						/>
 					</div>
 					<DialogFooter>
