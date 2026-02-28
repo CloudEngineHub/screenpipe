@@ -16,6 +16,7 @@ use crate::{
     analytics,
     hot_frame_cache::HotFrameCache,
     routes::{
+        activity_summary::get_activity_summary,
         audio::{
             api_list_audio_devices, start_audio, start_audio_device, stop_audio, stop_audio_device,
         },
@@ -418,6 +419,7 @@ impl SCServer {
             .post("/audio/device/stop", stop_audio_device)
             .get("/elements", search_elements)
             .get("/frames/:frame_id/elements", get_frame_elements)
+            .get("/activity-summary", get_activity_summary)
             .route_yaml_spec("/openapi.yaml")
             .route_json_spec("/openapi.json")
             .freeze();

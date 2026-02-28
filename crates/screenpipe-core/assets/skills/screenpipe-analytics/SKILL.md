@@ -136,6 +136,34 @@ CREATE TABLE ocr_text (
 );
 ```
 
+### elements — Structured UI elements (accessibility nodes + OCR blocks)
+
+```sql
+CREATE TABLE elements (
+    id INTEGER PRIMARY KEY,
+    frame_id INTEGER NOT NULL,     -- FK to frames.id
+    source TEXT NOT NULL,           -- 'accessibility' or 'ocr'
+    role TEXT NOT NULL,             -- e.g. 'AXButton', 'AXStaticText', 'AXLink', 'line'
+    text TEXT,                      -- element text content
+    parent_id INTEGER,             -- parent element id (for hierarchy)
+    depth INTEGER NOT NULL DEFAULT 0,
+    bounds_left REAL,
+    bounds_top REAL,
+    bounds_width REAL,
+    bounds_height REAL,
+    confidence REAL,
+    sort_order INTEGER NOT NULL DEFAULT 0
+);
+-- FTS index: elements_fts (text)
+```
+
+**Key facts:**
+- Each frame can have hundreds of elements (one per UI node)
+- `source='accessibility'` has proper hierarchy (parent_id, depth) and roles
+- `source='ocr'` has flat text blocks with bounding boxes
+- FTS index enables fast full-text search via the `/elements` API endpoint
+- Join with `frames` via `frame_id` to get timestamps, app names, etc.
+
 ## Ready-to-Use Queries
 
 ### Most used apps (by screen time)
@@ -226,6 +254,16 @@ curl -X POST http://localhost:3030/raw_sql \
 PAYLOAD
 ```
 
+### Most seen UI elements by app
+
+```bash
+curl -X POST http://localhost:3030/raw_sql \
+  -H "Content-Type: application/json" \
+  --data-binary @- <<'PAYLOAD'
+{"query": "SELECT f.app_name, e.role, COUNT(*) as count FROM elements e JOIN frames f ON f.id = e.frame_id WHERE f.timestamp > datetime('now', '-24 hours') AND e.source = 'accessibility' AND e.text IS NOT NULL GROUP BY f.app_name, e.role ORDER BY count DESC LIMIT 30"}
+PAYLOAD
+```
+
 ### Typing volume by app
 
 ```bash
@@ -286,6 +324,7 @@ Weekday values: 0=Sunday, 1=Monday, ..., 6=Saturday.
 |-------|---------|-------------|-------------|
 | `frames` | Screen captures (~0.5 fps) | `timestamp` | `app_name`, `window_name`, `browser_url`, `focused` |
 | `ocr_text` | OCR text per frame | Join via `frame_id` | `text`, `app_name`, `window_name` |
+| `elements` | Structured UI elements | Join via `frame_id` → `frames.timestamp` | `source`, `role`, `text`, `bounds_*` |
 | `audio_transcriptions` | Speech segments | `timestamp` | `transcription`, `device`, `speaker_id`, `is_input_device` |
 | `audio_chunks` | Audio files (~30s) | `timestamp` | `file_path` |
 | `speakers` | Speaker identities | — | `name`, `metadata` |

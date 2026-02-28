@@ -47,6 +47,25 @@ curl "http://localhost:3030/search?q=QUERY&content_type=all&limit=10&start_time=
 - `accessibility` — Accessibility tree text
 - `all` — OCR + Audio + Accessibility (default)
 
+### Progressive Disclosure Strategy
+
+Don't jump straight to heavy `/search` calls. Escalate through these steps, stopping as soon as you have enough info:
+
+| Step | Endpoint | Tokens | When to use |
+|------|----------|--------|-------------|
+| 1. **Activity Summary** | `GET /activity-summary?start_time=...&end_time=...` | ~200 | Start here for broad questions ("what was I doing?", "summarize my day") |
+| 2. **Narrow with /search** | `GET /search?...` | ~500-1000 | When you need specific content from step 1's context |
+| 3. **Drill into elements** | `GET /elements?...` or `GET /frames/{id}/context` | ~200 each | For structural detail (buttons, links, UI layout) |
+| 4. **Screenshots** | `GET /frames/{frame_id}` | ~1500 each | Only when text isn't enough (charts, images, visual layout) |
+
+#### Decision tree
+
+- "What was I doing?" → Step 1 only
+- "What did I work on in Chrome?" → Step 1 (identify Chrome usage) → Step 2 (search Chrome content)
+- "What button did I click?" → Step 1 (context) → Step 3 (elements with role=AXButton)
+- "Show me what I was looking at" → Step 1 → Step 2 (find frame_id) → Step 4 (fetch screenshot)
+- "What URLs did I visit?" → Step 1 (identify browser) → Step 3 (`/frames/{id}/context` for URLs)
+
 ### CRITICAL RULES
 
 1. **ALWAYS include `start_time`** — the database has hundreds of thousands of entries. Queries without time bounds WILL timeout.
@@ -56,6 +75,7 @@ curl "http://localhost:3030/search?q=QUERY&content_type=all&limit=10&start_time=
 5. **Keep `limit` low** (5-10) initially. Only increase if the user needs more.
 6. **"recent"** = last 30 minutes. **"today"** = since midnight. **"yesterday"** = yesterday's date range.
 7. If a search times out, retry with a narrower time range (e.g. 30 mins instead of 2 hours).
+8. **Prefer lightweight endpoints first** — use `/activity-summary` before `/search`, and `/elements` before fetching full frames.
 
 ### Example Searches
 
@@ -165,6 +185,24 @@ curl -o /tmp/frame_12345.png "http://localhost:3030/frames/12345"
 ```
 
 ## Other Useful Endpoints
+
+### Activity Summary (lightweight overview)
+```bash
+curl "http://localhost:3030/activity-summary?start_time=$(date -u -v-1H +%Y-%m-%dT%H:%M:%SZ)&end_time=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+```
+Returns app usage, recent texts, and audio summary in ~200-500 tokens. Great starting point before deeper searches.
+
+### Elements Search (structured UI data)
+```bash
+curl "http://localhost:3030/elements?q=Submit&role=AXButton&start_time=$(date -u -v-1H +%Y-%m-%dT%H:%M:%SZ)&limit=10"
+```
+Returns individual UI elements (~100-500 bytes each) — much lighter than `/search` for targeted lookups.
+
+### Frame Context (accessibility text + URLs)
+```bash
+curl "http://localhost:3030/frames/12345/context"
+```
+Returns parsed accessibility tree, full text, and extracted URLs for a specific frame.
 
 ### Health Check
 ```bash
