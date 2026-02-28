@@ -583,8 +583,6 @@ fn run_tree_walker(
                 }
 
                 if cache.should_store(&snap) {
-                    // Check stop flag before blocking on the runtime — during shutdown
-                    // the tokio context may be tearing down, causing a panic in block_on.
                     if stop.load(std::sync::atomic::Ordering::Relaxed) {
                         debug!("Stop flag set, skipping DB insert for accessibility text");
                         break;
@@ -592,19 +590,21 @@ fn run_tree_walker(
 
                     metrics.total_text_chars += snap.text_content.len() as u64;
 
-                    // Wrap block_on in catch_unwind — during shutdown the tokio
-                    // runtime may be tearing down, causing block_on to panic.
-                    // Losing one DB write on shutdown is harmless.
-                    let db_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                        rt_handle.block_on(db.insert_accessibility_text(
-                            &snap.app_name,
-                            &snap.window_name,
-                            &snap.text_content,
-                            snap.browser_url.as_deref(),
-                        ))
-                    }));
+                    // Spawn the DB write on the runtime and wait via std channel.
+                    // Unlike block_on, this won't panic during runtime shutdown —
+                    // the spawned task is silently cancelled and the channel closes.
+                    let (result_tx, result_rx) = std::sync::mpsc::sync_channel(1);
+                    let db_c = db.clone();
+                    let app = snap.app_name.clone();
+                    let win = snap.window_name.clone();
+                    let text = snap.text_content.clone();
+                    let url = snap.browser_url.clone();
+                    rt_handle.spawn(async move {
+                        let r = db_c.insert_accessibility_text(&app, &win, &text, url.as_deref()).await;
+                        let _ = result_tx.send(r);
+                    });
 
-                    match db_result {
+                    match result_rx.recv_timeout(std::time::Duration::from_secs(5)) {
                         Ok(Ok(_id)) => {
                             debug!(
                                 "Stored accessibility text: app={}, window={}, len={}, nodes={}, walk={}ms",
@@ -622,8 +622,13 @@ fn run_tree_walker(
                             metrics.walks_error += 1;
                         }
                         Err(_) => {
-                            debug!("Runtime shutting down, stopping tree-walker DB writes");
-                            break;
+                            // Channel closed (runtime shutdown) or timed out
+                            if stop.load(Ordering::Relaxed) {
+                                debug!("Runtime shutting down, stopping tree-walker DB writes");
+                                break;
+                            }
+                            debug!("DB insert timed out");
+                            metrics.walks_error += 1;
                         }
                     }
                 } else {
