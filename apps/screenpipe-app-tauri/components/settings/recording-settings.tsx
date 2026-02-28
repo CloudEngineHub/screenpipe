@@ -240,6 +240,25 @@ export function RecordingSettings() {
     }
   };
 
+  const handleRemoveTeamFilter = async (configType: string, key: string, filterToRemove: string) => {
+    const config = team.configs?.find(
+      (c) => c.config_type === configType && c.key === key && c.scope === "team"
+    );
+    if (!config) return;
+    const currentFilters = (config.value as { filters?: string[] })?.filters || [];
+    const updated = currentFilters.filter((f) => f !== filterToRemove);
+    try {
+      if (updated.length === 0) {
+        await team.deleteConfig(config.id);
+      } else {
+        await team.pushConfig(configType, key, { filters: updated });
+      }
+      toast({ title: "filter removed from team" });
+    } catch (err: any) {
+      toast({ title: "failed to remove filter", description: err.message, variant: "destructive" });
+    }
+  };
+
   // Add new state to track if settings have changed
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
 
@@ -1524,8 +1543,13 @@ Your screen is a pipe. Everything you see, hear, and type flows through it. Scre
                   {filterView === "all" && (settings.teamFilters?.ignoredWindows?.length ?? 0) > 0 && (
                     <div className="flex flex-wrap gap-1 mt-1">
                       {settings.teamFilters!.ignoredWindows.map((w) => (
-                        <Badge key={w} variant="outline" className="text-[10px] h-5">
+                        <Badge key={w} variant="outline" className="text-[10px] h-5 gap-0.5">
                           <Users className="h-2.5 w-2.5 mr-0.5" />{w}
+                          {isTeamAdmin && (
+                            <button onClick={() => handleRemoveTeamFilter("window_filter", "ignored_windows", w)} className="ml-0.5 hover:text-destructive">
+                              <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+                            </button>
+                          )}
                         </Badge>
                       ))}
                     </div>
@@ -1572,8 +1596,13 @@ Your screen is a pipe. Everything you see, hear, and type flows through it. Scre
                   {filterView === "all" && (settings.teamFilters?.includedWindows?.length ?? 0) > 0 && (
                     <div className="flex flex-wrap gap-1 mt-1">
                       {settings.teamFilters!.includedWindows.map((w) => (
-                        <Badge key={w} variant="outline" className="text-[10px] h-5">
+                        <Badge key={w} variant="outline" className="text-[10px] h-5 gap-0.5">
                           <Users className="h-2.5 w-2.5 mr-0.5" />{w}
+                          {isTeamAdmin && (
+                            <button onClick={() => handleRemoveTeamFilter("window_filter", "included_windows", w)} className="ml-0.5 hover:text-destructive">
+                              <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+                            </button>
+                          )}
                         </Badge>
                       ))}
                     </div>
@@ -1629,8 +1658,13 @@ Your screen is a pipe. Everything you see, hear, and type flows through it. Scre
                   {filterView === "all" && (settings.teamFilters?.ignoredUrls?.length ?? 0) > 0 && (
                     <div className="flex flex-wrap gap-1 mt-1">
                       {settings.teamFilters!.ignoredUrls.map((u) => (
-                        <Badge key={u} variant="outline" className="text-[10px] h-5">
+                        <Badge key={u} variant="outline" className="text-[10px] h-5 gap-0.5">
                           <Users className="h-2.5 w-2.5 mr-0.5" />{u}
+                          {isTeamAdmin && (
+                            <button onClick={() => handleRemoveTeamFilter("url_filter", "ignored_urls", u)} className="ml-0.5 hover:text-destructive">
+                              <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+                            </button>
+                          )}
                         </Badge>
                       ))}
                     </div>
@@ -1653,8 +1687,13 @@ Your screen is a pipe. Everything you see, hear, and type flows through it. Scre
                   </div>
                   <div className="flex flex-wrap gap-1 ml-[26px]">
                     {settings.teamFilters!.ignoredWindows.map((w) => (
-                      <Badge key={w} variant="outline" className="text-[10px] h-5">
+                      <Badge key={w} variant="outline" className="text-[10px] h-5 gap-0.5">
                         <Users className="h-2.5 w-2.5 mr-0.5" />{w}
+                        {isTeamAdmin && (
+                          <button onClick={() => handleRemoveTeamFilter("window_filter", "ignored_windows", w)} className="ml-0.5 hover:text-destructive">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+                          </button>
+                        )}
                       </Badge>
                     ))}
                   </div>
@@ -1671,8 +1710,13 @@ Your screen is a pipe. Everything you see, hear, and type flows through it. Scre
                   </div>
                   <div className="flex flex-wrap gap-1 ml-[26px]">
                     {settings.teamFilters!.includedWindows.map((w) => (
-                      <Badge key={w} variant="outline" className="text-[10px] h-5">
+                      <Badge key={w} variant="outline" className="text-[10px] h-5 gap-0.5">
                         <Users className="h-2.5 w-2.5 mr-0.5" />{w}
+                        {isTeamAdmin && (
+                          <button onClick={() => handleRemoveTeamFilter("window_filter", "included_windows", w)} className="ml-0.5 hover:text-destructive">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+                          </button>
+                        )}
                       </Badge>
                     ))}
                   </div>
@@ -1689,8 +1733,13 @@ Your screen is a pipe. Everything you see, hear, and type flows through it. Scre
                   </div>
                   <div className="flex flex-wrap gap-1 ml-[26px]">
                     {settings.teamFilters!.ignoredUrls.map((u) => (
-                      <Badge key={u} variant="outline" className="text-[10px] h-5">
+                      <Badge key={u} variant="outline" className="text-[10px] h-5 gap-0.5">
                         <Users className="h-2.5 w-2.5 mr-0.5" />{u}
+                        {isTeamAdmin && (
+                          <button onClick={() => handleRemoveTeamFilter("url_filter", "ignored_urls", u)} className="ml-0.5 hover:text-destructive">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+                          </button>
+                        )}
                       </Badge>
                     ))}
                   </div>

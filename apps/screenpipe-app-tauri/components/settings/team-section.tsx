@@ -54,6 +54,21 @@ export function TeamSection() {
   const [inviteEmail, setInviteEmail] = useState("");
   const [sendingInvite, setSendingInvite] = useState(false);
 
+  const handleRemoveFilterItem = async (config: TeamConfig, filterToRemove: string) => {
+    const currentFilters = (config.value as { filters?: string[] })?.filters || [];
+    const updated = currentFilters.filter((f) => f !== filterToRemove);
+    try {
+      if (updated.length === 0) {
+        await team.deleteConfig(config.id);
+      } else {
+        await team.pushConfig(config.config_type, config.key, { filters: updated });
+      }
+      toast({ title: "filter removed" });
+    } catch (err: any) {
+      toast({ title: "failed to remove filter", description: err.message, variant: "destructive" });
+    }
+  };
+
   // track team section view
   const hasTeam = !!team.team;
   useEffect(() => {
@@ -540,7 +555,7 @@ export function TeamSection() {
             ) : (
               <div className="space-y-2 mt-2">
                 {windowFilterConfigs.map((c) => (
-                  <SharedFilterRow key={c.id} config={c} isAdmin={isAdmin} onDelete={() => team.deleteConfig(c.id)} />
+                  <SharedFilterRow key={c.id} config={c} isAdmin={isAdmin} onDelete={() => team.deleteConfig(c.id)} onRemoveFilter={(f) => handleRemoveFilterItem(c, f)} />
                 ))}
               </div>
             )}
@@ -556,7 +571,7 @@ export function TeamSection() {
             ) : (
               <div className="space-y-2 mt-2">
                 {urlFilterConfigs.map((c) => (
-                  <SharedFilterRow key={c.id} config={c} isAdmin={isAdmin} onDelete={() => team.deleteConfig(c.id)} />
+                  <SharedFilterRow key={c.id} config={c} isAdmin={isAdmin} onDelete={() => team.deleteConfig(c.id)} onRemoveFilter={(f) => handleRemoveFilterItem(c, f)} />
                 ))}
               </div>
             )}
@@ -651,7 +666,7 @@ function SharedConfigRow({ config, isAdmin, onDelete }: { config: TeamConfig; is
   );
 }
 
-function SharedFilterRow({ config, isAdmin, onDelete }: { config: TeamConfig; isAdmin: boolean; onDelete: () => void }) {
+function SharedFilterRow({ config, isAdmin, onDelete, onRemoveFilter }: { config: TeamConfig; isAdmin: boolean; onDelete: () => void; onRemoveFilter?: (filter: string) => void }) {
   const filters = (config.value as { filters?: string[] })?.filters || [];
   return (
     <div className="flex items-center justify-between py-2 px-3 rounded-md border">
@@ -663,8 +678,13 @@ function SharedFilterRow({ config, isAdmin, onDelete }: { config: TeamConfig; is
         {filters.length > 0 && (
           <div className="flex flex-wrap gap-1 mt-1">
             {filters.map((f) => (
-              <Badge key={f} variant="secondary" className="text-[10px] h-5">
+              <Badge key={f} variant="secondary" className="text-[10px] h-5 gap-0.5">
                 {f}
+                {isAdmin && onRemoveFilter && (
+                  <button onClick={() => onRemoveFilter(f)} className="ml-0.5 hover:text-destructive">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+                  </button>
+                )}
               </Badge>
             ))}
           </div>
@@ -681,6 +701,7 @@ function SharedFilterRow({ config, isAdmin, onDelete }: { config: TeamConfig; is
           size="sm"
           className="h-7 text-xs text-muted-foreground hover:text-destructive"
           onClick={onDelete}
+          title="remove all"
         >
           <Trash2 className="h-3 w-3" />
         </Button>
