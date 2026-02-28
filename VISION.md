@@ -24,16 +24,16 @@ We build the layer that gives AI full context of human work so it can act autono
 
 ## Structural advantages
 
-- **Local-first** is architecture, not a feature. Apple/Google/Microsoft can't credibly do this — their business model is cloud. Privacy is structural, not a toggle.
-- **Open source** creates trust you can't buy. 16K+ GitHub stars, 80+ contributors.
-- **Last man standing.** Rewind ($350M raised) and Limitless were both acquired by Meta and shut down. Microsoft Recall is Windows-only, enterprise, and a privacy nightmare. We are the only indie local-first option.
+- **Local-first** is architecture, not a feature. Privacy is structural, not a toggle.
+- **Open source** creates trust you can't buy.
 - **Data moat.** Switching means losing your entire memory. Compounds daily.
+- **Cross-platform.** macOS, Windows, Linux. Not locked to one ecosystem.
 
 ## Product principles
 
 - **Stability over features.** Users who stay are obsessed. Users who leave hit bugs. Fix what's broken before building what's new.
-- **Activation is the bottleneck, not product quality.** 75% of users who open the app never engage — but the ones who do are power users. The product works, the door is hidden.
-- **Consumer-first.** B2B emerges naturally from stability. Don't chase enterprise — earn it.
+- **Activation is the bottleneck.** The product works, the door is hidden. Make the first experience undeniable.
+- **Consumer-first.** Don't chase enterprise — earn it through product quality.
 - **No feature creep.** Every feature must serve Record, Rewind, or Ask. If it doesn't, it doesn't ship.
 - **Respect the user's machine.** CPU, memory, disk — screenpipe runs 24/7 in the background. Performance is not optional. Target: <20% CPU, <4GB RAM on release builds.
 
@@ -42,8 +42,8 @@ We build the layer that gives AI full context of human work so it can act autono
 - **Ship daily.** Small, focused changes. Every commit should be deployable.
 - **Fix the funnel before adding features.** Permission loss, onboarding drops, version fragmentation — these kill growth silently.
 - **Local-first always.** Data never leaves the device unless the user explicitly opts in (cloud sync, cloud archive). Encryption is zero-knowledge.
-- **Cross-platform.** macOS, Windows, Linux. If it doesn't work on all three, it's not done.
-- **Open source by default.** Capture layer is open. Understanding layer can be proprietary. Trust is earned through transparency.
+- **Cross-platform.** If it doesn't work on macOS, Windows, and Linux, it's not done.
+- **Open source by default.** Trust is earned through transparency.
 
 ## Design voice
 
@@ -56,10 +56,9 @@ We build the layer that gives AI full context of human work so it can act autono
 
 ## North star metrics
 
-- **Hours of human work automated** — the ultimate measure of value.
 - **Daily active users** (intentional retrieval: shortcut, search, timeline scrub) — not app launches.
-- **Activation rate** — % of app openers who perform an intentional action. Target: 40%+.
-- **D7 retention** — do they come back? Target: 20%+.
+- **Activation rate** — % of app openers who perform an intentional action.
+- **D7 retention** — do they come back?
 
 ## What we believe
 
