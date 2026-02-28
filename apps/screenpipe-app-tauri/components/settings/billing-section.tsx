@@ -160,12 +160,12 @@ export function BillingSection() {
             Billing
           </h1>
           <p className="text-sm text-muted-foreground mt-1">
-            sign in to view your usage and billing
+            Sign in to view your usage and billing
           </p>
         </div>
         <Card className="p-8 flex flex-col items-center text-center">
           <Zap className="h-10 w-10 text-muted-foreground mb-4" />
-          <h3 className="text-lg font-semibold mb-1">sign in required</h3>
+          <h3 className="text-lg font-semibold mb-1">Sign in required</h3>
           <p className="text-sm text-muted-foreground mb-6">
             log in to view your AI usage and manage billing
           </p>
@@ -279,7 +279,7 @@ export function BillingSection() {
       <Card className="p-5">
         <div className="flex items-center justify-between mb-3">
           <h3 className="text-sm font-semibold text-foreground">
-            daily usage
+            Daily usage
           </h3>
           <span className="text-xs font-medium text-muted-foreground">
             {usageLabel}
@@ -337,7 +337,7 @@ export function BillingSection() {
         <div className="flex items-center justify-between mb-4">
           <div>
             <h3 className="text-sm font-semibold text-foreground">
-              auto-reload
+              Auto-reload
             </h3>
             <p className="text-xs text-muted-foreground mt-0.5">
               automatically top up when credit balance is low

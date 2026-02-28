@@ -285,7 +285,7 @@ export function TeamSection() {
         <Card className="p-6">
           <div className="flex items-start justify-between mb-3">
             <div>
-              <h3 className="text-lg font-semibold">bring your team to screenpipe</h3>
+              <h3 className="text-lg font-semibold">Bring your team to Screenpipe</h3>
               <p className="text-sm text-muted-foreground mt-1">
                 add your team and push pipe configurations and content filters to all members.
                 everything is end-to-end encrypted — the server never sees your configs.
@@ -307,14 +307,14 @@ export function TeamSection() {
               ) : (
                 <Plus className="h-4 w-4 mr-1.5" />
               )}
-              create team
+              Create team
             </Button>
           </div>
         </Card>
 
         {/* Join with invite link */}
         <Card className="p-6">
-          <h3 className="text-sm font-medium mb-3">have an invite link?</h3>
+          <h3 className="text-sm font-medium mb-3">Have an invite link?</h3>
           {showJoinInput ? (
             <div className="flex gap-2">
               <Input

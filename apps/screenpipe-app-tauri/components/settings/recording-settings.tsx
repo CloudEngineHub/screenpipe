@@ -1785,7 +1785,7 @@ Your screen is a pipe. Everything you see, hear, and type flows through it. Scre
         }
       }}>
         <DialogContent className="max-w-lg">
-          <DialogTitle className="text-sm font-medium">read this aloud</DialogTitle>
+          <DialogTitle className="text-sm font-medium">Read this aloud</DialogTitle>
           <DialogDescription className="text-xs text-muted-foreground">
             speak naturally at your normal pace — this helps screenpipe learn your voice
           </DialogDescription>
