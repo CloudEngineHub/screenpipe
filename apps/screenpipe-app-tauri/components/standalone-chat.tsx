@@ -179,54 +179,111 @@ const TOOL_ICONS: Record<string, string> = {
   ls: "📁",
 };
 
-// Grid dissolve loading indicator — 5x4 grid of cells that randomly toggle
-// black/white like pixels being scanned. Geometric, screen-capture themed.
-function GridDissolveLoader({ label = "analyzing..." }: { label?: string }) {
+// Animation phase for the grid dissolve loader.
+type LoaderPhase = "analyzing" | "thinking" | "tool" | "streaming";
+
+// Grid dissolve loading indicator — 5x4 grid of cells with animation patterns
+// that shift based on what the model is doing. Geometric, screen-capture themed.
+function GridDissolveLoader({
+  phase = "analyzing",
+  label,
+  toolName,
+  thinkingSecs,
+}: {
+  phase?: LoaderPhase;
+  label?: string;
+  toolName?: string;
+  thinkingSecs?: number;
+}) {
   const ROWS = 4;
   const COLS = 5;
   const TOTAL = ROWS * COLS;
+  const tickRef = useRef(0);
   const [cells, setCells] = useState<boolean[]>(() =>
     Array.from({ length: TOTAL }, () => Math.random() > 0.5)
   );
 
+  const phaseRef = useRef(phase);
+  phaseRef.current = phase;
+
   useEffect(() => {
+    const interval = phaseRef.current === "streaming" ? 200 : 120;
     const id = window.setInterval(() => {
+      const p = phaseRef.current;
+      const tick = tickRef.current++;
       setCells((prev) => {
-        const next = [...prev];
-        const count = 3 + Math.floor(Math.random() * 3);
-        for (let i = 0; i < count; i++) {
-          const idx = Math.floor(Math.random() * TOTAL);
-          next[idx] = !next[idx];
+        if (p === "thinking") {
+          // Wave sweep: diagonal band moves across the grid
+          return Array.from({ length: TOTAL }, (_, i) => {
+            const row = Math.floor(i / COLS);
+            const col = i % COLS;
+            const wave = (tick * 1.2) % (ROWS + COLS);
+            const dist = Math.abs(row + col - wave);
+            return dist < 1.8;
+          });
         }
-        return next;
+        if (p === "tool") {
+          // Columns fill bottom-up like a bar chart loading
+          return Array.from({ length: TOTAL }, (_, i) => {
+            const row = Math.floor(i / COLS);
+            const col = i % COLS;
+            const fillHeight = ((tick + col * 2) % (ROWS + 2));
+            return (ROWS - 1 - row) < fillHeight;
+          });
+        }
+        if (p === "streaming") {
+          // Sparse fade-out: mostly off, a few random cells flicker
+          return Array.from({ length: TOTAL }, () => Math.random() > 0.82);
+        }
+        // "analyzing" — classic random toggle (use prev state for continuity)
+        return prev.map((was) => Math.random() > 0.7 ? !was : was);
       });
-    }, 120);
+    }, interval);
     return () => window.clearInterval(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [phase]);
+
+  const displayLabel = label ?? (
+    phase === "thinking" ? `thinking${thinkingSecs != null ? ` ${thinkingSecs}s` : ""}...` :
+    phase === "tool" ? (toolName ?? "running tool...") :
+    phase === "streaming" ? "writing..." :
+    "analyzing..."
+  );
+
+  // Smaller grid (3x2) during streaming to be less intrusive
+  const gridRows = phase === "streaming" ? 2 : ROWS;
+  const gridCols = phase === "streaming" ? 3 : COLS;
+  const gridCells = phase === "streaming" ? cells.slice(0, 6) : cells;
 
   return (
     <div className="flex items-center gap-3">
       <div
         className="grid shrink-0"
         style={{
-          gridTemplateColumns: `repeat(${COLS}, 8px)`,
-          gridTemplateRows: `repeat(${ROWS}, 8px)`,
+          gridTemplateColumns: `repeat(${gridCols}, ${phase === "streaming" ? 6 : 8}px)`,
+          gridTemplateRows: `repeat(${gridRows}, ${phase === "streaming" ? 6 : 8}px)`,
           gap: "2px",
         }}
       >
-        {cells.map((on, i) => (
+        {gridCells.map((on, i) => (
           <div
             key={i}
             className={cn(
-              "border transition-colors duration-[120ms]",
-              on ? "bg-foreground border-foreground" : "bg-transparent border-border"
+              "border transition-colors",
+              phase === "streaming" ? "duration-[200ms]" : "duration-[120ms]",
+              on
+                ? phase === "streaming"
+                  ? "bg-foreground/40 border-foreground/40"
+                  : "bg-foreground border-foreground"
+                : "bg-transparent border-border/50"
             )}
-            style={{ width: 8, height: 8 }}
+            style={{ width: phase === "streaming" ? 6 : 8, height: phase === "streaming" ? 6 : 8 }}
           />
         ))}
       </div>
-      <span className="text-xs font-mono text-muted-foreground tracking-wide">{label}</span>
+      <span className="text-xs font-mono text-muted-foreground tracking-wide">
+        {displayLabel}
+      </span>
     </div>
   );
 }
@@ -2720,17 +2777,47 @@ export function StandaloneChat({ className }: { className?: string } = {}) {
           ))}
         </AnimatePresence>
         <AnimatePresence>
-          {isLoading && messages.some(m => m.role === "assistant" && m.content === "Processing..." && !m.contentBlocks?.length) && (
-            <motion.div
-              initial={{ opacity: 0, y: 5 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -5 }}
-              transition={{ duration: 0.15 }}
-              className="px-4 py-3 border border-border/50 w-fit"
-            >
-              <GridDissolveLoader label="analyzing..." />
-            </motion.div>
-          )}
+          {isLoading && (() => {
+            // Derive loader phase from the last assistant message's content blocks
+            const lastAssistant = [...messages].reverse().find(m => m.role === "assistant");
+            const blocks = lastAssistant?.contentBlocks;
+            let loaderPhase: LoaderPhase = "analyzing";
+            let toolName: string | undefined;
+            let thinkingSecs: number | undefined;
+
+            if (blocks && blocks.length > 0) {
+              const lastBlock = blocks[blocks.length - 1];
+              if (lastBlock.type === "thinking" && (lastBlock as any).isThinking) {
+                loaderPhase = "thinking";
+              } else if (lastBlock.type === "tool" && (lastBlock as any).toolCall?.isRunning) {
+                loaderPhase = "tool";
+                toolName = (lastBlock as any).toolCall?.toolName;
+              } else if (lastBlock.type === "text" && lastBlock.text) {
+                loaderPhase = "streaming";
+              }
+            }
+
+            return (
+              <motion.div
+                initial={{ opacity: 0, y: 5 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -5 }}
+                transition={{ duration: 0.15 }}
+                className={cn(
+                  "w-fit",
+                  loaderPhase === "streaming"
+                    ? "px-3 py-1.5"
+                    : "px-4 py-3 border border-border/50"
+                )}
+              >
+                <GridDissolveLoader
+                  phase={loaderPhase}
+                  toolName={toolName}
+                  thinkingSecs={thinkingSecs}
+                />
+              </motion.div>
+            );
+          })()}
         </AnimatePresence>
         <div ref={messagesEndRef} />
       </div> {/* End of max-w-4xl wrapper */}
