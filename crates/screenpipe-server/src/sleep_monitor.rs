@@ -16,10 +16,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 #[cfg(not(any(target_os = "macos", target_os = "windows")))]
 use tracing::debug;
-#[cfg(target_os = "macos")]
-use tracing::{debug, error, info, warn};
 #[cfg(target_os = "windows")]
 use tracing::info;
+#[cfg(target_os = "macos")]
+use tracing::{debug, error, info, warn};
 
 #[cfg(target_os = "macos")]
 use crate::analytics::capture_event_nonblocking;
@@ -83,8 +83,11 @@ fn check_screen_locked_cgsession() -> bool {
         }
 
         let key_cstr = CString::new("CGSSessionScreenIsLocked").unwrap();
-        let key =
-            CFStringCreateWithCString(std::ptr::null(), key_cstr.as_ptr(), K_CF_STRING_ENCODING_UTF8);
+        let key = CFStringCreateWithCString(
+            std::ptr::null(),
+            key_cstr.as_ptr(),
+            K_CF_STRING_ENCODING_UTF8,
+        );
         if key.is_null() {
             CFRelease(dict);
             return false;
@@ -136,17 +139,15 @@ pub fn start_sleep_monitor() {
     // Thread 1: Poll CGSessionCopyCurrentDictionary every 2s.
     // This catches ALL lock methods (Cmd+Ctrl+Q, menu, hot corner, auto-lock)
     // which NSWorkspace.screensDidSleep does NOT detect.
-    std::thread::spawn(|| {
-        loop {
-            std::thread::sleep(std::time::Duration::from_secs(2));
-            let locked = check_screen_locked_cgsession();
-            let was_locked = SCREEN_IS_LOCKED.swap(locked, Ordering::SeqCst);
-            if locked != was_locked {
-                if locked {
-                    info!("Screen locked (CGSession poll)");
-                } else {
-                    info!("Screen unlocked (CGSession poll)");
-                }
+    std::thread::spawn(|| loop {
+        std::thread::sleep(std::time::Duration::from_secs(2));
+        let locked = check_screen_locked_cgsession();
+        let was_locked = SCREEN_IS_LOCKED.swap(locked, Ordering::SeqCst);
+        if locked != was_locked {
+            if locked {
+                info!("Screen locked (CGSession poll)");
+            } else {
+                info!("Screen unlocked (CGSession poll)");
             }
         }
     });
@@ -293,7 +294,9 @@ async fn check_recording_health() -> (bool, bool) {
 /// When the interactive desktop is not accessible the screen is locked.
 #[cfg(target_os = "windows")]
 pub fn start_sleep_monitor() {
-    use windows::Win32::System::StationsAndDesktops::{OpenInputDesktop, CloseDesktop, DESKTOP_CONTROL_FLAGS, DESKTOP_ACCESS_FLAGS};
+    use windows::Win32::System::StationsAndDesktops::{
+        CloseDesktop, OpenInputDesktop, DESKTOP_ACCESS_FLAGS, DESKTOP_CONTROL_FLAGS,
+    };
 
     info!("Starting Windows screen-lock monitor (OpenInputDesktop polling)");
 

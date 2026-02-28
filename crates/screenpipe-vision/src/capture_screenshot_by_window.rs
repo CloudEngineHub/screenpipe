@@ -239,10 +239,7 @@ impl WindowFilters {
         let title_lower = title.to_lowercase();
 
         // Always reject built-in system apps (lock screen, etc.)
-        if Self::BUILTIN_IGNORED
-            .iter()
-            .any(|b| app_name_lower == *b)
-        {
+        if Self::BUILTIN_IGNORED.iter().any(|b| app_name_lower == *b) {
             return false;
         }
 
@@ -845,8 +842,7 @@ fn get_process_exe_name(pid: u32) -> Option<String> {
 
     unsafe {
         // Try full access first, fall back to limited (handles elevated processes)
-        let mut handle =
-            OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, 0, pid);
+        let mut handle = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, 0, pid);
         if handle == 0 {
             handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
         }

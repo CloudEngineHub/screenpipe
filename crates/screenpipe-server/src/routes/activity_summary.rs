@@ -141,13 +141,13 @@ pub async fn get_activity_summary(
                     .and_then(|v| v.as_str())
                     .unwrap_or("")
                     .to_string();
-                let frame_count = row
-                    .get("frame_count")
-                    .and_then(|v| v.as_i64())
-                    .unwrap_or(0);
+                let frame_count = row.get("frame_count").and_then(|v| v.as_i64()).unwrap_or(0);
                 let minutes = row
                     .get("minutes")
-                    .and_then(|v| v.as_f64().or_else(|| v.as_str().and_then(|s| s.parse().ok())))
+                    .and_then(|v| {
+                        v.as_f64()
+                            .or_else(|| v.as_str().and_then(|s| s.parse().ok()))
+                    })
                     .unwrap_or(0.0);
                 total_frames += frame_count;
                 apps.push(AppUsage {
