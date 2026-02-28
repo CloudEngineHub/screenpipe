@@ -24,6 +24,13 @@ pub async fn prepare_segments(
 ) -> Result<(tokio::sync::mpsc::Receiver<SpeechSegment>, bool, f32)> {
     let audio_data = normalize_v2(audio_data);
 
+    // Silero VAD v5 expects continuous 512-sample chunks at 16kHz (32ms).
+    // On Windows, WASAPI delivers lower audio levels than CoreAudio, so we
+    // must feed Silero at its native frame size to preserve its LSTM temporal
+    // state — using 1600 caused 68ms gaps that broke speech detection.
+    #[cfg(target_os = "windows")]
+    let frame_size = 512;
+    #[cfg(not(target_os = "windows"))]
     let frame_size = 1600;
     let vad_engine = vad_engine.clone();
 

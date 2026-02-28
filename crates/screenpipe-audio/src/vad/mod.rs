@@ -37,6 +37,12 @@ pub trait VadEngine: Send {
 }
 
 const FRAME_HISTORY: usize = 10; // Number of frames to consider for decision
+// On Windows, WASAPI captures at lower levels than CoreAudio, so Silero
+// returns lower speech probabilities for the same audio. Use a relaxed
+// threshold to avoid missing speech entirely.
+#[cfg(target_os = "windows")]
+const SPEECH_THRESHOLD: f32 = 0.3;
+#[cfg(not(target_os = "windows"))]
 const SPEECH_THRESHOLD: f32 = 0.5;
 const SILENCE_THRESHOLD: f32 = 0.35;
 const SPEECH_FRAME_THRESHOLD: usize = 3; // Minimum number of frames above SPEECH_THRESHOLD to consider as speech
