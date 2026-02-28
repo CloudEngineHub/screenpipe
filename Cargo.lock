@@ -491,7 +491,7 @@ dependencies = [
 [[package]]
 name = "audiopipe"
 version = "0.1.0"
-source = "git+https://github.com/screenpipe/audiopipe.git#3fe90489bce20dc98d8a45cf9f4e826fd07b76e1"
+source = "git+https://github.com/screenpipe/audiopipe.git#5bbb9ae20c854e4d2427c903956540405b37eb78"
 dependencies = [
  "half",
  "hf-hub",
@@ -2627,7 +2627,7 @@ dependencies = [
  "hyper",
  "libc",
  "pin-project-lite",
- "socket2 0.5.10",
+ "socket2 0.6.2",
  "tokio",
  "tower-service",
  "tracing",
@@ -4801,7 +4801,7 @@ dependencies = [
  "quinn-udp",
  "rustc-hash 2.1.1",
  "rustls",
- "socket2 0.5.10",
+ "socket2 0.6.2",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
@@ -4838,7 +4838,7 @@ dependencies = [
  "cfg_aliases",
  "libc",
  "once_cell",
- "socket2 0.5.10",
+ "socket2 0.6.2",
  "tracing",
  "windows-sys 0.60.2",
 ]
