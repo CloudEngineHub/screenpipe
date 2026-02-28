@@ -458,7 +458,7 @@ impl AudioManager {
             {
                 if *audio_transcription_engine == AudioTranscriptionEngine::Qwen3Asr {
                     match tokio::task::spawn_blocking(|| {
-                        stt::Model::from_pretrained("qwen3-asr-0.6b-ggml")
+                        audiopipe::Model::from_pretrained("qwen3-asr-0.6b-ggml")
                     })
                     .await
                     {

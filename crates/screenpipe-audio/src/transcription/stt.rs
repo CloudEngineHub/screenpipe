@@ -37,9 +37,9 @@ pub trait AlternateStt: Send {
 pub type AlternateSttEngine = Arc<StdMutex<Box<dyn AlternateStt + Send>>>;
 
 #[cfg(feature = "qwen3-asr")]
-impl AlternateStt for stt::Model {
+impl AlternateStt for audiopipe::Model {
     fn transcribe(&mut self, audio: &[f32], sample_rate: u32) -> Result<String> {
-        let opts = stt::TranscribeOptions::default();
+        let opts = audiopipe::TranscribeOptions::default();
         let result = self
             .transcribe_with_sample_rate(audio, sample_rate, opts)
             .map_err(|e| anyhow::anyhow!("{}", e))?;

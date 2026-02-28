@@ -134,7 +134,7 @@ pub async fn retranscribe_handler(
         {
             use screenpipe_audio::core::engine::AudioTranscriptionEngine;
             if *engine == AudioTranscriptionEngine::Qwen3Asr {
-                match stt::Model::from_pretrained("qwen3-asr-0.6b-ggml") {
+                match audiopipe::Model::from_pretrained("qwen3-asr-0.6b-ggml") {
                     Ok(model) => {
                         info!("loaded qwen3-asr model for retranscription");
                         Some(std::sync::Arc::new(std::sync::Mutex::new(
