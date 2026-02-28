@@ -29,12 +29,17 @@ use tracing::{error, info, warn};
 #[allow(dead_code)]
 pub struct EmbeddedServerHandle {
     shutdown_tx: broadcast::Sender<()>,
+    ui_recorder_handle: Option<screenpipe_server::UiRecorderHandle>,
 }
 
 #[allow(dead_code)]
 impl EmbeddedServerHandle {
     pub fn shutdown(&self) {
         info!("Shutting down embedded screenpipe server");
+        // Signal the UI recorder to stop its tree walker and event loops
+        if let Some(ref ui_handle) = self.ui_recorder_handle {
+            ui_handle.stop();
+        }
         let _ = self.shutdown_tx.send(());
     }
 }
@@ -262,22 +267,22 @@ pub async fn start_embedded_server(
     // Start UI event recording (database recording of accessibility events)
     let ui_enabled = config.enable_input_capture || config.enable_accessibility;
     info!("UI events setting: enable_input_capture={}, enable_accessibility={}", config.enable_input_capture, config.enable_accessibility);
-    if ui_enabled {
+    let ui_recorder_handle = if ui_enabled {
         let ui_config = config.to_ui_recorder_config();
         let db_clone = db.clone();
-        tokio::spawn(async move {
-            match start_ui_recording(db_clone, ui_config, capture_trigger_tx).await {
-                Ok(handle) => {
-                    info!("UI event recording started successfully");
-                    // Keep the handle alive - don't drop it or UI recording stops
-                    std::mem::forget(handle);
-                }
-                Err(e) => {
-                    error!("Failed to start UI event recording: {}", e);
-                }
+        match start_ui_recording(db_clone, ui_config, capture_trigger_tx).await {
+            Ok(handle) => {
+                info!("UI event recording started successfully");
+                Some(handle)
             }
-        });
-    }
+            Err(e) => {
+                error!("Failed to start UI event recording: {}", e);
+                None
+            }
+        }
+    } else {
+        None
+    };
 
     // Start meeting watcher (standalone accessibility listener for smart mode)
     // Independent of enable_input_capture/enable_accessibility toggles — only needs accessibility permission
@@ -399,5 +404,52 @@ pub async fn start_embedded_server(
 
     info!("Embedded screenpipe server started successfully");
 
-    Ok(EmbeddedServerHandle { shutdown_tx })
+    Ok(EmbeddedServerHandle { shutdown_tx, ui_recorder_handle })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
+
+    #[test]
+    fn test_shutdown_sets_ui_recorder_stop_flag() {
+        let flag = Arc::new(AtomicBool::new(false));
+        let flag_clone = flag.clone();
+
+        let (shutdown_tx, _) = broadcast::channel::<()>(1);
+        let handle = EmbeddedServerHandle {
+            shutdown_tx,
+            ui_recorder_handle: Some(screenpipe_server::UiRecorderHandle::new_for_test(flag)),
+        };
+
+        assert!(!flag_clone.load(Ordering::Relaxed));
+        handle.shutdown();
+        assert!(flag_clone.load(Ordering::Relaxed), "shutdown must set stop_flag");
+    }
+
+    #[test]
+    fn test_shutdown_sends_broadcast() {
+        let (shutdown_tx, mut rx) = broadcast::channel::<()>(1);
+        let handle = EmbeddedServerHandle {
+            shutdown_tx,
+            ui_recorder_handle: None,
+        };
+
+        handle.shutdown();
+        assert!(rx.try_recv().is_ok(), "shutdown must send on broadcast channel");
+    }
+
+    #[test]
+    fn test_shutdown_without_ui_recorder() {
+        let (shutdown_tx, _) = broadcast::channel::<()>(1);
+        let handle = EmbeddedServerHandle {
+            shutdown_tx,
+            ui_recorder_handle: None,
+        };
+
+        // Should not panic when ui_recorder_handle is None
+        handle.shutdown();
+    }
 }
