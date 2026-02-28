@@ -22,20 +22,11 @@ We build the layer that gives AI full context of human work so it can act autono
 2. **Next: Context layer for AI agents.** Open API so any AI agent can query your screen history. Every AI agent needs to know what the user is doing, act on that context, and trigger without prompts.
 3. **Later: Every sensor.** Screen is sensor #1. Then cameras, rooms, spatial memory. Local-first makes it viable — "no internet required" level clear.
 
-## Structural advantages
-
-- **Local-first** is architecture, not a feature. Privacy is structural, not a toggle.
-- **Open source** creates trust you can't buy.
-- **Data moat.** Switching means losing your entire memory. Compounds daily.
-- **Cross-platform.** macOS, Windows, Linux. Not locked to one ecosystem.
-
 ## Product principles
 
 - **Stability over features.** Users who stay are obsessed. Users who leave hit bugs. Fix what's broken before building what's new.
-- **Activation is the bottleneck.** The product works, the door is hidden. Make the first experience undeniable.
-- **Consumer-first.** Don't chase enterprise — earn it through product quality.
 - **No feature creep.** Every feature must serve Record, Rewind, or Ask. If it doesn't, it doesn't ship.
-- **Respect the user's machine.** CPU, memory, disk — screenpipe runs 24/7 in the background. Performance is not optional. Target: <20% CPU, <4GB RAM on release builds.
+- **Respect the user's machine.** CPU, memory, disk — screenpipe runs 24/7 in the background. Performance is not optional. Target: <20% CPU, <3GB RAM on release builds.
 
 ## Engineering principles
 
@@ -48,9 +39,8 @@ We build the layer that gives AI full context of human work so it can act autono
 ## Design voice
 
 - State facts. No marketing fluff.
-- No emoji in the product. No exclamation marks.
-- "search your memory" not "Search through all your amazing captured moments!"
-- Monospace. Black and white. 1px borders. Sharp corners. No shadows, no gradients.
+- No emoji in the product. No exclamation marks. Remove what's unecessary.
+- Black and white. 1px borders. Sharp corners. No shadows, no gradients.
 - 40% of any composition should be empty space.
 - When in doubt, remove.
 
