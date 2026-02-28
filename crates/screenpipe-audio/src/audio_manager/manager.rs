@@ -158,13 +158,14 @@ impl AudioManager {
         if self.options.read().await.transcription_mode == TranscriptionMode::Batch {
             let db = self.db.clone();
             let engine_ref = self.engine.clone();
+            let on_insert_bg = self.on_transcription_insert.clone();
             tokio::spawn(async move {
                 // Wait for model to load + initial recordings
                 tokio::time::sleep(Duration::from_secs(120)).await;
                 loop {
                     if let Some(ref engine) = *engine_ref.read().await {
                         let count = super::reconciliation::reconcile_untranscribed(
-                            &db, engine,
+                            &db, engine, on_insert_bg.as_ref(),
                         )
                         .await;
                         if count > 0 {
@@ -385,6 +386,7 @@ impl AudioManager {
         let meeting_detector = self.meeting_detector.clone();
         let db = self.db.clone();
         let shared_engine = self.engine.clone();
+        let on_insert_session = self.on_transcription_insert.clone();
 
         // Build unified transcription engine — only loads the needed model
         let engine = TranscriptionEngine::new(
@@ -467,6 +469,7 @@ impl AudioManager {
                             let count = super::reconciliation::reconcile_untranscribed(
                                 &db,
                                 &engine,
+                                on_insert_session.as_ref(),
                             )
                             .await;
                             info!("batch mode: transcribed {} chunks after session end", count);

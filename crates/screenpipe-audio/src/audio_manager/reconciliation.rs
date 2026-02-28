@@ -8,6 +8,7 @@ use screenpipe_db::{DatabaseManager, UntranscribedChunk};
 use tracing::{debug, error, warn};
 
 use crate::transcription::engine::TranscriptionEngine;
+use crate::transcription::{AudioInsertCallback, AudioInsertInfo};
 use crate::utils::ffmpeg::read_audio_from_file;
 
 /// Maximum number of consecutive 30s chunks to concatenate into a single batch.
@@ -24,6 +25,7 @@ const MAX_BATCH_CHUNKS: usize = 10;
 pub async fn reconcile_untranscribed(
     db: &DatabaseManager,
     engine: &TranscriptionEngine,
+    on_insert: Option<&AudioInsertCallback>,
 ) -> usize {
     let since = chrono::Utc::now() - chrono::Duration::hours(24);
     let chunks = match db.get_untranscribed_chunks(since, 50).await {
@@ -158,6 +160,23 @@ pub async fn reconcile_untranscribed(
             continue;
         }
         success_count += 1;
+
+        // Notify hot frame cache so reconciled audio appears on the timeline
+        if let Some(callback) = on_insert {
+            let capture_ts = primary_chunk.timestamp.timestamp() as u64;
+            callback(AudioInsertInfo {
+                audio_chunk_id: primary_chunk.id,
+                transcription: full_text.clone(),
+                device_name: device_name.clone(),
+                is_input,
+                audio_file_path: primary_chunk.file_path.clone(),
+                duration_secs: batch_duration,
+                start_time: Some(0.0),
+                end_time: Some(batch_duration),
+                speaker_id: None,
+                capture_timestamp: capture_ts,
+            });
+        }
 
         // Delete the secondary chunks — they're now merged into the primary.
         for chunk in &valid_chunks[1..] {
