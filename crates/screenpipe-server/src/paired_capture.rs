@@ -158,11 +158,15 @@ pub async fn paired_capture(
     // When app_prefers_ocr (terminals), always prefer OCR over accessibility tree
     // because the tree only returns window chrome (Minimize/Maximize/Close), not
     // the actual terminal content.
-    let (accessibility_text, tree_json, content_hash, simhash) = if app_prefers_ocr
-        && !ocr_text.is_empty()
-    {
-        // Terminal with successful OCR: use OCR text, skip tree
-        (Some(ocr_text.clone()), None, None, None)
+    let (accessibility_text, tree_json, content_hash, simhash) = if app_prefers_ocr {
+        // Terminal apps: OCR is the only useful source. The accessibility tree
+        // only returns window chrome ("System, Minimize, Restore, Close") which
+        // is noise. If OCR fails, store nothing rather than chrome.
+        if !ocr_text.is_empty() {
+            (Some(ocr_text.clone()), None, None, None)
+        } else {
+            (None, None, None, None)
+        }
     } else {
         match tree_snapshot {
             Some(snap) if !snap.text_content.is_empty() => {
