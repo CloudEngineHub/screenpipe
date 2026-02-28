@@ -75,6 +75,7 @@ Don't jump straight to heavy `/search` calls. Escalate through these steps, stop
 5. **"recent"** = last 30 minutes. **"today"** = since midnight. **"yesterday"** = yesterday's date range.
 6. If a search times out, retry with a narrower time range (e.g. 30 mins instead of 2 hours).
 7. **Prefer lightweight endpoints first** — use `/activity-summary` before `/search`, and `/elements` before fetching full frames.
+8. **Protect your context window.** API responses can be large. Always write curl output to a file first (`curl ... -o /tmp/sp_result.json`), then check its size (`wc -c /tmp/sp_result.json`). If over 5KB, read only the first 50-100 lines to understand the structure, then extract what you need with `jq` or targeted reads. NEVER dump a full large API response into your context.
 
 ### Example Searches
 

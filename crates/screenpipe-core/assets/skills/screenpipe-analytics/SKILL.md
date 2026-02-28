@@ -34,6 +34,7 @@ Returns a JSON array of row objects.
 4. **Use datetime() for time math** — SQLite syntax: `datetime('now', '-1 hours')`, `datetime('now', '-7 days')`, `date('now')`.
 5. **Default to last 24 hours** unless the user asks for a different range.
 6. **"today"** = `date(timestamp) = date('now')`. **"yesterday"** = `date(timestamp) = date('now', '-1 day')`. **"this week"** = `timestamp > datetime('now', '-7 days')`.
+7. **Protect your context window.** SQL results can be large. Always write curl output to a file first (`curl ... -o /tmp/sp_result.json`), then check its size (`wc -c /tmp/sp_result.json`). If over 5KB, read only the first 50-100 lines to understand the structure, then extract what you need with `jq` or targeted reads. NEVER dump a full large API response into your context.
 
 ## Database Schema
 

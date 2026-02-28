@@ -146,6 +146,7 @@ curl "http://localhost:3030/frames/6789/context"
 3. **Use `source=accessibility` for structured queries** — accessibility data has proper roles, hierarchy, and bounds. OCR is flat text.
 4. **Use `/frames/{id}/context` for URL extraction** — it parses link nodes and regex-scans for URLs automatically.
 5. **Start with short time ranges** — last 1-2 hours. Expand only if needed.
+6. **Protect your context window.** Element queries can return hundreds of results. Always write curl output to a file first (`curl ... -o /tmp/sp_result.json`), then check its size (`wc -c /tmp/sp_result.json`). If over 5KB, read only the first 50-100 lines to understand the structure, then extract what you need with `jq` or targeted reads. NEVER dump a full large API response into your context.
 
 ## Example Workflows
 
