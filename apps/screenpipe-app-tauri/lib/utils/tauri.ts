@@ -575,6 +575,17 @@ async piNewSession() : Promise<Result<null, string>> {
 }
 },
 /**
+ * Update Pi config files without restarting the process.
+ */
+async piUpdateConfig(userToken: string | null, providerConfig: PiProviderConfig | null) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("pi_update_config", { userToken, providerConfig }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Check Reminders authorization + scheduler status (no popup).
  */
 async remindersStatus() : Promise<Result<RemindersStatus, string>> {

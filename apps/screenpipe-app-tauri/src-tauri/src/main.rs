@@ -1224,6 +1224,7 @@ async fn main() {
                 pi::pi_prompt,
                 pi::pi_abort,
                 pi::pi_new_session,
+                pi::pi_update_config,
                 // Reminders commands
                 reminders::reminders_status,
                 reminders::reminders_authorize,
@@ -1447,6 +1448,7 @@ async fn main() {
             pi::pi_prompt,
             pi::pi_abort,
             pi::pi_new_session,
+            pi::pi_update_config,
             // Reminders commands
             reminders::reminders_status,
             reminders::reminders_authorize,

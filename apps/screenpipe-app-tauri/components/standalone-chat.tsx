@@ -660,7 +660,6 @@ export function StandaloneChat({ className }: { className?: string } = {}) {
   const piMessageIdRef = useRef<string | null>(null);
   const piContentBlocksRef = useRef<ContentBlock[]>([]);
   const piStartInFlightRef = useRef(false);
-  const piRestartCountRef = useRef(0);
   const piStoppedIntentionallyRef = useRef(false);
   const piThinkingStartRef = useRef<number | null>(null);
   const piSessionSyncedRef = useRef(false);
@@ -1333,8 +1332,8 @@ export function StandaloneChat({ className }: { className?: string } = {}) {
   const isPi = true;
   const hasValidModel = activePreset?.model && activePreset.model.trim() !== "";
   const needsLogin = (activePreset?.provider === "screenpipe-cloud" || activePreset?.provider === "pi") && !settings.user?.token;
-  const piReady = piInfo?.running ?? false;
-  const canChat = hasPresets && hasValidModel && !needsLogin && piReady;
+  // Pi auto-starts on first message, so don't block chat when Pi is not running
+  const canChat = hasPresets && hasValidModel && !needsLogin && !piStarting;
 
   const getDisabledReason = (): string | null => {
     if (!hasPresets) return "No AI presets configured";
@@ -1342,7 +1341,6 @@ export function StandaloneChat({ className }: { className?: string } = {}) {
     if (!hasValidModel) return `No model selected in "${activePreset.id}" preset`;
     if (needsLogin) return "Login required";
     if (piStarting) return "Starting Pi agent...";
-    if (!piReady) return "Connecting to Pi agent...";
     return null;
   };
   const disabledReason = getDisabledReason();
@@ -1409,7 +1407,8 @@ export function StandaloneChat({ className }: { className?: string } = {}) {
   // Track previous preset to detect changes
   const prevPresetRef = useRef<{ provider?: string; model?: string; token?: string | null }>({});
 
-  // Restart Pi when user switches preset (different provider/model) or token changes (login)
+  // Update Pi config when user switches preset — no restart, just update config files.
+  // Pi picks up the new provider/model on the next prompt.
   useEffect(() => {
     if (!activePreset) return;
     const prev = prevPresetRef.current;
@@ -1419,55 +1418,12 @@ export function StandaloneChat({ className }: { className?: string } = {}) {
     prevPresetRef.current = { provider: activePreset.provider, model: activePreset.model, token: currentToken };
 
     if (!presetChanged && !tokenChanged) return;
-    if (piStartInFlightRef.current) return;
 
-    const restartPi = async () => {
-      // Clear any in-flight streaming state before killing Pi
-      if (piMessageIdRef.current) {
-        const msgId = piMessageIdRef.current;
-        setMessages((prev) =>
-          prev.map((m) =>
-            m.id === msgId && (m.content === "Processing..." || !m.content)
-              ? { ...m, content: "Model changed — restarting AI agent..." }
-              : m
-          )
-        );
-        piStreamingTextRef.current = "";
-        piMessageIdRef.current = null;
-        piContentBlocksRef.current = [];
-        setIsLoading(false);
-        setIsStreaming(false);
-      }
-      piStartInFlightRef.current = true;
-      setPiStarting(true);
-      const providerConfig = buildProviderConfig();
-      let dir: string;
-      try {
-        const home = await homeDir();
-        dir = await join(home, ".screenpipe", "pi-chat");
-      } catch {
-        dir = "/tmp/.screenpipe/pi-chat";
-      }
-      console.log("[Pi] Restarting with new preset:", providerConfig?.provider, providerConfig?.model);
-      try {
-        const result = await commands.piStart(dir, settings.user?.token ?? null, providerConfig);
-        if (result.status === "ok") {
-          setPiInfo(result.data);
-          piSessionSyncedRef.current = false;
-        } else {
-          console.error("[Pi] Restart failed:", result.error);
-          toast({ title: "Failed to restart Pi", description: result.error, variant: "destructive" });
-        }
-      } catch (e) {
-        console.error("[Pi] Restart exception:", e);
-      } finally {
-        setPiStarting(false);
-        // Keep the guard active for 2s to absorb delayed re-triggers from
-        // settings/loadUser cascades during boot (prevents double-start race)
-        setTimeout(() => { piStartInFlightRef.current = false; }, 2000);
-      }
-    };
-    restartPi();
+    const providerConfig = buildProviderConfig();
+    console.log("[Pi] Config updated (no restart):", providerConfig?.provider, providerConfig?.model);
+    commands.piUpdateConfig(settings.user?.token ?? null, providerConfig).catch((e) => {
+      console.error("[Pi] Config update failed:", e);
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activePreset?.provider, activePreset?.model, settings.user?.token]);
 
@@ -1698,7 +1654,6 @@ export function StandaloneChat({ className }: { className?: string } = {}) {
             }
           }
         } else if (data.type === "agent_end") {
-          piRestartCountRef.current = 0;
           if (piMessageIdRef.current) {
             const msgId = piMessageIdRef.current;
             // Use streamed text if available, otherwise extract from agent_end messages
@@ -1827,8 +1782,6 @@ export function StandaloneChat({ className }: { className?: string } = {}) {
     const setup = async () => {
       unlistenEvent = await listen<any>("pi_event", (event) => {
         if (!mounted) return;
-        // Pi sent an event — it's running stably, reset restart counter
-        piRestartCountRef.current = 0;
         handlePiEventData(event.payload);
       });
 
@@ -1851,14 +1804,7 @@ export function StandaloneChat({ className }: { className?: string } = {}) {
           return;
         }
         const terminatedPid = event.payload;
-        console.log("[Pi] Process terminated, pid:", terminatedPid, "restart count:", piRestartCountRef.current);
-
-        // pid=0 means the idle watchdog stopped Pi to save resources — don't auto-restart
-        if (terminatedPid === 0) {
-          console.log("[Pi] Idle watchdog stopped Pi, skipping auto-restart");
-          setPiInfo(null);
-          return;
-        }
+        console.log("[Pi] Process terminated, pid:", terminatedPid);
 
         // If a message was in flight, mark it as errored so the UI doesn't stay stuck
         if (piMessageIdRef.current) {
@@ -1877,8 +1823,8 @@ export function StandaloneChat({ className }: { className?: string } = {}) {
           setIsStreaming(false);
         }
 
-        piRestartCountRef.current += 1;
-        const delay = Math.min(1000 * piRestartCountRef.current, 5000);
+        // Always auto-restart — Pi is a singleton, keep it alive
+        const delay = 1500;
         setTimeout(async () => {
           if (!mounted) return;
           // Check if a newer Pi process is already running (race: stop → start → terminated)
@@ -1887,14 +1833,12 @@ export function StandaloneChat({ className }: { className?: string } = {}) {
             if (result.status === "ok" && result.data.running && result.data.pid !== terminatedPid) {
               console.log("[Pi] Stale termination for pid", terminatedPid, "— newer pid", result.data.pid, "is running");
               setPiInfo(result.data);
-              piRestartCountRef.current = 0;
               return;
             }
           } catch {}
 
-          // Pi is actually dead — auto-restart (up to 5 attempts)
-          if (piRestartCountRef.current <= 5 && !piStartInFlightRef.current) {
-            console.log("[Pi] Auto-restarting (attempt", piRestartCountRef.current, "/ 5)");
+          if (!piStartInFlightRef.current) {
+            console.log("[Pi] Auto-restarting after crash");
             try {
               const providerConfig = buildProviderConfig();
               const home = await homeDir();
@@ -1903,23 +1847,15 @@ export function StandaloneChat({ className }: { className?: string } = {}) {
               if (result.status === "ok") {
                 setPiInfo(result.data);
                 piSessionSyncedRef.current = false;
-                if (result.data.running) piRestartCountRef.current = 0;
               } else {
                 console.error("[Pi] Auto-restart failed:", result.error);
-                // Show error to user on final attempt so they know what's wrong
-                if (piRestartCountRef.current >= 5) {
-                  toast({ title: "ai assistant failed to start", description: result.error, variant: "destructive" });
-                }
+                // Don't give up — user can still trigger restart on next message
                 setPiInfo(null);
               }
             } catch (e) {
               console.error("[Pi] Auto-restart exception:", e);
               setPiInfo(null);
             }
-          } else {
-            // All restart attempts exhausted
-            console.error("[Pi] All restart attempts exhausted");
-            setPiInfo(null);
           }
         }, delay);
       });
@@ -2083,9 +2019,34 @@ export function StandaloneChat({ className }: { className?: string } = {}) {
 
   // Send message using Pi agent
   async function sendPiMessage(userMessage: string, displayLabel?: string) {
+    // Auto-start Pi if it's dead (singleton recovery)
     if (!piInfo?.running && !autoSendBypassRef.current) {
-      toast({ title: "Pi not running", description: "Please wait for Pi to start", variant: "destructive" });
-      return;
+      if (piStartInFlightRef.current) {
+        toast({ title: "Pi starting", description: "Please wait a moment", variant: "destructive" });
+        return;
+      }
+      console.log("[Pi] Not running, auto-starting before sending message");
+      piStartInFlightRef.current = true;
+      setPiStarting(true);
+      try {
+        const providerConfig = buildProviderConfig();
+        const home = await homeDir();
+        const dir = await join(home, ".screenpipe", "pi-chat");
+        const result = await commands.piStart(dir, settings.user?.token ?? null, providerConfig);
+        if (result.status === "ok" && result.data.running) {
+          setPiInfo(result.data);
+          piSessionSyncedRef.current = false;
+        } else {
+          toast({ title: "Failed to start Pi", description: result.status === "error" ? result.error : "Unknown error", variant: "destructive" });
+          return;
+        }
+      } catch (e) {
+        toast({ title: "Failed to start Pi", description: String(e), variant: "destructive" });
+        return;
+      } finally {
+        setPiStarting(false);
+        piStartInFlightRef.current = false;
+      }
     }
 
     // Prevent sending while a previous message is still being processed

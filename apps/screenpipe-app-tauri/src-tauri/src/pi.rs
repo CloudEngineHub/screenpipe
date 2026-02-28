@@ -111,17 +111,9 @@ pub struct PiManager {
     project_dir: Option<String>,
     request_id: u64,
     app_handle: AppHandle,
-    /// Tracks last activity (creation or send_command) for idle shutdown
+    /// Tracks last activity (creation or send_command)
     last_activity: std::time::Instant,
-    /// Handle to the idle watchdog task so stop() can abort it
-    watchdog_handle: Option<tokio::task::JoinHandle<()>>,
-    /// Shared flag: set by the idle watchdog before stopping Pi, read by the
-    /// stdout reader to decide whether to emit `pi_terminated(0)` (idle) or
-    /// `pi_terminated(pid)` (crash). Each Pi session creates a fresh Arc so
-    /// old reader threads don't interfere with new sessions.
-    idle_stopped: Arc<AtomicBool>,
     /// Guard: ensures only one `pi_terminated` event is emitted per session.
-    /// Both the reader thread and watchdog check-and-set this before emitting.
     terminated_emitted: Arc<AtomicBool>,
 }
 
@@ -134,15 +126,8 @@ impl PiManager {
             request_id: 0,
             app_handle,
             last_activity: std::time::Instant::now(),
-            watchdog_handle: None,
-            idle_stopped: Arc::new(AtomicBool::new(false)),
             terminated_emitted: Arc::new(AtomicBool::new(false)),
         }
-    }
-
-    /// How long since the last send_command() or creation
-    pub fn idle_duration(&self) -> std::time::Duration {
-        self.last_activity.elapsed()
     }
 
     /// Check if the child process is actually alive via try_wait().
@@ -183,11 +168,6 @@ impl PiManager {
     }
 
     pub fn stop(&mut self) {
-        // Abort the idle watchdog first
-        if let Some(handle) = self.watchdog_handle.take() {
-            handle.abort();
-        }
-
         if let Some(mut child) = self.child.take() {
             // Send abort command before killing
             if let Some(ref mut stdin) = self.stdin {
@@ -596,10 +576,8 @@ fn kill_orphan_pi_processes(managed_alive: bool) {
     }
 }
 
-/// Duration after which an idle Pi process is automatically stopped.
-const PI_IDLE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5 * 60);
-/// How often the watchdog checks for idle / dead Pi processes.
-const PI_WATCHDOG_INTERVAL: std::time::Duration = std::time::Duration::from_secs(30);
+/// Max time to wait for Pi to emit its first stdout line (readiness handshake).
+const PI_READY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
 
 /// Resolve a model name against the screenpipe cloud models list.
 /// Handles mismatches like "claude-haiku-4-5@20251001" when the list only has
@@ -854,17 +832,13 @@ pub async fn pi_start_inner(
     let stderr = child.stderr.take();
 
     // Update manager
-    let idle_stopped = Arc::new(AtomicBool::new(false));
     let terminated_emitted = Arc::new(AtomicBool::new(false));
     if let Some(m) = manager_guard.as_mut() {
         m.child = Some(child);
         m.stdin = Some(stdin);
         m.project_dir = Some(project_dir.clone());
-        // Reset idle timer so the watchdog doesn't use a stale timestamp
-        // from a previous session and immediately kill this new process
         m.last_activity = std::time::Instant::now();
-        // Fresh flags for this session — old reader threads keep their own Arc
-        m.idle_stopped = idle_stopped.clone();
+        // Fresh flag for this session — old reader threads keep their own Arc
         m.terminated_emitted = terminated_emitted.clone();
     }
 
@@ -878,17 +852,19 @@ pub async fn pi_start_inner(
     // queued pi_start calls from stacking behind a 500ms sleep while holding the lock
     drop(manager_guard);
 
+    // Readiness signal — stdout reader notifies when first JSON line arrives,
+    // so pi_start_inner can return without a blind 1500ms sleep.
+    let ready_notify = Arc::new(tokio::sync::Notify::new());
+    let ready_notify_reader = ready_notify.clone();
+
     // Spawn stdout reader thread — this is the SOLE emitter of `pi_terminated`.
-    // Using idle_stopped (shared with the watchdog) to distinguish idle stops
-    // from crashes: idle → emit pid=0 (frontend skips restart), crash → emit
-    // real pid (frontend auto-restarts).
     let app_handle = app.clone();
-    let idle_stopped_reader = idle_stopped.clone();
     let terminated_guard = terminated_emitted.clone();
     std::thread::spawn(move || {
         let reader = BufReader::new(stdout);
         info!("Pi stdout reader started (pid: {})", pid);
         let mut line_count = 0u64;
+        let mut ready_signalled = false;
         for line in reader.lines() {
             match line {
                 Ok(line) => {
@@ -898,6 +874,14 @@ pub async fn pi_start_inner(
                         .and_then(|v| v.get("type").and_then(|t| t.as_str()).map(|s| s.to_string()));
                     debug!("Pi stdout #{} (pid {}): type={}", line_count, pid,
                         event_type.as_deref().unwrap_or("non-json"));
+
+                    // Signal readiness on first successful JSON line
+                    if !ready_signalled {
+                        if serde_json::from_str::<Value>(&line).is_ok() {
+                            ready_notify_reader.notify_one();
+                            ready_signalled = true;
+                        }
+                    }
 
                     // Try to parse as JSON and emit event
                     match serde_json::from_str::<Value>(&line) {
@@ -923,10 +907,9 @@ pub async fn pi_start_inner(
             }
         }
         info!("Pi stdout reader ended (pid: {}), processed {} lines", pid, line_count);
-        // Only emit once per session — watchdog or overlapping sessions could race
+        // Only emit once per session — overlapping sessions could race
         if terminated_guard.compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire).is_ok() {
-            let terminated_pid = if idle_stopped_reader.load(Ordering::Acquire) { 0u32 } else { pid };
-            let _ = app_handle.emit("pi_terminated", terminated_pid);
+            let _ = app_handle.emit("pi_terminated", pid);
         } else {
             debug!("Pi stdout reader: pi_terminated already emitted for this session, skipping");
         }
@@ -968,48 +951,16 @@ pub async fn pi_start_inner(
         });
     }
 
-    // Spawn idle watchdog — auto-stops Pi after PI_IDLE_TIMEOUT of inactivity.
-    // The watchdog does NOT emit `pi_terminated` directly. Instead, it sets
-    // `idle_stopped` and calls stop(). The stdout reader thread detects EOF
-    // from the killed process and emits the single authoritative event.
-    {
-        let state_clone = state.0.clone();
-        let watchdog = tokio::spawn(async move {
-            loop {
-                tokio::time::sleep(PI_WATCHDOG_INTERVAL).await;
-                let mut guard = state_clone.lock().await;
-                if let Some(m) = guard.as_mut() {
-                    if !m.check_alive() {
-                        // Process already dead — stdout reader will emit pi_terminated
-                        info!("Watchdog: Pi process is dead, reader thread will handle termination");
-                        break;
-                    }
-                    let idle = m.idle_duration();
-                    if idle >= PI_IDLE_TIMEOUT {
-                        info!("Watchdog: Pi idle for {:?}, stopping to save resources", idle);
-                        m.idle_stopped.store(true, Ordering::Release);
-                        m.stop();
-                        // stdout reader will see EOF and emit pi_terminated(0)
-                        break;
-                    }
-                } else {
-                    // No manager — nothing to watch
-                    break;
-                }
-            }
-            debug!("Watchdog task exiting");
-        });
-
-        // Store the handle so stop() can abort it
-        let mut guard = state.0.lock().await;
-        if let Some(m) = guard.as_mut() {
-            m.watchdog_handle = Some(watchdog);
+    // Wait for Pi to signal readiness (first JSON line on stdout) instead of
+    // a blind 1500ms sleep. Falls back to process-alive check on timeout.
+    tokio::select! {
+        _ = ready_notify.notified() => {
+            info!("Pi readiness signal received (pid: {})", pid);
+        }
+        _ = tokio::time::sleep(PI_READY_TIMEOUT) => {
+            warn!("Pi readiness timeout after {:?} (pid: {}), checking if alive", PI_READY_TIMEOUT, pid);
         }
     }
-
-    // Wait for Pi to initialize before allowing prompts. Pi v0.51+ needs time
-    // to set up its RPC listener — sending prompts too early causes them to be lost.
-    tokio::time::sleep(tokio::time::Duration::from_millis(1500)).await;
     {
         let mut manager_guard = state.0.lock().await;
         if let Some(m) = manager_guard.as_mut() {
@@ -1018,10 +969,6 @@ pub async fn pi_start_inner(
                     Ok(Some(status)) => {
                         let code = status.code().unwrap_or(-1);
                         error!("Pi process exited immediately with code {} — check 'Pi stderr:' warnings above for details (bun path: {})", code, bun_path);
-                        // Clean up: abort watchdog so it doesn't emit stale pi_terminated events
-                        if let Some(handle) = m.watchdog_handle.take() {
-                            handle.abort();
-                        }
                         m.child = None;
                         m.stdin = None;
                         return Err(format!("Pi exited immediately with code {} (bun: {}). Check app logs for 'Pi stderr:' lines.", code, bun_path));
@@ -1116,6 +1063,23 @@ pub async fn pi_check() -> Result<PiCheckResult, String> {
         available: path.is_some(),
         path,
     })
+}
+
+/// Update Pi config files (models.json / auth.json) without restarting the process.
+/// Call this when the user changes preset — Pi picks up the new config on next prompt.
+#[tauri::command]
+#[specta::specta]
+pub async fn pi_update_config(
+    user_token: Option<String>,
+    provider_config: Option<PiProviderConfig>,
+) -> Result<(), String> {
+    ensure_pi_config(user_token.as_deref(), provider_config.as_ref())?;
+    info!(
+        "Pi config updated (provider: {:?}, model: {:?})",
+        provider_config.as_ref().map(|c| &c.provider),
+        provider_config.as_ref().map(|c| &c.model),
+    );
+    Ok(())
 }
 
 /// Install pi via bun
@@ -1615,24 +1579,6 @@ mod tests {
         assert_eq!(result, Some("C:\\Users\\npm\\pi.cmd".to_string()));
     }
 
-    /// Test that idle_duration tracks time correctly
-    #[test]
-    fn test_idle_duration_tracking() {
-        use std::time::{Duration, Instant};
-        // Simulate the tracking logic without needing a full PiManager
-        let start = Instant::now();
-        std::thread::sleep(Duration::from_millis(50));
-        let elapsed = start.elapsed();
-        assert!(elapsed >= Duration::from_millis(50));
-        assert!(elapsed < Duration::from_secs(2));
-
-        // Simulate activity reset
-        let reset = Instant::now();
-        std::thread::sleep(Duration::from_millis(10));
-        let after_reset = reset.elapsed();
-        assert!(after_reset < elapsed, "activity reset should reduce idle duration");
-    }
-
     /// Test that kill_orphan_pi_processes doesn't crash when no processes exist.
     /// Ignored by default because pkill interferes with parallel tests.
     #[test]
@@ -1649,12 +1595,10 @@ mod tests {
         super::kill_orphan_pi_processes(true);
     }
 
-    /// Test PI_IDLE_TIMEOUT and PI_WATCHDOG_INTERVAL constants are sensible
+    /// Test PI_READY_TIMEOUT constant is sensible
     #[test]
-    fn test_idle_timeout_constants() {
-        assert_eq!(super::PI_IDLE_TIMEOUT.as_secs(), 300); // 5 minutes
-        assert_eq!(super::PI_WATCHDOG_INTERVAL.as_secs(), 30);
-        assert!(super::PI_IDLE_TIMEOUT > super::PI_WATCHDOG_INTERVAL);
+    fn test_ready_timeout_constant() {
+        assert_eq!(super::PI_READY_TIMEOUT.as_secs(), 15);
     }
 
 }
