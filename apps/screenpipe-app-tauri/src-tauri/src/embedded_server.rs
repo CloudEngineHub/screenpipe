@@ -406,3 +406,50 @@ pub async fn start_embedded_server(
 
     Ok(EmbeddedServerHandle { shutdown_tx, ui_recorder_handle })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
+
+    #[test]
+    fn test_shutdown_sets_ui_recorder_stop_flag() {
+        let flag = Arc::new(AtomicBool::new(false));
+        let flag_clone = flag.clone();
+
+        let (shutdown_tx, _) = broadcast::channel::<()>(1);
+        let handle = EmbeddedServerHandle {
+            shutdown_tx,
+            ui_recorder_handle: Some(screenpipe_server::UiRecorderHandle::new_for_test(flag)),
+        };
+
+        assert!(!flag_clone.load(Ordering::Relaxed));
+        handle.shutdown();
+        assert!(flag_clone.load(Ordering::Relaxed), "shutdown must set stop_flag");
+    }
+
+    #[test]
+    fn test_shutdown_sends_broadcast() {
+        let (shutdown_tx, mut rx) = broadcast::channel::<()>(1);
+        let handle = EmbeddedServerHandle {
+            shutdown_tx,
+            ui_recorder_handle: None,
+        };
+
+        handle.shutdown();
+        assert!(rx.try_recv().is_ok(), "shutdown must send on broadcast channel");
+    }
+
+    #[test]
+    fn test_shutdown_without_ui_recorder() {
+        let (shutdown_tx, _) = broadcast::channel::<()>(1);
+        let handle = EmbeddedServerHandle {
+            shutdown_tx,
+            ui_recorder_handle: None,
+        };
+
+        // Should not panic when ui_recorder_handle is None
+        handle.shutdown();
+    }
+}

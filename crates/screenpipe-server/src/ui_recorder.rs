@@ -185,6 +185,16 @@ impl UiRecorderHandle {
             let _ = handle.await;
         }
     }
+
+    /// Create a handle with only a stop flag (for testing shutdown wiring)
+    #[doc(hidden)]
+    pub fn new_for_test(stop_flag: Arc<AtomicBool>) -> Self {
+        Self {
+            stop_flag,
+            task_handle: None,
+            tree_walker_handle: None,
+        }
+    }
 }
 
 /// Start UI event recording.
@@ -705,4 +715,104 @@ async fn flush_batch(
         }
     }
     batch.clear();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_stop_flag_sets_on_stop() {
+        let handle = UiRecorderHandle {
+            stop_flag: Arc::new(AtomicBool::new(false)),
+            task_handle: None,
+            tree_walker_handle: None,
+        };
+
+        assert!(handle.is_running());
+        handle.stop();
+        assert!(!handle.is_running());
+    }
+
+    #[test]
+    fn test_stop_flag_propagates_to_shared_clone() {
+        // Simulates the real scenario: stop_flag is shared between
+        // UiRecorderHandle and the tree walker thread via Arc.
+        let flag = Arc::new(AtomicBool::new(false));
+        let flag_clone = flag.clone();
+
+        let handle = UiRecorderHandle {
+            stop_flag: flag,
+            task_handle: None,
+            tree_walker_handle: None,
+        };
+
+        // The tree walker checks the cloned flag
+        assert!(!flag_clone.load(Ordering::Relaxed));
+        handle.stop();
+        assert!(flag_clone.load(Ordering::Relaxed));
+    }
+
+    #[tokio::test]
+    async fn test_spawn_channel_pattern_clean_shutdown() {
+        // Verifies the spawn+channel pattern doesn't panic when the
+        // spawned task is cancelled (simulating runtime shutdown).
+        let (result_tx, result_rx) = std::sync::mpsc::sync_channel::<Result<i64, String>>(1);
+
+        // Drop the sender without sending — simulates runtime dropping the task
+        drop(result_tx);
+
+        // recv_timeout should return Err, not panic
+        let result = result_rx.recv_timeout(std::time::Duration::from_millis(100));
+        assert!(result.is_err());
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_spawn_channel_pattern_success() {
+        let rt_handle = tokio::runtime::Handle::current();
+        let (result_tx, result_rx) = std::sync::mpsc::sync_channel::<Result<i64, String>>(1);
+
+        rt_handle.spawn(async move {
+            let _ = result_tx.send(Ok(42i64));
+        });
+
+        // recv_timeout blocks the thread, so we need multi_thread runtime
+        // to let the spawned task run on another worker
+        let result = result_rx.recv_timeout(std::time::Duration::from_secs(5));
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().unwrap(), 42);
+    }
+
+    #[tokio::test]
+    async fn test_spawn_channel_runtime_shutdown_no_panic() {
+        // Creates a separate runtime, spawns a slow task, then drops the
+        // runtime. The recv should return Err cleanly — no panic.
+        let (result_tx, result_rx) = std::sync::mpsc::sync_channel::<Result<i64, String>>(1);
+
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_time()
+            .build()
+            .unwrap();
+
+        let handle = rt.handle().clone();
+        handle.spawn(async move {
+            // Simulate a slow DB write that won't complete before shutdown
+            tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
+            let _ = result_tx.send(Ok(1));
+        });
+
+        // Shutdown the runtime — the task is cancelled, sender is dropped
+        rt.shutdown_background();
+
+        let result = result_rx.recv_timeout(std::time::Duration::from_millis(500));
+        assert!(result.is_err(), "should get Err when runtime shuts down");
+    }
+
+    #[test]
+    fn test_handle_is_send() {
+        // EmbeddedServerHandle stores UiRecorderHandle and crosses async
+        // boundaries — it must be Send.
+        fn assert_send<T: Send>() {}
+        assert_send::<UiRecorderHandle>();
+    }
 }
