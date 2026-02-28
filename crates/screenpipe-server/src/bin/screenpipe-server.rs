@@ -744,8 +744,9 @@ async fn main() -> anyhow::Result<()> {
         });
         (h, Some(trigger_tx))
     } else {
-        // Vision disabled — spawn a no-op task so `handle` always exists
-        (tokio::spawn(async {}), None)
+        // Vision disabled — spawn a pending task so `handle` never completes
+        // (otherwise the no-op future wins the tokio::select! race and shuts down the server)
+        (tokio::spawn(std::future::pending::<()>()), None)
     };
 
     let local_data_dir_clone_2 = local_data_dir_clone.clone();
