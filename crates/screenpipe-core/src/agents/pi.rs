@@ -452,9 +452,31 @@ impl PiExecutor {
 
         let mut reader = tokio::io::BufReader::new(child_stdout).lines();
         let mut stdout_buf = String::new();
+        let mut llm_error: Option<String> = None;
 
         while let Some(line) = reader.next_line().await? {
             let _ = line_tx.send(line.clone());
+
+            // Detect LLM-level errors (e.g. credits_exhausted) even when
+            // the process exits 0.  We look for assistant message events
+            // with stopReason "error".
+            if llm_error.is_none() {
+                if let Ok(evt) = serde_json::from_str::<serde_json::Value>(&line) {
+                    let is_assistant = evt.get("message")
+                        .and_then(|m| m.get("role"))
+                        .and_then(|r| r.as_str()) == Some("assistant");
+                    let stop_reason = evt.get("message")
+                        .and_then(|m| m.get("stopReason"))
+                        .and_then(|r| r.as_str());
+                    if is_assistant && stop_reason == Some("error") {
+                        llm_error = evt.get("message")
+                            .and_then(|m| m.get("errorMessage"))
+                            .and_then(|e| e.as_str())
+                            .map(|s| s.to_string());
+                    }
+                }
+            }
+
             stdout_buf.push_str(&line);
             stdout_buf.push('\n');
         }
@@ -462,7 +484,7 @@ impl PiExecutor {
         let status = child.wait().await?;
 
         // Read remaining stderr
-        let stderr = if let Some(mut stderr_handle) = child.stderr.take() {
+        let mut stderr = if let Some(mut stderr_handle) = child.stderr.take() {
             let mut buf = String::new();
             tokio::io::AsyncReadExt::read_to_string(&mut stderr_handle, &mut buf).await?;
             buf
@@ -470,10 +492,24 @@ impl PiExecutor {
             String::new()
         };
 
+        // If the process exited cleanly but the LLM returned an error
+        // (e.g. 429 credits_exhausted), treat it as a failure.
+        let success = if let Some(ref err) = llm_error {
+            if stderr.is_empty() {
+                stderr = err.clone();
+            } else {
+                stderr.push_str(&format!("\nLLM error: {}", err));
+            }
+            warn!("pi exited 0 but LLM returned error: {}", err);
+            false
+        } else {
+            status.success()
+        };
+
         Ok(AgentOutput {
             stdout: stdout_buf,
             stderr,
-            success: status.success(),
+            success,
             pid,
         })
     }

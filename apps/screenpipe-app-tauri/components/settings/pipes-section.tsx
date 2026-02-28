@@ -235,6 +235,7 @@ function formatDuration(ms: number): string {
  *  non-JSON lines as-is. */
 function cleanPipeStdout(raw: string): string {
   const parts: string[] = [];
+  let errorMessage: string | null = null;
   for (const line of raw.split("\n")) {
     const trimmed = line.trim();
     if (!trimmed) continue;
@@ -251,16 +252,25 @@ function cleanPipeStdout(raw: string): string {
           parts.push(evt.assistantMessageEvent.delta);
           continue;
         }
-        // message_start may contain initial text content
-        if (evt.type === "message_start" && evt.message?.content) {
-          for (const block of evt.message.content) {
-            if (block.type === "text" && block.text) {
-              parts.push(block.text);
+        // message_start/message_end for assistant role only
+        if (
+          (evt.type === "message_start" || evt.type === "message_end") &&
+          evt.message?.role === "assistant"
+        ) {
+          // Capture LLM-level errors (e.g. credits_exhausted)
+          if (evt.message.stopReason === "error" && evt.message.errorMessage) {
+            errorMessage = evt.message.errorMessage;
+          }
+          if (evt.message?.content) {
+            for (const block of evt.message.content) {
+              if (block.type === "text" && block.text) {
+                parts.push(block.text);
+              }
             }
           }
           continue;
         }
-        // Skip all other JSON events (session, agent_start, tool calls, etc.)
+        // Skip all other JSON events (session, agent_start, user messages, tool calls, etc.)
         continue;
       } catch {
         // Not valid JSON — fall through to treat as plain text
@@ -269,7 +279,11 @@ function cleanPipeStdout(raw: string): string {
     // Non-JSON line — keep as-is
     parts.push(trimmed);
   }
-  return parts.join("").trim();
+  const text = parts.join("").trim();
+  if (!text && errorMessage) {
+    return `error: ${errorMessage}`;
+  }
+  return text;
 }
 
 function ElapsedTimer({ startedAt }: { startedAt: string }) {
