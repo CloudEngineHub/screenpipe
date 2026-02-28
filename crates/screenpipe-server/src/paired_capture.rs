@@ -155,23 +155,32 @@ pub async fn paired_capture(
     };
 
     // --- Extract data from tree snapshot, fall back to OCR text ---
-    let (accessibility_text, tree_json, content_hash, simhash) = match tree_snapshot {
-        Some(snap) if !snap.text_content.is_empty() => {
-            let json = serde_json::to_string(&snap.nodes).ok();
-            (
-                Some(snap.text_content.clone()),
-                json,
-                Some(snap.content_hash as i64),
-                Some(snap.simhash as i64),
-            )
-        }
-        _ => {
-            // OCR fallback: accessibility returned no text (games, bad a11y apps)
-            // or app_prefers_ocr forced OCR (terminals).
-            if ocr_text.is_empty() {
-                (None, None, None, None)
-            } else {
-                (Some(ocr_text.clone()), None, None, None)
+    // When app_prefers_ocr (terminals), always prefer OCR over accessibility tree
+    // because the tree only returns window chrome (Minimize/Maximize/Close), not
+    // the actual terminal content.
+    let (accessibility_text, tree_json, content_hash, simhash) = if app_prefers_ocr
+        && !ocr_text.is_empty()
+    {
+        // Terminal with successful OCR: use OCR text, skip tree
+        (Some(ocr_text.clone()), None, None, None)
+    } else {
+        match tree_snapshot {
+            Some(snap) if !snap.text_content.is_empty() => {
+                let json = serde_json::to_string(&snap.nodes).ok();
+                (
+                    Some(snap.text_content.clone()),
+                    json,
+                    Some(snap.content_hash as i64),
+                    Some(snap.simhash as i64),
+                )
+            }
+            _ => {
+                // OCR fallback: accessibility returned no text (games, bad a11y apps)
+                if ocr_text.is_empty() {
+                    (None, None, None, None)
+                } else {
+                    (Some(ocr_text.clone()), None, None, None)
+                }
             }
         }
     };
