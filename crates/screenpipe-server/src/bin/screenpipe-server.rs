@@ -262,7 +262,8 @@ async fn main() -> anyhow::Result<()> {
             "https://123656092b01a72b0417355ebbfb471f@o4505591122886656.ingest.us.sentry.io/4510761360949248",
             sentry::ClientOptions {
                 release: Some(release_name.into()),
-                traces_sample_rate: 0.1,
+                sample_rate: 0.1,
+                traces_sample_rate: 0.01,
                 send_default_pii: false,
                 server_name: Some("screenpipe-cli".into()),
                 before_send: Some(std::sync::Arc::new(|mut event| {
