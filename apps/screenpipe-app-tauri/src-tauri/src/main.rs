@@ -25,6 +25,9 @@ use tracing::{debug, error, info, warn};
 use tracing_appender::rolling::{RollingFileAppender, Rotation};
 use tracing_subscriber::prelude::*;
 use tracing_subscriber::EnvFilter;
+
+#[cfg(target_os = "macos")]
+use tracing_oslog::OsLogger;
 use updates::start_update_check;
 use window_api::ShowRewindWindow;
 
@@ -1617,17 +1620,19 @@ async fn main() {
 
             // Initialize the tracing subscriber with both layers + optional Sentry layer
             // The Sentry layer captures error!() and warn!() events (not just panics)
+            let registry = tracing_subscriber::registry()
+                .with(file_layer)
+                .with(console_layer);
+
+            #[cfg(target_os = "macos")]
+            let registry = registry.with(OsLogger::new("pe.screenpi", "app"));
+
             if sentry_guard.is_some() {
-                tracing_subscriber::registry()
-                    .with(file_layer)
-                    .with(console_layer)
+                registry
                     .with(sentry::integrations::tracing::layer())
                     .init();
             } else {
-                tracing_subscriber::registry()
-                    .with(file_layer)
-                    .with(console_layer)
-                    .init();
+                registry.init();
             }
 
             // Windows-specific setup
