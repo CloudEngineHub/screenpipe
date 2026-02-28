@@ -250,7 +250,21 @@ impl TranscriptionSession {
                 let result = engine
                     .transcribe_with_sample_rate(audio, sample_rate, opts)
                     .map_err(|e| anyhow!("{}", e))?;
-                Ok(result.text)
+                // Qwen3-ASR outputs "language <lang>" prefix; the audiopipe
+                // strip function handles most cases but fails when the output
+                // is *only* a prefix with no actual speech (e.g. "language None",
+                // "language English"). Treat these as empty transcriptions.
+                let text = result.text.trim();
+                if text.is_empty()
+                    || text.eq_ignore_ascii_case("language none")
+                    || text
+                        .strip_prefix("language ")
+                        .map_or(false, |rest| rest.chars().all(|c| c.is_alphabetic()))
+                {
+                    Ok(String::new())
+                } else {
+                    Ok(result.text)
+                }
             }
 
             Self::Whisper {
