@@ -229,7 +229,13 @@ export function ArchiveSettings() {
             </Badge>
           </div>
           <p className="text-sm text-muted-foreground mt-1">
-            Encrypt and archive old data to the cloud to free disk space.
+            Encrypt and archive old data to the cloud to free disk space.{" "}
+            <button
+              onClick={() => openUrl("https://docs.screenpi.pe/cloud-archive")}
+              className="underline underline-offset-2 hover:text-foreground transition-colors"
+            >
+              Learn more
+            </button>
           </p>
         </div>
 
@@ -242,7 +248,7 @@ export function ArchiveSettings() {
               </p>
             </div>
             <Button size="sm" onClick={handleCheckout}>
-              {isLoggedIn ? "upgrade to pro" : "log in to upgrade"}
+              {isLoggedIn ? "Upgrade to pro" : "Log in to upgrade"}
             </Button>
           </CardContent>
         </Card>
@@ -278,7 +284,13 @@ export function ArchiveSettings() {
               ))}
             </SelectContent>
           </Select>{" "}
-          to free disk space.
+          to free disk space.{" "}
+          <button
+            onClick={() => openUrl("https://docs.screenpi.pe/cloud-archive")}
+            className="underline underline-offset-2 hover:text-foreground transition-colors"
+          >
+            Learn more
+          </button>
         </p>
       </div>
 
