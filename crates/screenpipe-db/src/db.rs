@@ -28,11 +28,11 @@ use futures::future::try_join_all;
 
 use crate::{
     text_similarity::is_similar_transcription, AudioChunksResponse, AudioDevice, AudioEntry,
-    AudioResult, AudioResultRaw, ContentType, DeviceType, FrameData, FrameRow, FrameRowLight,
-    FrameWindowData, InsertUiEvent, MeetingRecord, OCREntry, OCRResult, OCRResultRaw, OcrEngine,
-    OcrTextBlock, Order, SearchMatch, SearchMatchGroup, SearchResult, Speaker, TagContentType,
-    TextBounds, TextPosition, TimeSeriesChunk, UiContent, UiEventRecord, UiEventRow,
-    VideoMetadata,
+    AudioResult, AudioResultRaw, ContentType, DeviceType, Element, ElementRow, ElementSource,
+    FrameData, FrameRow, FrameRowLight, FrameWindowData, InsertUiEvent,
+    MeetingRecord, OCREntry, OCRResult, OCRResultRaw, OcrEngine, OcrTextBlock, Order, SearchMatch,
+    SearchMatchGroup, SearchResult, Speaker, TagContentType, TextBounds, TextPosition,
+    TimeSeriesChunk, UiContent, UiEventRecord, UiEventRow, VideoMetadata,
 };
 
 /// Time window (in seconds) to check for similar transcriptions across devices.
@@ -1228,6 +1228,245 @@ impl DatabaseManager {
         .await
     }
 
+    // ========================================================================
+    // Elements helpers — dual-write OCR + accessibility as structured rows
+    // ========================================================================
+
+    /// Insert OCR elements from `text_json` (serialized `Vec<OcrTextBlock>`) into the
+    /// `elements` table. Builds a page→block→paragraph→line→word hierarchy using
+    /// `RETURNING id` to chain parent IDs within the same transaction.
+    ///
+    /// Errors are logged and swallowed so that the primary OCR insert path is never
+    /// blocked by a failure in the new elements table.
+    async fn insert_ocr_elements(
+        tx: &mut sqlx::pool::PoolConnection<Sqlite>,
+        frame_id: i64,
+        text_json: &str,
+    ) {
+        let blocks: Vec<OcrTextBlock> = match serde_json::from_str(text_json) {
+            Ok(b) => b,
+            Err(e) => {
+                debug!("elements: skipping OCR parse for frame {}: {}", frame_id, e);
+                return;
+            }
+        };
+        if blocks.is_empty() {
+            return;
+        }
+
+        // Track hierarchy: (page, block, par, line) → element_id
+        // We use a BTreeMap so keys are ordered.
+        let mut page_ids: BTreeMap<i64, i64> = BTreeMap::new();
+        let mut block_ids: BTreeMap<(i64, i64), i64> = BTreeMap::new();
+        let mut par_ids: BTreeMap<(i64, i64, i64), i64> = BTreeMap::new();
+        let mut line_ids: BTreeMap<(i64, i64, i64, i64), i64> = BTreeMap::new();
+        let mut sort_order: i32 = 0;
+
+        for block in &blocks {
+            let level: i64 = block.level.parse().unwrap_or(0);
+            let page_num: i64 = block.page_num.parse().unwrap_or(0);
+            let block_num: i64 = block.block_num.parse().unwrap_or(0);
+            let par_num: i64 = block.par_num.parse().unwrap_or(0);
+            let line_num: i64 = block.line_num.parse().unwrap_or(0);
+
+            let left: Option<f64> = block.left.parse().ok();
+            let top: Option<f64> = block.top.parse().ok();
+            let width: Option<f64> = block.width.parse().ok();
+            let height: Option<f64> = block.height.parse().ok();
+            let conf: Option<f64> = block.conf.parse().ok();
+
+            let (role, text, parent_id, depth, confidence) = match level {
+                // Level 0: flat text blocks from Apple Native OCR (no hierarchy).
+                // Each block is a standalone text element (like a line/word).
+                0 => {
+                    let text_val = block.text.as_str();
+                    if text_val.trim().is_empty() {
+                        continue;
+                    }
+                    ("block", Some(text_val), None::<i64>, 0i32, conf)
+                }
+                1 => {
+                    if page_ids.contains_key(&page_num) {
+                        continue;
+                    }
+                    ("page", None::<&str>, None::<i64>, 0i32, None::<f64>)
+                }
+                2 => {
+                    if block_ids.contains_key(&(page_num, block_num)) {
+                        continue;
+                    }
+                    let pid = page_ids.get(&page_num).copied();
+                    ("block", None, pid, 1, None)
+                }
+                3 => {
+                    if par_ids.contains_key(&(page_num, block_num, par_num)) {
+                        continue;
+                    }
+                    let pid = block_ids.get(&(page_num, block_num)).copied();
+                    ("paragraph", None, pid, 2, None)
+                }
+                4 => {
+                    if line_ids.contains_key(&(page_num, block_num, par_num, line_num)) {
+                        continue;
+                    }
+                    let pid = par_ids.get(&(page_num, block_num, par_num)).copied();
+                    ("line", None, pid, 3, None)
+                }
+                5 => {
+                    let text_val = block.text.as_str();
+                    if text_val.trim().is_empty() {
+                        continue;
+                    }
+                    let pid = line_ids
+                        .get(&(page_num, block_num, par_num, line_num))
+                        .copied();
+                    ("word", Some(text_val), pid, 4, conf)
+                }
+                _ => continue,
+            };
+
+            let result = sqlx::query_scalar::<_, i64>(
+                "INSERT INTO elements (frame_id, source, role, text, parent_id, depth, left_bound, top_bound, width_bound, height_bound, confidence, sort_order) VALUES (?1, 'ocr', ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11) RETURNING id",
+            )
+            .bind(frame_id)
+            .bind(role)
+            .bind(text)
+            .bind(parent_id)
+            .bind(depth)
+            .bind(left)
+            .bind(top)
+            .bind(width)
+            .bind(height)
+            .bind(confidence)
+            .bind(sort_order)
+            .fetch_one(&mut **tx)
+            .await;
+
+            match result {
+                Ok(id) => {
+                    match level {
+                        1 => { page_ids.insert(page_num, id); }
+                        2 => { block_ids.insert((page_num, block_num), id); }
+                        3 => { par_ids.insert((page_num, block_num, par_num), id); }
+                        4 => { line_ids.insert((page_num, block_num, par_num, line_num), id); }
+                        _ => {}
+                    }
+                    sort_order += 1;
+                }
+                Err(e) => {
+                    debug!("elements: OCR insert failed for frame {}: {}", frame_id, e);
+                    return;
+                }
+            }
+        }
+    }
+
+    /// Insert accessibility tree nodes from `tree_json` (serialized
+    /// `Vec<AccessibilityTreeNode>`) into the `elements` table.
+    ///
+    /// Nodes are inserted in depth-first order. A depth→parent_id stack is
+    /// used to resolve parent references.
+    ///
+    /// Errors are logged and swallowed.
+    async fn insert_accessibility_elements(
+        tx: &mut sqlx::pool::PoolConnection<Sqlite>,
+        frame_id: i64,
+        tree_json: &str,
+    ) {
+        // AccessibilityTreeNode: { role, text, depth, bounds? }
+        #[derive(serde::Deserialize)]
+        struct AxNode {
+            role: String,
+            text: String,
+            depth: u8,
+            bounds: Option<AxBounds>,
+        }
+        #[derive(serde::Deserialize)]
+        struct AxBounds {
+            left: f32,
+            top: f32,
+            width: f32,
+            height: f32,
+        }
+
+        let nodes: Vec<AxNode> = match serde_json::from_str(tree_json) {
+            Ok(n) => n,
+            Err(e) => {
+                debug!("elements: skipping AX parse for frame {}: {}", frame_id, e);
+                return;
+            }
+        };
+        if nodes.is_empty() {
+            return;
+        }
+
+        // depth → most-recent element_id at that depth
+        // parent of depth N = last id at depth N-1
+        let mut depth_stack: Vec<(u8, i64)> = Vec::new();
+        let mut sort_order: i32 = 0;
+
+        for node in &nodes {
+            let depth = node.depth as i32;
+            let text = if node.text.is_empty() {
+                None
+            } else {
+                Some(node.text.as_str())
+            };
+
+            // Find parent: walk stack backwards to find depth - 1
+            let parent_id = if depth > 0 {
+                depth_stack
+                    .iter()
+                    .rev()
+                    .find(|(d, _)| (*d as i32) == depth - 1)
+                    .map(|(_, id)| *id)
+            } else {
+                None
+            };
+
+            let (left, top, width, height) = match &node.bounds {
+                Some(b) => (
+                    Some(b.left as f64),
+                    Some(b.top as f64),
+                    Some(b.width as f64),
+                    Some(b.height as f64),
+                ),
+                None => (None, None, None, None),
+            };
+
+            let result = sqlx::query_scalar::<_, i64>(
+                "INSERT INTO elements (frame_id, source, role, text, parent_id, depth, left_bound, top_bound, width_bound, height_bound, confidence, sort_order) VALUES (?1, 'accessibility', ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, NULL, ?10) RETURNING id",
+            )
+            .bind(frame_id)
+            .bind(&node.role)
+            .bind(text)
+            .bind(parent_id)
+            .bind(depth)
+            .bind(left)
+            .bind(top)
+            .bind(width)
+            .bind(height)
+            .bind(sort_order)
+            .fetch_one(&mut **tx)
+            .await;
+
+            match result {
+                Ok(id) => {
+                    // Trim stack to current depth, then push
+                    while depth_stack.last().map_or(false, |(d, _)| *d as i32 >= depth) {
+                        depth_stack.pop();
+                    }
+                    depth_stack.push((node.depth, id));
+                    sort_order += 1;
+                }
+                Err(e) => {
+                    debug!("elements: AX insert failed for frame {}: {}", frame_id, e);
+                    return;
+                }
+            }
+        }
+    }
+
     /// Insert a snapshot frame AND optional OCR text positions in a single transaction.
     /// This avoids opening two separate transactions per capture which doubles pool pressure.
     #[allow(clippy::too_many_arguments)]
@@ -1294,6 +1533,16 @@ impl DatabaseManager {
             .bind(text_length)
             .execute(&mut **tx.conn())
             .await?;
+
+            // Dual-write: insert OCR elements into unified elements table
+            Self::insert_ocr_elements(tx.conn(), id, text_json).await;
+        }
+
+        // Dual-write: insert accessibility elements if tree JSON is present
+        if let Some(tree_json) = accessibility_tree_json {
+            if !tree_json.is_empty() {
+                Self::insert_accessibility_elements(tx.conn(), id, tree_json).await;
+            }
         }
 
         tx.commit().await?;
@@ -1447,6 +1696,11 @@ impl DatabaseManager {
             .execute(&mut **tx.conn())
             .await?;
 
+            // Dual-write: insert OCR elements into unified elements table
+            if !window.text_json.is_empty() {
+                Self::insert_ocr_elements(tx.conn(), frame_id, &window.text_json).await;
+            }
+
             results.push((frame_id, idx));
         }
 
@@ -1556,6 +1810,11 @@ impl DatabaseManager {
                     .bind(text_length)
                     .execute(&mut **tx.conn())
                     .await?;
+
+                    // Dual-write: insert OCR elements into unified elements table
+                    if !window.text_json.is_empty() {
+                        Self::insert_ocr_elements(tx.conn(), frame_id, &window.text_json).await;
+                    }
                 }
 
                 frame_results.push((frame_id, idx));
@@ -4106,6 +4365,151 @@ LIMIT ? OFFSET ?
                 }
             })
             .collect())
+    }
+
+    // ========================================================================
+    // Elements search
+    // ========================================================================
+
+    /// Search the unified `elements` table with optional FTS, time, and app filters.
+    /// Returns a flat `Vec<Element>` — clients reconstruct the tree from `parent_id`/`depth`.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn search_elements(
+        &self,
+        query: &str,
+        frame_id: Option<i64>,
+        source: Option<&ElementSource>,
+        role: Option<&str>,
+        start_time: Option<DateTime<Utc>>,
+        end_time: Option<DateTime<Utc>>,
+        app_name: Option<&str>,
+        limit: u32,
+        offset: u32,
+    ) -> Result<(Vec<Element>, i64), sqlx::Error> {
+        let mut conditions = Vec::new();
+        let use_fts = !query.is_empty();
+
+        if use_fts {
+            conditions.push("fts.text MATCH ?".to_string());
+        }
+        if frame_id.is_some() {
+            conditions.push("e.frame_id = ?".to_string());
+        }
+        if source.is_some() {
+            conditions.push("e.source = ?".to_string());
+        }
+        if role.is_some() {
+            conditions.push("e.role = ?".to_string());
+        }
+        if start_time.is_some() {
+            conditions.push("f.timestamp >= ?".to_string());
+        }
+        if end_time.is_some() {
+            conditions.push("f.timestamp <= ?".to_string());
+        }
+        if app_name.is_some() {
+            conditions.push("f.app_name = ?".to_string());
+        }
+
+        let where_clause = if conditions.is_empty() {
+            String::new()
+        } else {
+            format!("WHERE {}", conditions.join(" AND "))
+        };
+
+        let join_fts = if use_fts {
+            "JOIN elements_fts fts ON fts.rowid = e.id"
+        } else {
+            ""
+        };
+
+        let sql = format!(
+            r#"SELECT e.id, e.frame_id, e.source, e.role, e.text, e.parent_id,
+                      e.depth, e.left_bound, e.top_bound, e.width_bound, e.height_bound,
+                      e.confidence, e.sort_order
+               FROM elements e
+               JOIN frames f ON f.id = e.frame_id
+               {}
+               {}
+               ORDER BY e.frame_id DESC, e.sort_order ASC
+               LIMIT ? OFFSET ?"#,
+            join_fts, where_clause
+        );
+
+        let count_sql = format!(
+            r#"SELECT COUNT(*) FROM elements e
+               JOIN frames f ON f.id = e.frame_id
+               {}
+               {}"#,
+            join_fts, where_clause
+        );
+
+        // Build the data query
+        let mut data_query = sqlx::query_as::<_, ElementRow>(&sql);
+        let mut count_query = sqlx::query_scalar::<_, i64>(&count_sql);
+
+        // Bind parameters in the same order as conditions
+        if use_fts {
+            let fts_query = crate::text_normalizer::sanitize_fts5_query(query);
+            data_query = data_query.bind(fts_query.clone());
+            count_query = count_query.bind(fts_query);
+        }
+        if let Some(fid) = frame_id {
+            data_query = data_query.bind(fid);
+            count_query = count_query.bind(fid);
+        }
+        if let Some(src) = source {
+            data_query = data_query.bind(src.to_string());
+            count_query = count_query.bind(src.to_string());
+        }
+        if let Some(r) = role {
+            data_query = data_query.bind(r.to_string());
+            count_query = count_query.bind(r.to_string());
+        }
+        if let Some(st) = start_time {
+            data_query = data_query.bind(st);
+            count_query = count_query.bind(st);
+        }
+        if let Some(et) = end_time {
+            data_query = data_query.bind(et);
+            count_query = count_query.bind(et);
+        }
+        if let Some(app) = app_name {
+            data_query = data_query.bind(app.to_string());
+            count_query = count_query.bind(app.to_string());
+        }
+
+        data_query = data_query.bind(limit as i64).bind(offset as i64);
+
+        let (rows, total) = tokio::try_join!(
+            data_query.fetch_all(&self.pool),
+            count_query.fetch_one(&self.pool),
+        )?;
+
+        let elements: Vec<Element> = rows.into_iter().map(Element::from).collect();
+        Ok((elements, total))
+    }
+
+    /// Get all elements for a single frame, ordered by sort_order.
+    /// Returns the full tree; clients reconstruct hierarchy from `parent_id`/`depth`.
+    pub async fn get_frame_elements(
+        &self,
+        frame_id: i64,
+        source: Option<&ElementSource>,
+    ) -> Result<Vec<Element>, sqlx::Error> {
+        let sql = if source.is_some() {
+            "SELECT id, frame_id, source, role, text, parent_id, depth, left_bound, top_bound, width_bound, height_bound, confidence, sort_order FROM elements WHERE frame_id = ?1 AND source = ?2 ORDER BY sort_order"
+        } else {
+            "SELECT id, frame_id, source, role, text, parent_id, depth, left_bound, top_bound, width_bound, height_bound, confidence, sort_order FROM elements WHERE frame_id = ?1 ORDER BY sort_order"
+        };
+
+        let mut query = sqlx::query_as::<_, ElementRow>(sql).bind(frame_id);
+        if let Some(src) = source {
+            query = query.bind(src.to_string());
+        }
+
+        let rows = query.fetch_all(&self.pool).await?;
+        Ok(rows.into_iter().map(Element::from).collect())
     }
 
     /// Lightweight search for grouped results — skips text/text_json columns entirely.

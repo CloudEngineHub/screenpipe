@@ -458,12 +458,12 @@ impl AudioManager {
             {
                 if *audio_transcription_engine == AudioTranscriptionEngine::Qwen3Asr {
                     match tokio::task::spawn_blocking(|| {
-                        audiopipe::Model::from_pretrained("qwen3-asr-0.6b")
+                        stt::Model::from_pretrained("qwen3-asr-0.6b-ggml")
                     })
                     .await
                     {
                         Ok(Ok(model)) => {
-                            info!("qwen3-asr model loaded successfully");
+                            info!("qwen3-asr-ggml model loaded successfully");
                             Some(std::sync::Arc::new(std::sync::Mutex::new(
                                 Box::new(model)
                                     as Box<dyn crate::transcription::stt::AlternateStt + Send>,

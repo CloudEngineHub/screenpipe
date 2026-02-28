@@ -79,6 +79,7 @@ pub use config::get_base_dir;
 pub use commands::set_tray_health_icon;
 pub use commands::set_tray_unhealth_icon;
 pub use commands::write_browser_log;
+pub use commands::write_browser_logs;
 pub use server::spawn_server;
 pub use recording::spawn_screenpipe;
 pub use recording::stop_screenpipe;
@@ -1219,6 +1220,7 @@ async fn main() {
                 set_tray_health_icon,
                 // Browser logging
                 write_browser_log,
+                write_browser_logs,
                 // Commands from sync.rs
                 sync::get_sync_status,
                 sync::set_sync_enabled,
@@ -1404,6 +1406,7 @@ async fn main() {
             set_tray_unhealth_icon,
             set_tray_health_icon,
             write_browser_log,
+            write_browser_logs,
             commands::update_show_screenpipe_shortcut,
             commands::get_disk_usage,
             commands::open_pipe_window,

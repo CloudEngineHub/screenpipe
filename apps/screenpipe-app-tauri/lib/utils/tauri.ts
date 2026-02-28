@@ -374,6 +374,9 @@ async setTrayHealthIcon() : Promise<void> {
 async writeBrowserLog(level: string, message: string) : Promise<void> {
     await TAURI_INVOKE("write_browser_log", { level, message });
 },
+async writeBrowserLogs(entries: BrowserLogEntry[]) : Promise<void> {
+    await TAURI_INVOKE("write_browser_logs", { entries });
+},
 /**
  * Get current sync status.
  */
@@ -840,6 +843,7 @@ async getHardwareCapability() : Promise<HardwareCapability> {
 export type AIPreset = { id: string; prompt: string; provider: AIProviderType; url?: string; model?: string; defaultPreset: boolean; apiKey: string | null; maxContextChars: number }
 export type AIProviderType = "openai" | "native-ollama" | "custom" | "screenpipe-cloud" | "pi"
 export type AudioDeviceInfo = { name: string; isDefault: boolean }
+export type BrowserLogEntry = { level: string; message: string }
 export type CachedSuggestions = { suggestions: Suggestion[]; generatedAt: string; mode: string; aiGenerated: boolean; tags: string[] }
 export type CalendarEventItem = { id: string; title: string; 
 /**

@@ -106,6 +106,7 @@ impl PiExecutor {
             std::fs::write(&skill_path, content)?;
             debug!("{} skill installed at {:?}", name, skill_path);
         }
+
         Ok(())
     }
 

@@ -4,7 +4,7 @@
 import { useState, useRef, useMemo, useCallback, useEffect } from "react";
 import { AudioData, StreamTimeSeriesResponse, TimeRange } from "@/components/rewind/timeline";
 import { Button } from "@/components/ui/button";
-import { GripHorizontal, X, Users, Copy, Check, BotMessageSquare, Sparkles, MoreVertical, RefreshCw, Loader2 } from "lucide-react";
+import { GripHorizontal, X, Copy, Check, BotMessageSquare, Sparkles, MoreVertical, RefreshCw, Loader2 } from "lucide-react";
 import {
 	DropdownMenu,
 	DropdownMenuContent,
@@ -42,8 +42,6 @@ interface ConversationItem {
 	isFirstInGroup: boolean;
 	gapMinutesBefore?: number;
 }
-
-type TabMode = "nearby" | "meeting";
 
 interface AudioTranscriptProps {
 	frames: StreamTimeSeriesResponse[];
@@ -92,7 +90,6 @@ export function AudioTranscript({
 	isPlaying = false,
 }: AudioTranscriptProps) {
 	const [playing, setPlaying] = useState<string | null>(null);
-	const [tabMode, setTabMode] = useState<TabMode>("nearby");
 	const { templatePipes } = usePipes();
 	const meetingScrollRef = useRef<HTMLDivElement | null>(null);
 
@@ -396,7 +393,7 @@ export function AudioTranscript({
 
 	// Copy full transcript to clipboard (nearby or meeting depending on active tab)
 	const handleCopyTranscript = useCallback(() => {
-		const data = tabMode === "meeting" ? meetingConversationData : conversationData;
+		const data = !!activeMeeting ? meetingConversationData : conversationData;
 		if (!data.items.length) return;
 
 		const lines = data.items.map((item) => {
@@ -410,7 +407,7 @@ export function AudioTranscript({
 			setCopied(true);
 			setTimeout(() => setCopied(false), 2000);
 		});
-	}, [tabMode, meetingConversationData, conversationData, getSpeakerInfo]);
+	}, [activeMeeting, meetingConversationData, conversationData, getSpeakerInfo]);
 
 	// Retranscribe: re-run STT on all audio in the current view
 	const [isRetranscribing, setIsRetranscribing] = useState(false);
@@ -420,7 +417,7 @@ export function AudioTranscript({
 
 	const handleRetranscribe = useCallback(async () => {
 		if (isRetranscribing) return; // prevent double-submit
-		const data = tabMode === "meeting" ? meetingConversationData : conversationData;
+		const data = !!activeMeeting ? meetingConversationData : conversationData;
 		if (!data.items.length) return;
 
 		setShowRetranscribeDialog(false);
@@ -474,10 +471,10 @@ export function AudioTranscript({
 			setIsRetranscribing(false);
 			setRetranscribePrompt("");
 		}
-	}, [tabMode, meetingConversationData, conversationData, retranscribePrompt, isRetranscribing, handleRetranscribed, toast]);
+	}, [activeMeeting, meetingConversationData, conversationData, retranscribePrompt, isRetranscribing, handleRetranscribed, toast]);
 
 	const handleSendToChat = useCallback(async () => {
-		const data = tabMode === "meeting" ? meetingConversationData : conversationData;
+		const data = !!activeMeeting ? meetingConversationData : conversationData;
 		if (!data.items.length) return;
 
 		const lines = data.items.map((item) => {
@@ -491,14 +488,14 @@ export function AudioTranscript({
 			? `${data.timeRange.start.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} – ${data.timeRange.end.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`
 			: "";
 
-		const label = tabMode === "meeting"
+		const label = !!activeMeeting
 			? `meeting transcript (${timeRange})`
 			: `nearby audio (${timeRange})`;
 
 		const context = `here is my ${label}:\n\n${lines.join("\n")}`;
 
 		await showChatWithPrefill({ context, prompt: "" });
-	}, [tabMode, meetingConversationData, conversationData, getSpeakerInfo]);
+	}, [activeMeeting, meetingConversationData, conversationData, getSpeakerInfo]);
 
 	// Summarize: works for meeting (preferred) or nearby audio (fallback)
 	const summarizeInfo = useMemo(() => {
@@ -580,8 +577,8 @@ export function AudioTranscript({
 	}, [summarizeInfo, getSpeakerInfo, templatePipes]);
 
 	const isVisible = useMemo(() => {
-		return conversationData.items.length > 0 || (tabMode === "meeting" && activeMeeting != null);
-	}, [conversationData.items.length, tabMode, activeMeeting]);
+		return conversationData.items.length > 0 || activeMeeting != null;
+	}, [conversationData.items.length, activeMeeting]);
 
 	const handlePanelMouseMove = useCallback(
 		(e: React.MouseEvent) => {
@@ -670,7 +667,7 @@ export function AudioTranscript({
 					<div className="flex items-center gap-1.5 text-xs text-muted-foreground shrink-0">
 						<GripHorizontal className="w-4 h-4 shrink-0" />
 						<span className="truncate">
-							{tabMode === "meeting" && activeMeeting
+							{activeMeeting
 								? `meeting · ${activeMeeting.audioEntries.length} seg`
 								: "audio"}
 						</span>
@@ -678,28 +675,6 @@ export function AudioTranscript({
 
 					<TooltipProvider delayDuration={300}>
 					<div className="flex items-center gap-0.5 shrink-0">
-						{activeMeeting && tabMode === "meeting" && (
-							<Tooltip>
-								<TooltipTrigger asChild>
-									<Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={() => setTabMode("nearby")}>
-										←
-									</Button>
-								</TooltipTrigger>
-								<TooltipContent side="bottom"><p>nearby view</p></TooltipContent>
-							</Tooltip>
-						)}
-						{activeMeeting && tabMode === "nearby" && (
-							<Tooltip>
-								<TooltipTrigger asChild>
-									<Button variant="ghost" size="sm" className="h-6 px-1.5 p-0 text-xs" onClick={() => setTabMode("meeting")}>
-										<Users className="h-3 w-3 mr-1" />full meeting
-									</Button>
-								</TooltipTrigger>
-								<TooltipContent side="bottom"><p>show full meeting transcript</p></TooltipContent>
-							</Tooltip>
-						)}
-
-						<div className="w-px h-4 bg-border mx-0.5" />
 						<Tooltip>
 							<TooltipTrigger asChild>
 								<Button
@@ -771,7 +746,7 @@ export function AudioTranscript({
 
 			{/* Participants summary */}
 			{(() => {
-				const activeData = tabMode === "meeting" ? meetingConversationData : conversationData;
+				const activeData = !!activeMeeting ? meetingConversationData : conversationData;
 				const showSummary = activeData.participants.length > 0 && activeData.timeRange;
 				return showSummary && activeData.timeRange ? (
 					<ParticipantsSummary
@@ -792,7 +767,7 @@ export function AudioTranscript({
 				style={{
 					height: `calc(100% - ${
 						(() => {
-							const activeData = tabMode === "meeting" ? meetingConversationData : conversationData;
+							const activeData = !!activeMeeting ? meetingConversationData : conversationData;
 							const hasSummary = activeData.participants.length > 0;
 							if (!hasSummary) return "45px";
 							// Extra space when unnamed speakers exist (hint banner)
@@ -812,7 +787,7 @@ export function AudioTranscript({
 					</div>
 				)}
 
-				{tabMode === "meeting" && activeMeeting ? (
+				{activeMeeting ? (
 					// Full meeting transcript view
 					<div className="p-3 pb-14 space-y-0">
 						{meetingConversationData.items.length === 0 ? (
@@ -966,7 +941,7 @@ export function AudioTranscript({
 					</DialogHeader>
 					<div className="space-y-3">
 						{(() => {
-							const data = tabMode === "meeting" ? meetingConversationData : conversationData;
+							const data = !!activeMeeting ? meetingConversationData : conversationData;
 							const chunkCount = new Set(data.items.map((item) => item.audio.audio_chunk_id)).size;
 							return (
 								<p className="text-xs text-muted-foreground">

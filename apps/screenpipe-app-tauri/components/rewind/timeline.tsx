@@ -202,7 +202,7 @@ export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 
 	// Note: audio transcript is now on-demand (opened via subtitle bar click)
 
-	const { currentDate, setCurrentDate, fetchTimeRange, hasDateBeenFetched, loadingProgress, onWindowFocus, newFramesCount, lastFlushTimestamp, clearNewFramesCount, clearSentRequestForDate, clearFramesForNavigation, pendingNavigation, setPendingNavigation } =
+	const { currentDate, setCurrentDate, fetchTimeRange, hasDateBeenFetched, onWindowFocus, clearNewFramesCount, clearSentRequestForDate, clearFramesForNavigation, pendingNavigation, setPendingNavigation } =
 		useTimelineStore();
 
 	const { frames, isLoading, error, message, fetchNextDayData, websocket } =
@@ -403,19 +403,30 @@ export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 	const isAtLiveEdge = currentIndex === 0;
 	const prevFramesLengthRef = useRef(frames.length);
 
-	// When new frames arrive and user is NOT at live edge, adjust index to stay on same frame
-	useEffect(() => {
-		if (newFramesCount > 0 && !isAtLiveEdge && frames.length > prevFramesLengthRef.current) {
-			// New frames were added at the front, shift our index to compensate
-			setCurrentIndex(prev => prev + newFramesCount);
-		}
-		prevFramesLengthRef.current = frames.length;
+	// When new frames arrive and user is NOT at live edge, adjust index to stay on same frame.
+	// Subscribe directly to the store instead of via reactive state to avoid re-rendering the
+	// entire timeline component every 150ms when lastFlushTimestamp changes.
+	const currentIndexRef = useRef(currentIndex);
+	currentIndexRef.current = currentIndex;
+	const framesLengthRef = useRef(frames.length);
+	framesLengthRef.current = frames.length;
 
-		// Clear the count after handling
-		if (newFramesCount > 0) {
-			clearNewFramesCount();
-		}
-	}, [lastFlushTimestamp, newFramesCount, isAtLiveEdge, frames.length, clearNewFramesCount]);
+	useEffect(() => {
+		let prevTs = 0;
+		return useTimelineStore.subscribe((state) => {
+			const { lastFlushTimestamp, newFramesCount } = state;
+			if (lastFlushTimestamp === prevTs) return;
+			prevTs = lastFlushTimestamp;
+
+			if (newFramesCount > 0 && currentIndexRef.current !== 0 && framesLengthRef.current > prevFramesLengthRef.current) {
+				setCurrentIndex(prev => prev + newFramesCount);
+			}
+			prevFramesLengthRef.current = framesLengthRef.current;
+			if (newFramesCount > 0) {
+				clearNewFramesCount();
+			}
+		});
+	}, [clearNewFramesCount]);
 
 	// Listen for window focus events to refresh timeline data (debounced)
 	useEffect(() => {
@@ -1888,8 +1899,6 @@ export default function Timeline({ embedded = false }: { embedded?: boolean }) {
 							fetchNextDayData={fetchNextDayData}
 							currentDate={currentDate}
 							startAndEndDates={startAndEndDates}
-							newFramesCount={newFramesCount}
-							lastFlushTimestamp={lastFlushTimestamp}
 							isSearchModalOpen={showSearchModal}
 							zoomLevel={zoomLevel}
 							targetZoom={targetZoom}

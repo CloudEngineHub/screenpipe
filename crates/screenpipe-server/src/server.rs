@@ -24,6 +24,7 @@ use crate::{
             remove_tags, validate_media_handler,
         },
         data::delete_time_range_handler,
+        elements::{get_frame_elements, search_elements},
         frames::{
             get_frame_context, get_frame_data, get_frame_metadata, get_frame_ocr_data,
             get_next_valid_frame, run_frame_ocr,
@@ -415,6 +416,8 @@ impl SCServer {
             .get("/search/keyword", keyword_search_handler)
             .post("/audio/device/start", start_audio_device)
             .post("/audio/device/stop", stop_audio_device)
+            .get("/elements", search_elements)
+            .get("/frames/:frame_id/elements", get_frame_elements)
             .route_yaml_spec("/openapi.yaml")
             .route_json_spec("/openapi.json")
             .freeze();
@@ -430,6 +433,14 @@ impl SCServer {
             .route(
                 "/sync/download",
                 axum::routing::post(sync_api::sync_download),
+            )
+            .route(
+                "/sync/pipes/push",
+                axum::routing::post(sync_api::sync_pipes_push),
+            )
+            .route(
+                "/sync/pipes/pull",
+                axum::routing::post(sync_api::sync_pipes_pull),
             )
             // Cloud Archive API routes
             .route("/archive/init", axum::routing::post(crate::archive::archive_init))

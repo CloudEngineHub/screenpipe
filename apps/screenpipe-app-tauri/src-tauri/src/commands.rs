@@ -23,6 +23,25 @@ pub fn write_browser_log(level: String, message: String) {
     }
 }
 
+#[derive(serde::Deserialize, specta::Type)]
+pub struct BrowserLogEntry {
+    pub level: String,
+    pub message: String,
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn write_browser_logs(entries: Vec<BrowserLogEntry>) {
+    for entry in entries {
+        match entry.level.as_str() {
+            "error" => error!("[webview] {}", entry.message),
+            "warn" => warn!("[webview] {}", entry.message),
+            "debug" => debug!("[webview] {}", entry.message),
+            _ => info!("[webview] {}", entry.message),
+        }
+    }
+}
+
 
 
 #[tauri::command]

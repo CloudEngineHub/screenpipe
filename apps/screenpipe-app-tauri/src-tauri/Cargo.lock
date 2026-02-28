@@ -799,22 +799,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "audiopipe"
-version = "0.1.0"
-source = "git+https://github.com/screenpipe/audiopipe.git#5bbb9ae20c854e4d2427c903956540405b37eb78"
-dependencies = [
- "half",
- "hf-hub",
- "ndarray",
- "ort",
- "realfft",
- "serde",
- "serde_json",
- "thiserror 1.0.69",
- "tracing",
-]
-
-[[package]]
 name = "auto-launch"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3882,6 +3866,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "hf-hub"
+version = "0.4.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "629d8f3bbeda9d148036d6b0de0a3ab947abd08ce90626327fc3547a49d59d97"
+dependencies = [
+ "dirs 6.0.0",
+ "futures",
+ "http 1.4.0",
+ "indicatif",
+ "libc",
+ "log",
+ "native-tls",
+ "num_cpus",
+ "rand 0.9.2",
+ "reqwest 0.12.12",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "ureq 2.12.1",
+ "windows-sys 0.60.2",
+]
+
+[[package]]
 name = "hkdf"
 version = "0.12.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5815,6 +5823,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "num_cpus"
+version = "1.17.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "91df4bbde75afed763b708b7eee1e8e7651e02d97f6d5dd763e89367e957b23b"
+dependencies = [
+ "hermit-abi",
+ "libc",
+]
+
+[[package]]
 name = "num_enum"
 version = "0.7.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7313,6 +7331,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "qwen3-asr-sys"
+version = "0.1.0"
+source = "git+https://github.com/screenpipe/stt.git?rev=7d14f76#7d14f769ad67367492c2c743650ccdeac7623416"
+dependencies = [
+ "cc",
+ "cmake",
+]
+
+[[package]]
 name = "r-efi"
 version = "5.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8183,7 +8210,7 @@ dependencies = [
 
 [[package]]
 name = "screenpipe-app"
-version = "2.0.610"
+version = "2.0.612"
 dependencies = [
  "anyhow",
  "arboard",
@@ -8282,7 +8309,6 @@ name = "screenpipe-audio"
 version = "0.3.158"
 dependencies = [
  "anyhow",
- "audiopipe",
  "bytemuck",
  "bytes",
  "chrono",
@@ -8295,7 +8321,7 @@ dependencies = [
  "env_logger",
  "esaxx-rs",
  "futures",
- "hf-hub",
+ "hf-hub 0.3.2",
  "hound",
  "knf-rs",
  "lazy_static",
@@ -8319,6 +8345,7 @@ dependencies = [
  "screenpipe-events",
  "serde",
  "serde_json",
+ "stt",
  "symphonia",
  "sysinfo",
  "tokio",
@@ -8437,7 +8464,6 @@ version = "0.3.158"
 dependencies = [
  "anyhow",
  "async-trait",
- "audiopipe",
  "axum 0.7.9",
  "base64 0.22.1",
  "bincode",
@@ -8474,6 +8500,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "sqlx",
+ "stt",
  "sysinfo",
  "tempfile",
  "tokio",
@@ -9686,6 +9713,19 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.117",
+]
+
+[[package]]
+name = "stt"
+version = "0.1.0"
+source = "git+https://github.com/screenpipe/stt.git?rev=7d14f76#7d14f769ad67367492c2c743650ccdeac7623416"
+dependencies = [
+ "hf-hub 0.4.3",
+ "qwen3-asr-sys",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tracing",
 ]
 
 [[package]]

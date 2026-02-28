@@ -29,6 +29,9 @@ const MAX_REQUEST_RETRIES = 3; // Retry request 3 times before giving up
 
 // Reconnect timeout - must be tracked to prevent cascade
 let reconnectTimeout: ReturnType<typeof setTimeout> | null = null;
+let reconnectAttempts = 0;
+const MAX_RECONNECT_ATTEMPTS = 10;
+const RECONNECT_BASE_DELAY_MS = 2000;
 
 // Suppress repeated disconnect logs - only log on state transitions
 let hasLoggedTimelineDisconnect = false;
@@ -361,8 +364,9 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
 			// Ignore events from old WebSocket instances
 			if (thisWsId !== currentWsId) return;
 
-			// Reset retry counter on successful connection
+			// Reset retry counters on successful connection
 			connectionAttempts = 0;
+			reconnectAttempts = 0;
 			if (errorGraceTimer) {
 				clearTimeout(errorGraceTimer);
 				errorGraceTimer = null;
@@ -553,12 +557,16 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
 				set({ isConnected: false });
 			}
 
-			// Reset attempts and reconnect after delay (tracked to prevent cascade)
-			reconnectTimeout = setTimeout(() => {
-				reconnectTimeout = null;
-				connectionAttempts = 0; // Fresh start for reconnection
-				get().connectWebSocket();
-			}, 5000);
+			// Reconnect with exponential backoff (2s, 3s, 4.5s, ... capped at 30s)
+			reconnectAttempts++;
+			if (reconnectAttempts <= MAX_RECONNECT_ATTEMPTS) {
+				const delay = Math.min(RECONNECT_BASE_DELAY_MS * Math.pow(1.5, reconnectAttempts - 1), 30000);
+				reconnectTimeout = setTimeout(() => {
+					reconnectTimeout = null;
+					connectionAttempts = 0; // Fresh start for reconnection
+					get().connectWebSocket();
+				}, delay);
+			}
 		};
 	},
 

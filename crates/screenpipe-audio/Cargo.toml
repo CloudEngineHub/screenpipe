@@ -81,7 +81,7 @@ ort-sys = "=2.0.0-rc.6"
 knf-rs = { git = "https://github.com/Neptune650/knf-rs.git" }
 futures = "0.3.31"
 deepgram = "0.6.4"
-audiopipe = { git = "https://github.com/screenpipe/audiopipe.git", default-features = false, features = ["qwen3-asr"], optional = true }
+stt = { git = "https://github.com/screenpipe/stt.git", rev = "7d14f76", default-features = false, features = ["qwen3-asr-ggml"], optional = true }
 bytes = { version = "1.9.0", features = ["serde"] }
 rand = "0.9.0"
 
@@ -118,9 +118,10 @@ metal = ["whisper-rs/metal"]
 cuda = ["whisper-rs/cuda"]
 vulkan = ["whisper-rs/vulkan"]
 pulseaudio = ["dep:libpulse-binding", "dep:libpulse-simple-binding"]
-qwen3-asr = ["dep:audiopipe"]
-coreml = ["audiopipe/coreml"]
-directml = ["audiopipe/directml"]
+qwen3-asr = ["dep:stt"]
+# GGML GPU backends for Qwen3-ASR (Metal auto-detects on macOS)
+coreml = ["stt/metal"]
+directml = ["stt/vulkan-ggml"]
 
 [[example]]
 name = "screenpipe-audio"

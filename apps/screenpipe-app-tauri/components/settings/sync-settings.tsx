@@ -592,23 +592,35 @@ export function SyncSettings() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isSettingsLoaded]);
 
-  // Auto-poll for subscription when on onboarding step
+  // Auto-poll for subscription when on onboarding step (exponential backoff)
   useEffect(() => {
     if (step !== "onboarding") return;
 
-    const pollInterval = setInterval(async () => {
-      console.log("auto-polling for subscription...");
+    let delay = 2000;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let cancelled = false;
+
+    const poll = async () => {
+      if (cancelled) return;
       const hasSubscription = await checkSubscriptionAndLoad();
       if (hasSubscription) {
-        clearInterval(pollInterval);
         toast({
           title: "subscription detected",
           description: "you can now set up your encryption password",
         });
+        return;
       }
-    }, 1000); // Poll every 1 second
+      if (!cancelled) {
+        delay = Math.min(delay * 1.5, 30000);
+        timer = setTimeout(poll, delay);
+      }
+    };
+    timer = setTimeout(poll, delay);
 
-    return () => clearInterval(pollInterval);
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [step]);
 

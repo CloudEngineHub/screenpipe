@@ -124,23 +124,31 @@ export function AIPanel({
 	};
 
 	useEffect(() => {
+		let rafId: number | null = null;
+
 		const handleGlobalMouseMove = (e: MouseEvent) => {
 			if (isDraggingPanel) {
 				e.preventDefault();
-				const newX = e.clientX - dragOffset.x;
-				const newY = e.clientY - dragOffset.y;
+				if (rafId) return; // skip until previous frame is painted
+				rafId = requestAnimationFrame(() => {
+					rafId = null;
+					const newX = e.clientX - dragOffset.x;
+					const newY = e.clientY - dragOffset.y;
 
-				const maxX = window.innerWidth - chatWindowSize.width;
-				const maxY = window.innerHeight - chatWindowSize.height;
+					const maxX = window.innerWidth - chatWindowSize.width;
+					const maxY = window.innerHeight - chatWindowSize.height;
 
-				onPositionChange({
-					x: Math.max(0, Math.min(maxX, newX)),
-					y: Math.max(0, Math.min(maxY, newY)),
+					onPositionChange({
+						x: Math.max(0, Math.min(maxX, newX)),
+						y: Math.max(0, Math.min(maxY, newY)),
+					});
 				});
 			}
 		};
 
 		const handleGlobalMouseUp = () => {
+			if (rafId) cancelAnimationFrame(rafId);
+			rafId = null;
 			setIsDraggingPanel(false);
 		};
 
@@ -150,6 +158,7 @@ export function AIPanel({
 		}
 
 		return () => {
+			if (rafId) cancelAnimationFrame(rafId);
 			document.removeEventListener("mousemove", handleGlobalMouseMove);
 			document.removeEventListener("mouseup", handleGlobalMouseUp);
 		};
@@ -187,14 +196,20 @@ export function AIPanel({
 		const startY = e.clientY;
 		const startWidth = chatWindowSize.width;
 		const startHeight = chatWindowSize.height;
+		let rafId: number | null = null;
 
 		const handleMouseMove = (moveEvent: MouseEvent) => {
-			const newWidth = Math.max(200, startWidth + moveEvent.clientX - startX);
-			const newHeight = Math.max(200, startHeight + moveEvent.clientY - startY);
-			setChatWindowSize({ width: newWidth, height: newHeight });
+			if (rafId) return;
+			rafId = requestAnimationFrame(() => {
+				rafId = null;
+				const newWidth = Math.max(200, startWidth + moveEvent.clientX - startX);
+				const newHeight = Math.max(200, startHeight + moveEvent.clientY - startY);
+				setChatWindowSize({ width: newWidth, height: newHeight });
+			});
 		};
 
 		const handleMouseUp = () => {
+			if (rafId) cancelAnimationFrame(rafId);
 			document.removeEventListener("mousemove", handleMouseMove);
 			document.removeEventListener("mouseup", handleMouseUp);
 		};

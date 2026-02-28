@@ -1712,7 +1712,10 @@ export function StandaloneChat({ className }: { className?: string } = {}) {
             }
           }
         } else if (data.type === "agent_end") {
-          if (piMessageIdRef.current) {
+          // When watching a pipe, agent_end fires before pipe_done — don't
+          // clear pipe refs here, let pipe_done handle cleanup instead.
+          const isPipeWatch = piMessageIdRef.current?.startsWith("pipe-");
+          if (piMessageIdRef.current && !isPipeWatch) {
             const msgId = piMessageIdRef.current;
             // Use streamed text if available, otherwise extract from agent_end messages
             let content = piStreamingTextRef.current;
@@ -1767,13 +1770,15 @@ export function StandaloneChat({ className }: { className?: string } = {}) {
               return prev.map((m) => m.id === msgId ? { ...m, content, contentBlocks } : m);
             });
           }
-          piStreamingTextRef.current = "";
-          piMessageIdRef.current = null;
-          piContentBlocksRef.current = [];
-          piThinkingStartRef.current = null;
-          followUpFiredRef.current = false;
-          setIsLoading(false);
-          setIsStreaming(false);
+          if (!isPipeWatch) {
+            piStreamingTextRef.current = "";
+            piMessageIdRef.current = null;
+            piContentBlocksRef.current = [];
+            piThinkingStartRef.current = null;
+            followUpFiredRef.current = false;
+            setIsLoading(false);
+            setIsStreaming(false);
+          }
         } else if (data.type === "response" && data.success === false) {
           const errorStr = data.error || "Unknown error";
           if (piMessageIdRef.current) {
@@ -1814,6 +1819,7 @@ export function StandaloneChat({ className }: { className?: string } = {}) {
             }
           }
           piStreamingTextRef.current = "";
+          if (piMessageIdRef.current?.startsWith("pipe-")) setActivePipeExecution(null);
           piMessageIdRef.current = null;
           piContentBlocksRef.current = [];
           setIsLoading(false);
@@ -1831,6 +1837,7 @@ export function StandaloneChat({ className }: { className?: string } = {}) {
             piMessageIdRef.current = null;
             piContentBlocksRef.current = [];
             piThinkingStartRef.current = null;
+            setActivePipeExecution(null);
             setIsLoading(false);
             setIsStreaming(false);
           }
@@ -1967,8 +1974,78 @@ export function StandaloneChat({ className }: { className?: string } = {}) {
 
   // Watch pipe: set up tracking from either Tauri event or sessionStorage (for cross-page navigation)
   useEffect(() => {
-    const initWatch = (pipeName: string, executionId: number) => {
+    let watchPollTimer: ReturnType<typeof setTimeout> | null = null;
+
+    // Poll execution API to check if pipe already finished (race condition fix)
+    const pollExecutionStatus = async (pipeName: string, executionId: number, msgId: string) => {
+      try {
+        const res = await fetch(`http://localhost:3030/pipes/${pipeName}/executions?limit=20`);
+        if (!res.ok) return;
+        const data = await res.json();
+        const exec = (data.data || []).find((e: any) => e.id === executionId);
+        if (!exec) return;
+
+        // If execution is already done (completed/failed/timed_out), show the result
+        if (exec.status !== "running") {
+          // Parse stdout to extract assistant text (same logic as cleanPipeStdout)
+          let output = "";
+          if (exec.stdout) {
+            const parts: string[] = [];
+            for (const line of exec.stdout.split("\n")) {
+              if (!line.trim()) continue;
+              try {
+                const evt = JSON.parse(line);
+                if (evt.type === "content_block_delta" && evt.delta?.type === "text_delta") {
+                  parts.push(evt.delta.text);
+                } else if ((evt.type === "message_start" || evt.type === "message_end") &&
+                           evt.message?.role === "assistant") {
+                  for (const c of evt.message?.content || []) {
+                    if (c.type === "text" && c.text) parts.push(c.text);
+                  }
+                }
+              } catch {}
+            }
+            output = parts.join("").trim();
+          }
+
+          if (!output && exec.status === "failed") {
+            output = `Pipe failed: ${exec.error_message || exec.stderr || "unknown error"}`;
+          } else if (!output) {
+            output = "Pipe completed with no output.";
+          }
+
+          // Only update if we're still watching this pipe
+          if (piMessageIdRef.current === msgId) {
+            piStreamingTextRef.current = output;
+            setMessages((prev) =>
+              prev.map((m) => m.id === msgId ? { ...m, content: output } : m)
+            );
+            // Clean up watch state
+            piStreamingTextRef.current = "";
+            piMessageIdRef.current = null;
+            piContentBlocksRef.current = [];
+            piThinkingStartRef.current = null;
+            setActivePipeExecution(null);
+            setIsLoading(false);
+            setIsStreaming(false);
+          }
+          return true; // done
+        }
+        return false; // still running
+      } catch {
+        return false;
+      }
+    };
+
+    const initWatch = (pipeName: string, executionId: number, presetId?: string | null) => {
       setActivePipeExecution({ name: pipeName, executionId });
+
+      // Apply the pipe's AI preset so the chat header reflects it
+      if (presetId && settings.aiPresets) {
+        const match = settings.aiPresets.find((p) => p.id === presetId);
+        if (match) setActivePreset(match);
+      }
+
       const msgId = `pipe-${pipeName}-${executionId}`;
       piStreamingTextRef.current = "";
       piContentBlocksRef.current = [];
@@ -1994,6 +2071,41 @@ export function StandaloneChat({ className }: { className?: string } = {}) {
         ];
       });
       setIsStreaming(true);
+
+      // Poll immediately in case execution already finished before we started listening
+      // Then poll every 3s as a fallback if streaming events are missed
+      let pollCount = 0;
+      const maxPolls = 10; // 30s max (10 * 3s)
+      const doPoll = async () => {
+        if (piMessageIdRef.current !== msgId) return; // no longer watching
+        const done = await pollExecutionStatus(pipeName, executionId, msgId);
+        if (done) {
+          watchPollTimer = null;
+          return;
+        }
+        pollCount++;
+        if (pollCount >= maxPolls) {
+          // Timeout — give up watching, show what we have
+          if (piMessageIdRef.current === msgId) {
+            const content = piStreamingTextRef.current || "Pipe is still running — check execution history for results.";
+            setMessages((prev) =>
+              prev.map((m) => m.id === msgId ? { ...m, content } : m)
+            );
+            piStreamingTextRef.current = "";
+            piMessageIdRef.current = null;
+            piContentBlocksRef.current = [];
+            piThinkingStartRef.current = null;
+            setActivePipeExecution(null);
+            setIsLoading(false);
+            setIsStreaming(false);
+          }
+          watchPollTimer = null;
+          return;
+        }
+        watchPollTimer = setTimeout(doPoll, 3000);
+      };
+      // Small delay before first poll to let streaming events arrive first
+      watchPollTimer = setTimeout(doPoll, 1500);
     };
 
     // Check sessionStorage first (set by pipes-section before navigation)
@@ -2001,20 +2113,23 @@ export function StandaloneChat({ className }: { className?: string } = {}) {
     if (stored) {
       sessionStorage.removeItem("watchPipe");
       try {
-        const { pipeName, executionId } = JSON.parse(stored);
+        const { pipeName, executionId, presetId } = JSON.parse(stored);
         if (pipeName && executionId != null) {
-          initWatch(pipeName, executionId);
+          initWatch(pipeName, executionId, presetId);
         }
       } catch {}
     }
 
     // Also listen for live events (in case chat is already mounted)
     let unlisten: (() => void) | null = null;
-    listen<{ pipeName: string; executionId: number }>("watch_pipe", (event) => {
-      const { pipeName, executionId } = event.payload;
-      initWatch(pipeName, executionId);
+    listen<{ pipeName: string; executionId: number; presetId?: string | null }>("watch_pipe", (event) => {
+      const { pipeName, executionId, presetId } = event.payload;
+      initWatch(pipeName, executionId, presetId);
     }).then((fn) => { unlisten = fn; });
-    return () => { unlisten?.(); };
+    return () => {
+      unlisten?.();
+      if (watchPollTimer) clearTimeout(watchPollTimer);
+    };
   }, []);
 
   // Generate follow-up suggestions using Apple Intelligence

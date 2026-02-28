@@ -102,10 +102,12 @@ export function AccountSection() {
         if (data.url) {
           openUrl(data.url);
 
-          // Poll for subscription status every 1 second after checkout
+          // Poll for subscription status with exponential backoff after checkout
           let pollCount = 0;
-          const maxPolls = 300; // 5 minutes
-          const checkInterval = setInterval(async () => {
+          const maxPolls = 60;
+          let delay = 2000;
+          let pollTimer: ReturnType<typeof setTimeout> | null = null;
+          const poll = async () => {
             pollCount++;
             try {
               const subResponse = await fetch(
@@ -117,8 +119,6 @@ export function AccountSection() {
               if (subResponse.ok) {
                 const subData = await subResponse.json();
                 if (subData.hasSubscription) {
-                  clearInterval(checkInterval);
-                  // Update user state with subscription
                   updateSettings({
                     user: { ...settings.user!, cloud_subscribed: true },
                   });
@@ -126,15 +126,18 @@ export function AccountSection() {
                     title: "subscription activated",
                     description: "welcome to screenpipe pro!",
                   });
+                  return; // stop polling
                 }
               }
             } catch (e) {
               console.error("polling error:", e);
             }
-            if (pollCount >= maxPolls) {
-              clearInterval(checkInterval);
+            if (pollCount < maxPolls) {
+              delay = Math.min(delay * 1.5, 30000);
+              pollTimer = setTimeout(poll, delay);
             }
-          }, 1000);
+          };
+          pollTimer = setTimeout(poll, delay);
         } else {
           throw new Error(data.error || "failed to create checkout");
         }

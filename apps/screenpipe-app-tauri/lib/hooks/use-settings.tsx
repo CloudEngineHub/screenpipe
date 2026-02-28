@@ -110,6 +110,8 @@ export type Settings = SettingsStore & {
 	cloudArchiveEnabled?: boolean;
 	/** Days to keep data locally before archiving (default: 7) */
 	cloudArchiveRetentionDays?: number;
+	/** Sync pipe configurations across devices (requires cloud sync subscription) */
+	pipeSyncEnabled?: boolean;
 }
 
 export function getEffectiveFilters(settings: Settings) {

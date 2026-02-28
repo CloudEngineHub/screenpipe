@@ -27,7 +27,7 @@ use crate::{AudioInput, TranscriptionResult};
 
 pub const SAMPLE_RATE: u32 = 16000;
 
-/// Trait for alternate STT engines (e.g. Qwen3-ASR via audiopipe).
+/// Trait for alternate STT engines (e.g. Qwen3-ASR via stt crate).
 /// Uses a trait object so the type is always available regardless of feature flags.
 pub trait AlternateStt: Send {
     fn transcribe(&mut self, audio: &[f32], sample_rate: u32) -> Result<String>;
@@ -37,9 +37,9 @@ pub trait AlternateStt: Send {
 pub type AlternateSttEngine = Arc<StdMutex<Box<dyn AlternateStt + Send>>>;
 
 #[cfg(feature = "qwen3-asr")]
-impl AlternateStt for audiopipe::Model {
+impl AlternateStt for stt::Model {
     fn transcribe(&mut self, audio: &[f32], sample_rate: u32) -> Result<String> {
-        let opts = audiopipe::TranscribeOptions::default();
+        let opts = stt::TranscribeOptions::default();
         let result = self
             .transcribe_with_sample_rate(audio, sample_rate, opts)
             .map_err(|e| anyhow::anyhow!("{}", e))?;
@@ -110,7 +110,7 @@ pub async fn stt(
                 }
             }
         } else if *audio_transcription_engine == AudioTranscriptionEngine::Qwen3Asr {
-            // Qwen3-ASR via alternate STT engine (audiopipe)
+            // Qwen3-ASR via alternate STT engine (stt crate, GGML backend)
             if let Some(ref engine) = alternate_stt {
                 let mut engine = engine.lock().map_err(|e| anyhow::anyhow!("stt model lock: {}", e))?;
                 engine.transcribe(audio, sample_rate)

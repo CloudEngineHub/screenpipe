@@ -10,6 +10,8 @@
 //! parses configs, runs the scheduler, and delegates execution to an
 //! [`AgentExecutor`].
 
+pub mod sync;
+
 use crate::agents::{
     pi::{PiExecutor, SCREENPIPE_API_URL},
     AgentExecutor, ExecutionHandle,
