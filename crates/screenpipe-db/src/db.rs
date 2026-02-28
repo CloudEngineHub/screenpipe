@@ -4011,16 +4011,16 @@ SELECT id, timestamp, url, app_name, window_name, ocr_text, text_json FROM (
         f.id,
         f.timestamp,
         f.browser_url as url,
-        COALESCE(f.app_name, o.app_name) as app_name,
-        COALESCE(f.window_name, o.window_name) as window_name,
-        o.text as ocr_text,
+        COALESCE(f.app_name, o.app_name, '') as app_name,
+        COALESCE(f.window_name, o.window_name, '') as window_name,
+        COALESCE(o.text, f.accessibility_text, '') as ocr_text,
         o.text_json,
         ROW_NUMBER() OVER (
-            PARTITION BY COALESCE(f.app_name, o.app_name)
+            PARTITION BY COALESCE(f.app_name, o.app_name, '')
             ORDER BY f.timestamp {order_dir}, {relevance} DESC
         ) as app_rn
     FROM frames f
-    INNER JOIN ocr_text o ON f.id = o.frame_id
+    LEFT JOIN ocr_text o ON f.id = o.frame_id
     WHERE {where_clause}
 )
 WHERE app_rn <= {cap}
@@ -4041,10 +4041,10 @@ SELECT
     f.browser_url as url,
     COALESCE(f.app_name, o.app_name) as app_name,
     COALESCE(f.window_name, o.window_name) as window_name,
-    o.text as ocr_text,
+    COALESCE(o.text, f.accessibility_text, '') as ocr_text,
     o.text_json
 FROM frames f
-INNER JOIN ocr_text o ON f.id = o.frame_id
+LEFT JOIN ocr_text o ON f.id = o.frame_id
 WHERE {}
 ORDER BY f.timestamp {}, {} DESC
 LIMIT ? OFFSET ?
