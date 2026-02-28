@@ -145,3 +145,4 @@ windows = { version = "0.58", features = [
 
 [target.'cfg(target_os = "macos")'.dependencies]
 cidre = { git = "https://github.com/yury/cidre.git", features = ["ns"] }
+tracing-oslog = { workspace = true }

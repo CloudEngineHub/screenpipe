@@ -57,6 +57,9 @@ use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::{fmt, EnvFilter};
 use tracing_subscriber::{prelude::__tracing_subscriber_SubscriberExt, Layer};
 
+#[cfg(target_os = "macos")]
+use tracing_oslog::OsLogger;
+
 /// Set the file descriptor limit for the process.
 /// This helps prevent "Too many open files" errors during heavy WebSocket/video usage.
 #[cfg(unix)]
@@ -219,6 +222,9 @@ fn setup_logging(local_data_dir: &PathBuf, cli: &Cli) -> anyhow::Result<WorkerGu
                 .with_timer(timer)
                 .with_filter(make_env_filter()),
         );
+
+    #[cfg(target_os = "macos")]
+    let tracing_registry = tracing_registry.with(OsLogger::new("pe.screenpi", "server"));
 
     #[cfg(feature = "debug-console")]
     let tracing_registry = tracing_registry.with(
