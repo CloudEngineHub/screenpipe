@@ -419,6 +419,7 @@ export function AudioTranscript({
 	const { toast } = useToast();
 
 	const handleRetranscribe = useCallback(async () => {
+		if (isRetranscribing) return; // prevent double-submit
 		const data = tabMode === "meeting" ? meetingConversationData : conversationData;
 		if (!data.items.length || !data.timeRange) return;
 
@@ -434,6 +435,8 @@ export function AudioTranscript({
 				body.prompt = retranscribePrompt.trim();
 			}
 
+			console.log("[retranscribe] request:", JSON.stringify(body));
+
 			const res = await fetch("http://localhost:3030/audio/retranscribe", {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
@@ -446,17 +449,21 @@ export function AudioTranscript({
 			}
 
 			const result = await res.json();
+			console.log("[retranscribe] response:", JSON.stringify(result));
 
 			// Apply all new transcriptions as overrides
-			for (const t of result.transcriptions ?? []) {
+			const transcriptions = result.transcriptions ?? [];
+			for (const t of transcriptions) {
 				handleRetranscribed(t.audio_chunk_id, t.new_text);
 			}
 
+			const count = result.chunks_processed ?? 0;
 			toast({
 				title: "retranscribed",
-				description: `${result.chunks_processed} chunk${result.chunks_processed !== 1 ? "s" : ""} updated`,
+				description: `${count} chunk${count !== 1 ? "s" : ""} updated`,
 			});
 		} catch (e: any) {
+			console.error("[retranscribe] error:", e);
 			toast({
 				title: "retranscribe failed",
 				description: e.message,
@@ -466,7 +473,7 @@ export function AudioTranscript({
 			setIsRetranscribing(false);
 			setRetranscribePrompt("");
 		}
-	}, [tabMode, meetingConversationData, conversationData, retranscribePrompt, handleRetranscribed, toast]);
+	}, [tabMode, meetingConversationData, conversationData, retranscribePrompt, isRetranscribing, handleRetranscribed, toast]);
 
 	const handleSendToChat = useCallback(async () => {
 		const data = tabMode === "meeting" ? meetingConversationData : conversationData;

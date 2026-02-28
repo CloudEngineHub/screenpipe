@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::path::Path;
 use std::sync::Arc;
-use tracing::{error, info};
+use tracing::{debug, error, info};
 
 use crate::server::AppState;
 
@@ -72,12 +72,15 @@ pub async fn retranscribe_handler(
     };
 
     if chunks.is_empty() {
-        return JsonResponse(json!(RetranscribeResponse {
-            chunks_processed: 0,
-            transcriptions: vec![],
+        info!("retranscribe: no audio chunks found in range");
+        return JsonResponse(json!({
+            "chunks_processed": 0,
+            "transcriptions": []
         }))
         .into_response();
     }
+
+    debug!("retranscribe: found {} raw rows (may include dupes)", chunks.len());
 
     // 2. Get transcription config from audio manager
     let audio_manager = &state.audio_manager;
@@ -266,11 +269,11 @@ pub async fn retranscribe_handler(
         processed += 1;
     }
 
-    info!("retranscribe complete: {} chunks processed", processed);
+    info!("retranscribe complete: {} chunks processed, {} transcription results", processed, results.len());
 
-    JsonResponse(json!(RetranscribeResponse {
+    let response = RetranscribeResponse {
         chunks_processed: processed,
         transcriptions: results,
-    }))
-    .into_response()
+    };
+    JsonResponse(json!(response)).into_response()
 }
