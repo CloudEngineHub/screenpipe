@@ -235,16 +235,16 @@ export function TeamSection() {
 
         <Card className="p-8 flex flex-col items-center text-center">
           <Users className="h-10 w-10 text-muted-foreground mb-4" />
-          <h3 className="text-lg font-semibold mb-1">sign in to use teams</h3>
+          <h3 className="text-lg font-semibold mb-1">Sign in to use teams</h3>
           <p className="text-sm text-muted-foreground mb-6">
-            team features require a screenpipe account
+            Team features require a Screenpipe account
           </p>
           <Button
             className="w-full max-w-xs"
             size="lg"
             onClick={() => commands.openLoginWindow()}
           >
-            log in
+            Log in
             <ExternalLink className="w-4 h-4 ml-2" />
           </Button>
         </Card>

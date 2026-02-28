@@ -167,13 +167,13 @@ export function BillingSection() {
           <Zap className="h-10 w-10 text-muted-foreground mb-4" />
           <h3 className="text-lg font-semibold mb-1">Sign in required</h3>
           <p className="text-sm text-muted-foreground mb-6">
-            log in to view your AI usage and manage billing
+            Log in to view your AI usage and manage billing
           </p>
           <Button
             className="w-full max-w-xs"
             onClick={() => commands.openLoginWindow()}
           >
-            log in
+            Log in
           </Button>
         </Card>
       </div>
@@ -211,7 +211,7 @@ export function BillingSection() {
           <p className="text-sm text-muted-foreground mb-4">{error}</p>
           <Button variant="outline" size="sm" onClick={() => fetchData()}>
             <RefreshCw className="w-3.5 h-3.5 mr-1.5" />
-            retry
+            Retry
           </Button>
         </Card>
       </div>
@@ -237,7 +237,7 @@ export function BillingSection() {
           Billing
         </h1>
         <p className="text-sm text-muted-foreground mt-1">
-          your AI usage and payment settings
+          Your AI usage and payment settings
         </p>
       </div>
 
@@ -253,7 +253,7 @@ export function BillingSection() {
             <div>
               <div className="flex items-center gap-2">
                 <p className="text-sm font-semibold text-foreground">
-                  screenpipe {tierLabel}
+                  Screenpipe {tierLabel}
                 </p>
                 <span
                   className={`text-xs px-2 py-0.5 rounded-full font-medium ${
@@ -325,7 +325,7 @@ export function BillingSection() {
                 {billing.stripe_customer.last4}
               </p>
               <p className="text-xs text-muted-foreground">
-                saved payment method
+                Saved payment method
               </p>
             </div>
           </div>
@@ -340,7 +340,7 @@ export function BillingSection() {
               Auto-reload
             </h3>
             <p className="text-xs text-muted-foreground mt-0.5">
-              automatically top up when credit balance is low
+              Automatically top up when credit balance is low
             </p>
           </div>
           <Switch
@@ -353,7 +353,7 @@ export function BillingSection() {
             <div className="grid grid-cols-2 gap-3 mt-3">
               <div>
                 <label className="text-xs text-muted-foreground mb-1 block">
-                  when balance drops below ($)
+                  When balance drops below ($)
                 </label>
                 <Input
                   type="number"
@@ -365,7 +365,7 @@ export function BillingSection() {
               </div>
               <div>
                 <label className="text-xs text-muted-foreground mb-1 block">
-                  reload amount ($)
+                  Reload amount ($)
                 </label>
                 <Input
                   type="number"
@@ -385,7 +385,7 @@ export function BillingSection() {
               {savingAutoReload ? (
                 <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
               ) : null}
-              save
+              Save
             </Button>
           </div>
         )}
@@ -402,7 +402,7 @@ export function BillingSection() {
                 {savingAutoReload ? (
                   <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
                 ) : null}
-                save
+                Save
               </Button>
             </div>
           )}
