@@ -37,6 +37,7 @@ commits that broke this area: `0752ea59`, `d89c5f14`, `4a64fd1a`, `fa591d6e`, `8
 - [ ] **chat re-show on fullscreen Space** — show chat on fullscreen Space, hide it, show again. must reappear on same fullscreen Space.
 - [ ] **space monitor only hides main overlay** — swipe Spaces. main overlay hides. chat window and shortcut reminder are unaffected.
 - [ ] **space monitor doesn't race with show** — show overlay via shortcut. the `activateIgnoringOtherApps` call must not trigger space monitor's hide callback.
+- [ ] **Chat streaming UX** — Verify that chat streaming uses a state-aware grid dissolve loader for a smooth user experience.
 
 ### 2. dock icon & tray icon (macOS)
 
@@ -79,6 +80,7 @@ commits: `28e5c247`
 - [ ] **multiple audio devices simultaneously** — input (mic) + output (speakers) both recording. both show in device list.
 - [ ] **disable audio setting** — toggling "disable audio" stops all audio recording. re-enabling restarts it.
 - [ ] **Metal GPU for whisper** — transcription uses GPU acceleration on macOS (`f882caef`). verify with Activity Monitor GPU tab.
+- [ ] **Batch transcription mode** — Verify that batch transcription mode works correctly with both cloud and Deepgram engines.
 
 ### 5. frame comparison & OCR pipeline
 
@@ -137,6 +139,8 @@ commits: `94531265`, `d794176a`, `9070639c`, `0378cab1`, `4a3313d3`
 - [ ] **port conflict on restart** — if old process is holding port 3030, new process kills it and starts cleanly (`0378cab1`, `4a3313d3`, `8c435a10`).
 - [ ] **no orphaned processes** — after quit, `ps aux | grep screenpipe` shows nothing. `lsof -i :3030` shows nothing.
 - [ ] **rollback** — user can rollback to previous version via tray menu (`c7fbc3ea`).
+- [ ] **Zombie CPU drain prevention** — Verify that `lsof` calls have a 5-second timeout, preventing zombie CPU drain, especially on quit. Check logs for `lsof` timeouts if applicable.
+- [ ] **Tokio shutdown stability** — Verify that the `tokio` shutdown process is stable and doesn't panic in the tree walker, especially during application exit or process restarts.
 
 ### 9. database & storage
 
@@ -149,6 +153,7 @@ commits: `eea0c865`, `cc09de61`
 - [ ] **UTF-8 boundary panic** — search with special characters, non-ASCII text in OCR results. no panic on string slicing (`eea0c865`).
 - [ ] **low disk space** — with <1GB free, app should warn user. no crash from failed writes.
 - [ ] **large database (>10GB)** — search still returns results within 2 seconds. app doesn't freeze on startup.
+- [ ] **Audio chunk timestamps** — `start_time` and `end_time` are correctly set for reconciled and retranscribed audio chunks in the database.
 
 ### 10. AI presets & settings
 
@@ -161,6 +166,7 @@ commits: `8a5f51dd`, `0b0d8090`
 - [ ] **FPS setting** — change capture FPS. recording interval changes accordingly.
 - [ ] **language/OCR engine setting** — change OCR language. new language used on next capture cycle.
 - [ ] **video quality setting** — low/balanced/high/max. affects FFmpeg encoding params (`21bddd0f`).
+- [ ] **Settings UI sentence case** — All settings UI elements (billing, pipes, team) should use consistent sentence case.
 
 ### 11. onboarding
 
@@ -185,6 +191,9 @@ commits: `f1255eac`, `25cbdc6b`, `2529367d`, `d9821624`
 - [ ] **daily summary in timeline** — Apple Intelligence summary shows in timeline, compact when no summary (`d9821624`).
 - [ ] **window-focused refresh** — opening app via shortcut/tray refreshes timeline data immediately (`0b057046`).
 - [ ] **frame deep link navigation** — `screenpipe://frame/N` or `screenpipe://frames/N` opens main window and jumps to frame N. works from cold start; invalid IDs show clear error.
+- [ ] **Keyword search accessibility** — Keyword search should find content within accessibility-only frames and utilize `frames_fts` for comprehensive accessibility text searching.
+- [ ] **Keyword search logic** — Verify that keyword search SQL correctly uses `OR` instead of `UNION` within `IN()`.
+- [ ] **Search prompt accuracy** — Verify that search prompts are improved to prevent false negatives from over-filtering.
 
 ### 13. sync & cloud
 
@@ -193,15 +202,20 @@ commits: `2f6b2af5`, `ea7f1f61`, `5cb100ea`
 - [ ] **auto-remember sync password** — user doesn't have to re-enter password each time (`5cb100ea`).
 - [ ] **auto-download from other devices** — after upload cycle, download new data from paired devices (`2f6b2af5`).
 - [ ] **auto-init doesn't loop** — sync initialization happens once, doesn't repeat endlessly (`ea7f1f61`).
+- [ ] **Cloud archive docs** — Verify that the cloud archive documentation page exists and is accessible via a link from settings.
 
 ### 14. Windows-specific
 
-commits: `eea0c865`
+commits: `eea0c865`, `fe9060db`, `c99c3967`, `aeaa446b`
 
 - [ ] **COM thread conflict** — audio and vision threads don't conflict on COM initialization (`eea0c865`).
 - [ ] **high-DPI display (150%, 200%)** — OCR captures at correct resolution.
 - [ ] **multiple monitors** — all detected and recorded.
 - [ ] **Windows Defender** — app not blocked by default security.
+- [ ] **Windows default mode** — On Windows, the app should default to window mode on first launch.
+- [ ] **Windows taskbar icon** — The app should display a taskbar icon on Windows.
+- [ ] **Windows audio transcription accuracy** — On Windows, verify improved audio transcription accuracy due to native Silero VAD frame size and lower speech threshold.
+- [ ] **Windows multi-line pipe prompts** — Multi-line pipe prompts should be preserved on Windows.
 
 ### 15. CI / release
 
@@ -223,6 +237,41 @@ commits: `8c8c445c`
 - [ ] **macOS Claude install flow** — downloads `.mcpb`, opens Claude Desktop, waits 1.5s, then opens the `.mcpb` file to trigger Claude's install modal.
 - [ ] **Windows Claude install flow** — same flow using `cmd /c start` instead of `open -a`.
 - [ ] **download error logging** — if download fails, console shows actual error message (not `{}`).
+
+### 17. AI Agents / Pipes
+
+commits: `fa887407`, `815f52e6`, `60840155`, `e66c5ff8`, `c905ffbf`, `01147096`, `5908d7f4`, `46422869`, `4f43da70`, `71a1a537`, `6abaaa36`
+
+- [ ] **Pi process stability** — After app launch, `ps aux | grep pi` should show a single, stable `pi` process that doesn't restart or get killed.
+- [ ] **Pi readiness handshake** — First chat interaction with Pi should be fast (<2s for readiness).
+- [ ] **Pi auto-recovery** — If the `pi` process is manually killed, it should restart automatically within a few seconds and be ready for chat.
+- [ ] **Pipe output accuracy** — When executing a pipe, the user's prompt should be accurately reflected in the output.
+- [ ] **Silent LLM errors** — LLM errors during pipe execution should be displayed to the user, not silently suppressed.
+- [ ] **Fast first chat with Pi** — The first interaction with Pi after app launch should be responsive, with no noticeable delay (aim for <2s).
+- [ ] **Activity Summary tool** — MCP can access activity summaries via the `activity-summary` tool, and the `activity-summary` endpoint works correctly.
+- [ ] **Search Elements tool** — MCP can search elements using the `search-elements` tool.
+- [ ] **Frame Context tool** — MCP can access frame context via the `frame-context` tool.
+- [ ] **Progressive disclosure for AI data** — AI data querying should progressively disclose information.
+- [ ] **Screenpipe Analytics skill** — The `screenpipe-analytics` skill can be used by the Pi agent to perform raw SQL usage analytics.
+- [ ] **Screenpipe Retranscribe skill** — The `screenpipe-retranscribe` skill can be used by the Pi agent for retranscription.
+- [ ] **AI preset save stability** — Saving AI presets should not cause crashes, especially when dealing with pipe session conflicts.
+- [ ] **Pipe token handling** — Ensure that Pi configuration for pipes uses the actual token value, not the environment variable name.
+- [ ] **Pipe user_token passthrough** — Verify that the `user_token` is correctly passed to Pi pre-configuration so pipes use the screenpipe provider.
+- [ ] **Default AI model ID** — Verify that the default AI model ID does not contain outdated date suffixes.
+- [ ] **Move provider/model flags** — `--provider` and `--model` flags should be correctly moved before `-p prompt` in `pi spawn` commands.
+
+### 18. Admin / Team features
+
+commits: `58460e02`
+
+- [ ] **Admin team-shared filters** — Admins should be able to remove individual team-shared filters.
+
+### 19. Logging
+
+commits: `fc830b43`
+
+- [ ] **Reduced log noise** — Verify a significant reduction in log noise (~54%).
+- [ ] **PII scrubbing** — Ensure that PII (Personally Identifiable Information) is scrubbed from logs.
 
 ## how to run
 
