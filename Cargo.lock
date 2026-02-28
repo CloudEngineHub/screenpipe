@@ -491,7 +491,7 @@ dependencies = [
 [[package]]
 name = "audiopipe"
 version = "0.2.0"
-source = "git+https://github.com/screenpipe/audiopipe.git?rev=c846356#c8463561962437c4bf55c364d6b6104bee742974"
+source = "git+https://github.com/screenpipe/audiopipe.git?rev=c92760e#c92760e7cfc9912162a411ba14ec2d90500fd44c"
 dependencies = [
  "hf-hub 0.4.3",
  "qwen3-asr-sys",
@@ -4905,7 +4905,7 @@ dependencies = [
 [[package]]
 name = "qwen3-asr-sys"
 version = "0.1.0"
-source = "git+https://github.com/screenpipe/audiopipe.git?rev=c846356#c8463561962437c4bf55c364d6b6104bee742974"
+source = "git+https://github.com/screenpipe/audiopipe.git?rev=c92760e#c92760e7cfc9912162a411ba14ec2d90500fd44c"
 dependencies = [
  "cc",
  "cmake",
