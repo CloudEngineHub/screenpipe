@@ -539,6 +539,22 @@ impl DatabaseManager {
         Ok(rows)
     }
 
+    /// Delete an audio chunk and its transcriptions (cascade via FK).
+    /// Used by batch reconciliation to merge multiple 30s chunks into one.
+    pub async fn delete_audio_chunk(&self, chunk_id: i64) -> Result<(), sqlx::Error> {
+        let mut tx = self.begin_immediate_with_retry().await?;
+        sqlx::query("DELETE FROM audio_transcriptions WHERE audio_chunk_id = ?1")
+            .bind(chunk_id)
+            .execute(&mut **tx.conn())
+            .await?;
+        sqlx::query("DELETE FROM audio_chunks WHERE id = ?1")
+            .bind(chunk_id)
+            .execute(&mut **tx.conn())
+            .await?;
+        tx.commit().await?;
+        Ok(())
+    }
+
     pub async fn count_audio_transcriptions(
         &self,
         audio_chunk_id: i64,

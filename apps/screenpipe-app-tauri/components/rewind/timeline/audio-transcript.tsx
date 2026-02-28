@@ -4,7 +4,22 @@
 import { useState, useRef, useMemo, useCallback, useEffect } from "react";
 import { AudioData, StreamTimeSeriesResponse, TimeRange } from "@/components/rewind/timeline";
 import { Button } from "@/components/ui/button";
-import { GripHorizontal, X, Users, Copy, Check, BotMessageSquare, Sparkles } from "lucide-react";
+import { GripHorizontal, X, Users, Copy, Check, BotMessageSquare, Sparkles, MoreVertical, RefreshCw, Loader2 } from "lucide-react";
+import {
+	DropdownMenu,
+	DropdownMenuContent,
+	DropdownMenuItem,
+	DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
+	Dialog,
+	DialogContent,
+	DialogHeader,
+	DialogTitle,
+	DialogFooter,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { useToast } from "@/components/ui/use-toast";
 import { showChatWithPrefill } from "@/lib/chat-utils";
 import {
 	ConversationBubble,
@@ -124,6 +139,22 @@ export function AudioTranscript({
 	const [speakerIdOverrides, setSpeakerIdOverrides] = useState<
 		Map<number, { speakerId: number; speakerName: string }>
 	>(new Map());
+
+	// Track retranscription overrides (chunk-level text updates)
+	const [transcriptionOverrides, setTranscriptionOverrides] = useState<
+		Map<number, string>
+	>(new Map());
+
+	const handleRetranscribed = useCallback(
+		(audioChunkId: number, newText: string) => {
+			setTranscriptionOverrides((prev) => {
+				const next = new Map(prev);
+				next.set(audioChunkId, newText);
+				return next;
+			});
+		},
+		[]
+	);
 
 	const handleSpeakerAssigned = useCallback(
 		(audioChunkId: number, newSpeakerId: number, newSpeakerName: string) => {
@@ -381,6 +412,62 @@ export function AudioTranscript({
 		});
 	}, [tabMode, meetingConversationData, conversationData, getSpeakerInfo]);
 
+	// Retranscribe: re-run STT on all audio in the current view
+	const [isRetranscribing, setIsRetranscribing] = useState(false);
+	const [showRetranscribeDialog, setShowRetranscribeDialog] = useState(false);
+	const [retranscribePrompt, setRetranscribePrompt] = useState("");
+	const { toast } = useToast();
+
+	const handleRetranscribe = useCallback(async () => {
+		const data = tabMode === "meeting" ? meetingConversationData : conversationData;
+		if (!data.items.length || !data.timeRange) return;
+
+		setShowRetranscribeDialog(false);
+		setIsRetranscribing(true);
+
+		try {
+			const body: Record<string, unknown> = {
+				start: data.timeRange.start.toISOString(),
+				end: data.timeRange.end.toISOString(),
+			};
+			if (retranscribePrompt.trim()) {
+				body.prompt = retranscribePrompt.trim();
+			}
+
+			const res = await fetch("http://localhost:3030/audio/retranscribe", {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify(body),
+			});
+
+			if (!res.ok) {
+				const err = await res.json().catch(() => ({}));
+				throw new Error(err.error || `failed (${res.status})`);
+			}
+
+			const result = await res.json();
+
+			// Apply all new transcriptions as overrides
+			for (const t of result.transcriptions ?? []) {
+				handleRetranscribed(t.audio_chunk_id, t.new_text);
+			}
+
+			toast({
+				title: "retranscribed",
+				description: `${result.chunks_processed} chunk${result.chunks_processed !== 1 ? "s" : ""} updated`,
+			});
+		} catch (e: any) {
+			toast({
+				title: "retranscribe failed",
+				description: e.message,
+				variant: "destructive",
+			});
+		} finally {
+			setIsRetranscribing(false);
+			setRetranscribePrompt("");
+		}
+	}, [tabMode, meetingConversationData, conversationData, retranscribePrompt, handleRetranscribed, toast]);
+
 	const handleSendToChat = useCallback(async () => {
 		const data = tabMode === "meeting" ? meetingConversationData : conversationData;
 		if (!data.items.length) return;
@@ -635,6 +722,27 @@ export function AudioTranscript({
 							</TooltipTrigger>
 							<TooltipContent side="bottom"><p>{copied ? "copied!" : "copy"}</p></TooltipContent>
 						</Tooltip>
+						<DropdownMenu>
+							<DropdownMenuTrigger asChild>
+								<Button variant="ghost" size="sm" className="h-6 w-6 p-0">
+									{isRetranscribing ? (
+										<Loader2 className="h-3 w-3 animate-spin" />
+									) : (
+										<MoreVertical className="h-3 w-3" />
+									)}
+								</Button>
+							</DropdownMenuTrigger>
+							<DropdownMenuContent align="end" className="w-44">
+								<DropdownMenuItem
+									onClick={() => setShowRetranscribeDialog(true)}
+									disabled={isRetranscribing}
+									className="text-xs gap-2"
+								>
+									<RefreshCw className="h-3 w-3" />
+									retranscribe
+								</DropdownMenuItem>
+							</DropdownMenuContent>
+						</DropdownMenu>
 						<Tooltip>
 							<TooltipTrigger asChild>
 								<Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={handleClose}>
@@ -733,7 +841,7 @@ export function AudioTranscript({
 													audioChunkId={item.audio.audio_chunk_id}
 													speakerId={speakerId}
 													speakerName={speakerName}
-													transcription={item.audio.transcription}
+													transcription={transcriptionOverrides.get(item.audio.audio_chunk_id) ?? item.audio.transcription}
 													audioFilePath={item.audio.audio_file_path}
 													durationSecs={item.audio.duration_secs}
 													timestamp={item.audio.timestamp}
@@ -790,7 +898,7 @@ export function AudioTranscript({
 											audioChunkId={item.audio.audio_chunk_id}
 											speakerId={speakerId}
 											speakerName={speakerName}
-											transcription={item.audio.transcription}
+											transcription={transcriptionOverrides.get(item.audio.audio_chunk_id) ?? item.audio.transcription}
 											audioFilePath={item.audio.audio_file_path}
 											durationSecs={item.audio.duration_secs}
 											timestamp={item.audio.timestamp}
@@ -826,6 +934,48 @@ export function AudioTranscript({
 					borderBottomRightRadius: "12px",
 				}}
 			/>
+
+			{/* Retranscribe dialog */}
+			<Dialog open={showRetranscribeDialog} onOpenChange={setShowRetranscribeDialog}>
+				<DialogContent className="sm:max-w-md">
+					<DialogHeader>
+						<DialogTitle className="text-sm">retranscribe audio</DialogTitle>
+					</DialogHeader>
+					<div className="space-y-3">
+						<p className="text-xs text-muted-foreground">
+							re-run speech-to-text on all audio chunks in the current view.
+							optionally provide a prompt to guide transcription (e.g. speaker names, technical terms, language).
+						</p>
+						<Input
+							placeholder="optional prompt (e.g. 'speakers: marc, ben. topic: AI startups')"
+							value={retranscribePrompt}
+							onChange={(e) => setRetranscribePrompt(e.target.value)}
+							onKeyDown={(e) => {
+								if (e.key === "Enter") handleRetranscribe();
+							}}
+							className="text-xs"
+						/>
+					</div>
+					<DialogFooter>
+						<Button
+							variant="outline"
+							size="sm"
+							className="text-xs"
+							onClick={() => setShowRetranscribeDialog(false)}
+						>
+							cancel
+						</Button>
+						<Button
+							size="sm"
+							className="text-xs gap-1.5"
+							onClick={handleRetranscribe}
+						>
+							<RefreshCw className="h-3 w-3" />
+							retranscribe
+						</Button>
+					</DialogFooter>
+				</DialogContent>
+			</Dialog>
 		</div>
 	) : null;
 }
