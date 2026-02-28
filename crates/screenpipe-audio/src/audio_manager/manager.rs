@@ -36,9 +36,9 @@ use crate::{
     segmentation::segmentation_manager::SegmentationManager,
     transcription::{
         deepgram::streaming::stream_transcription_deepgram,
+        engine::TranscriptionEngine,
         handle_new_transcript,
         stt::{process_audio_input, SAMPLE_RATE},
-        whisper::model::{create_whisper_context_parameters, download_whisper_model},
     },
     utils::{audio::resample, ffmpeg::{get_new_file_path, write_audio_to_file}},
     vad::{silero::SileroVad, webrtc::WebRtcVad, VadEngine, VadEngineEnum},
@@ -69,7 +69,6 @@ pub struct AudioManager {
     transcription_sender: Arc<crossbeam::channel::Sender<TranscriptionResult>>,
     transcription_receiver_handle: Arc<RwLock<Option<JoinHandle<()>>>>,
     recording_receiver_handle: Arc<RwLock<Option<JoinHandle<()>>>>,
-    stt_model_path: tokio::sync::watch::Receiver<Option<PathBuf>>,
     pub metrics: Arc<AudioPipelineMetrics>,
     meeting_detector: Option<Arc<MeetingDetector>>,
     /// Whether transcription is currently paused (legacy, always false — deferral removed).
@@ -77,11 +76,8 @@ pub struct AudioManager {
     /// Optional callback invoked after each audio transcription DB insert.
     /// Used by the hot frame cache to receive live audio updates.
     on_transcription_insert: Option<crate::transcription::AudioInsertCallback>,
-    /// Shared WhisperContext for re-transcription requests.
-    /// Set after the model is loaded in start_audio_receiver_handler.
-    whisper_context: Arc<RwLock<Option<Arc<WhisperContext>>>>,
-    /// Shared alternate STT engine (Qwen3-ASR GGML) for reconciliation.
-    alternate_stt: Arc<RwLock<Option<crate::transcription::stt::AlternateSttEngine>>>,
+    /// Unified transcription engine. Set after model loading in start_audio_receiver_handler.
+    engine: Arc<RwLock<Option<TranscriptionEngine>>>,
 }
 
 /// Result of checking / restarting the two central handler tasks.
@@ -107,24 +103,6 @@ impl AudioManager {
         let (transcription_sender, transcription_receiver) = crossbeam::channel::bounded(1000);
 
         let recording_handles = DashMap::new();
-        let (stt_model_tx, stt_model_rx) = tokio::sync::watch::channel(None);
-        {
-            let engine = options.transcription_engine.clone();
-            tokio::task::spawn_blocking(move || {
-                match download_whisper_model(engine) {
-                    Ok(path) => {
-                        info!("whisper model available: {:?}", path);
-                        let _ = stt_model_tx.send(Some(path));
-                    }
-                    Err(e) => {
-                        error!("failed to download whisper model: {}", e);
-                        // watch stays None — start_audio_receiver_handler will handle this
-                    }
-                }
-            });
-        }
-
-        whisper_rs::install_logging_hooks();
 
         let meeting_detector = options.meeting_detector.clone();
 
@@ -142,13 +120,11 @@ impl AudioManager {
             recording_handles: Arc::new(recording_handles),
             recording_receiver_handle: Arc::new(RwLock::new(None)),
             transcription_receiver_handle: Arc::new(RwLock::new(None)),
-            stt_model_path: stt_model_rx,
             metrics: Arc::new(AudioPipelineMetrics::new()),
             meeting_detector,
             transcription_paused: Arc::new(AtomicBool::new(false)),
             on_transcription_insert: None,
-            whisper_context: Arc::new(RwLock::new(None)),
-            alternate_stt: Arc::new(RwLock::new(None)),
+            engine: Arc::new(RwLock::new(None)),
         };
 
         Ok(manager)
@@ -181,23 +157,14 @@ impl AudioManager {
         // Spawn reconciliation sweep for orphaned audio chunks (batch mode only)
         if self.options.read().await.transcription_mode == TranscriptionMode::Batch {
             let db = self.db.clone();
-            let whisper_ctx_ref = self.whisper_context.clone();
-            let alt_stt_ref = self.alternate_stt.clone();
-            let options = self.options.clone();
+            let engine_ref = self.engine.clone();
             tokio::spawn(async move {
-                // Wait for Whisper model to load + initial recordings
+                // Wait for model to load + initial recordings
                 tokio::time::sleep(Duration::from_secs(120)).await;
                 loop {
-                    if let Some(ref ctx) = *whisper_ctx_ref.read().await {
-                        let opts = options.read().await;
-                        let engine = opts.transcription_engine.clone();
-                        let key = opts.deepgram_api_key.clone();
-                        let langs = opts.languages.clone();
-                        let vocab = opts.vocabulary.clone();
-                        drop(opts);
-                        let alt_stt = alt_stt_ref.read().await.clone();
+                    if let Some(ref engine) = *engine_ref.read().await {
                         let count = super::reconciliation::reconcile_untranscribed(
-                            &db, ctx, engine, key, langs, &vocab, alt_stt,
+                            &db, engine,
                         )
                         .await;
                         if count > 0 {
@@ -415,87 +382,26 @@ impl AudioManager {
         let vad_engine = self.vad_engine.clone();
         let whisper_receiver = self.recording_receiver.clone();
         let metrics = self.metrics.clone();
-        let context_param = create_whisper_context_parameters(audio_transcription_engine.clone())?;
         let meeting_detector = self.meeting_detector.clone();
         let db = self.db.clone();
-        let shared_alternate_stt = self.alternate_stt.clone();
+        let shared_engine = self.engine.clone();
 
-        let quantized_path = {
-            let mut rx = self.stt_model_path.clone();
-            let deadline = tokio::time::Instant::now() + Duration::from_secs(600);
-            loop {
-                if let Some(ref path) = *rx.borrow() {
-                    break path.clone();
-                }
-                match tokio::time::timeout_at(deadline, rx.changed()).await {
-                    Ok(Ok(())) => continue,
-                    Ok(Err(_)) => return Err(anyhow!("whisper model download failed")),
-                    Err(_) => return Err(anyhow!("whisper model download timed out (10 min)")),
-                }
-            }
-        };
-        info!("loading whisper model with GPU acceleration...");
-        // Use spawn_blocking to avoid blocking a tokio worker thread for 1-3s
-        // while the 834MB model is loaded into Metal/Vulkan GPU memory.
-        let whisper_context = tokio::task::spawn_blocking(move || {
-            WhisperContext::new_with_params(&quantized_path.to_string_lossy(), context_param)
-                .map(Arc::new)
-        })
-        .await
-        .map_err(|e| anyhow!("whisper model loading task panicked: {}", e))?
-        .map_err(|e| anyhow!("failed to load whisper model: {}", e))?;
-        info!("whisper model loaded successfully");
+        // Build unified transcription engine — only loads the needed model
+        let engine = TranscriptionEngine::new(
+            audio_transcription_engine,
+            deepgram_api_key,
+            languages,
+            vocabulary,
+        )
+        .await?;
 
-        // Store the context for re-transcription use
-        *self.whisper_context.write().await = Some(whisper_context.clone());
+        // Store for reconciliation / retranscribe access
+        *shared_engine.write().await = Some(engine.clone());
 
-        // Create a single WhisperState and reuse it across all segments.
-        // whisper_full_with_state() clears KV caches and results internally,
-        // so there is no stale data between calls. This avoids repeated
-        // Metal GPU buffer allocation/deallocation per segment.
-        let mut whisper_state = whisper_context
-            .create_state()
-            .map_err(|e| anyhow!("failed to create initial whisper state: {}", e))?;
-        info!("whisper state created (will be reused across segments)");
-
-        // Initialize alternate STT engine (Qwen3-ASR) if selected
-        let alternate_stt: Option<crate::transcription::stt::AlternateSttEngine> = {
-            #[cfg(feature = "qwen3-asr")]
-            {
-                if *audio_transcription_engine == AudioTranscriptionEngine::Qwen3Asr {
-                    match tokio::task::spawn_blocking(|| {
-                        audiopipe::Model::from_pretrained("qwen3-asr-0.6b-ggml")
-                    })
-                    .await
-                    {
-                        Ok(Ok(model)) => {
-                            info!("qwen3-asr-ggml model loaded successfully");
-                            Some(std::sync::Arc::new(std::sync::Mutex::new(
-                                Box::new(model)
-                                    as Box<dyn crate::transcription::stt::AlternateStt + Send>,
-                            )))
-                        }
-                        Ok(Err(e)) => {
-                            error!("failed to load qwen3-asr model: {}", e);
-                            None
-                        }
-                        Err(e) => {
-                            error!("qwen3-asr model loading task panicked: {}", e);
-                            None
-                        }
-                    }
-                } else {
-                    None
-                }
-            }
-            #[cfg(not(feature = "qwen3-asr"))]
-            {
-                None
-            }
-        };
-
-        // Store in shared field so reconciliation can access it
-        *shared_alternate_stt.write().await = alternate_stt.clone();
+        // Create a single session and reuse it across all segments.
+        // WhisperState is reused (whisper_full_with_state clears KV caches internally).
+        let mut session = engine.create_session()?;
+        info!("transcription session created (will be reused across segments)");
 
         Ok(tokio::spawn(async move {
             while let Ok(audio) = whisper_receiver.recv() {
@@ -560,12 +466,7 @@ impl AudioManager {
                             info!("batch mode: audio session ended, transcribing accumulated audio");
                             let count = super::reconciliation::reconcile_untranscribed(
                                 &db,
-                                &whisper_context,
-                                audio_transcription_engine.clone(),
-                                deepgram_api_key.clone(),
-                                languages.clone(),
-                                &vocabulary,
-                                alternate_stt.clone(),
+                                &engine,
                             )
                             .await;
                             info!("batch mode: transcribed {} chunks after session end", count);
@@ -580,15 +481,10 @@ impl AudioManager {
                                 embedding_manager.clone(),
                                 embedding_extractor.clone(),
                                 &output_path.clone().unwrap(),
-                                audio_transcription_engine.clone(),
-                                deepgram_api_key.clone(),
-                                languages.clone(),
                                 &transcription_sender.clone(),
-                                &mut whisper_state,
+                                &mut session,
                                 metrics.clone(),
-                                &vocabulary,
                                 persisted_file_path.clone(),
-                                alternate_stt.clone(),
                             )
                             .await
                             {
@@ -604,15 +500,10 @@ impl AudioManager {
                             embedding_manager.clone(),
                             embedding_extractor.clone(),
                             &output_path.clone().unwrap(),
-                            audio_transcription_engine.clone(),
-                            deepgram_api_key.clone(),
-                            languages.clone(),
                             &transcription_sender.clone(),
-                            &mut whisper_state,
+                            &mut session,
                             metrics.clone(),
-                            &vocabulary,
                             persisted_file_path.clone(),
-                            alternate_stt.clone(),
                         )
                         .await
                         {
@@ -628,15 +519,10 @@ impl AudioManager {
                         embedding_manager.clone(),
                         embedding_extractor.clone(),
                         &output_path.clone().unwrap(),
-                        audio_transcription_engine.clone(),
-                        deepgram_api_key.clone(),
-                        languages.clone(),
                         &transcription_sender.clone(),
-                        &mut whisper_state,
+                        &mut session,
                         metrics.clone(),
-                        &vocabulary,
                         persisted_file_path.clone(),
-                        alternate_stt.clone(),
                     )
                     .await
                     {
@@ -703,17 +589,21 @@ impl AudioManager {
         self.meeting_detector.as_ref()
     }
 
-    /// Returns the shared WhisperContext for re-transcription, if loaded.
+    /// Returns the shared WhisperContext for backward compatibility, if loaded.
     pub async fn whisper_context(&self) -> Option<Arc<WhisperContext>> {
-        self.whisper_context.read().await.clone()
+        self.engine
+            .read()
+            .await
+            .as_ref()
+            .and_then(|e| e.whisper_context())
     }
 
-    /// Returns the STT model path (for creating new WhisperContext if needed).
-    pub fn stt_model_path(&self) -> Option<PathBuf> {
-        self.stt_model_path.borrow().clone()
+    /// Returns the current transcription engine instance (for retranscribe endpoint).
+    pub async fn transcription_engine_instance(&self) -> Option<TranscriptionEngine> {
+        self.engine.read().await.clone()
     }
 
-    /// Returns the current transcription engine.
+    /// Returns the current transcription engine config.
     pub async fn transcription_engine(&self) -> Arc<AudioTranscriptionEngine> {
         self.options.read().await.transcription_engine.clone()
     }

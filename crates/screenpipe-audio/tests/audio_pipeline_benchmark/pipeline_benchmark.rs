@@ -13,15 +13,12 @@ use crate::ground_truth::{ScenarioManifest, SpeechSegment, synthetic_manifest};
 use crate::metrics::PipelineResult;
 
 use screenpipe_audio::core::engine::AudioTranscriptionEngine;
-use screenpipe_audio::transcription::whisper::model::{
-    create_whisper_context_parameters, download_whisper_model,
-};
 use screenpipe_audio::utils::audio::normalize_v2;
 use screenpipe_audio::vad::silero::SileroVad;
 use screenpipe_audio::vad::VadEngine;
+use screenpipe_audio::TranscriptionEngine;
 use screenpipe_core::Language;
 use vad_rs::VadStatus;
-use whisper_rs::WhisperContext;
 
 use std::sync::Arc;
 
@@ -210,19 +207,15 @@ async fn pipeline_with_whisper_dataset() {
     // Load Whisper model (large-v3-turbo quantized — the production default)
     let engine = Arc::new(AudioTranscriptionEngine::WhisperLargeV3TurboQuantized);
     println!("\n  Loading Whisper model (large-v3-turbo-q8_0)...");
-    let model_path = download_whisper_model(engine.clone())
-        .expect("failed to download whisper model");
-    println!("  Model path: {:?}", model_path);
-
-    let context_params = create_whisper_context_parameters(engine.clone())
-        .expect("failed to create whisper context params");
-    let whisper_context = Arc::new(
-        WhisperContext::new_with_params(&model_path.to_string_lossy(), context_params)
-            .expect("failed to load whisper model"),
-    );
-    let mut whisper_state = whisper_context
-        .create_state()
-        .expect("failed to create whisper state");
+    let transcription_engine = TranscriptionEngine::new(
+        engine.clone(),
+        None,
+        vec![Language::English],
+        vec![],
+    )
+    .await
+    .expect("failed to create transcription engine");
+    let mut session = transcription_engine.create_session().expect("failed to create session");
 
     let mut scenarios: Vec<_> = std::fs::read_dir(dataset_path)
         .expect("failed to read dataset directory")
@@ -284,18 +277,9 @@ async fn pipeline_with_whisper_dataset() {
                 let gt_combined = gt_texts.join(" ");
 
                 // Transcribe the full 30-second chunk
-                match screenpipe_audio::stt(
-                    chunk,
-                    SAMPLE_RATE,
-                    "benchmark",
-                    engine.clone(),
-                    None,
-                    vec![Language::English],
-                    &mut whisper_state,
-                    &[],
-                    None,
-                )
-                .await
+                match session
+                    .transcribe(chunk, SAMPLE_RATE, "benchmark")
+                    .await
                 {
                     Ok(text) => {
                         if !text.is_empty() {

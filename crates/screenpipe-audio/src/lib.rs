@@ -5,7 +5,7 @@ pub mod core;
 pub mod metrics;
 pub mod utils;
 pub mod vad;
-pub use transcription::stt::stt;
+pub use transcription::engine::{TranscriptionEngine, TranscriptionSession};
 pub use transcription::{AudioInput, TranscriptionResult};
 pub mod speaker;
 pub mod transcription;

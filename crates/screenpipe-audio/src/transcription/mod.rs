@@ -7,6 +7,7 @@ use std::sync::Arc;
 use crate::core::device::AudioDevice;
 
 pub mod deepgram;
+pub mod engine;
 pub mod stt;
 pub mod whisper;
 

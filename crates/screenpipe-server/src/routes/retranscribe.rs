@@ -8,6 +8,7 @@ use axum::{
     response::{IntoResponse, Json as JsonResponse, Response},
 };
 use chrono::{DateTime, Utc};
+use screenpipe_audio::transcription::engine::TranscriptionEngine;
 use screenpipe_audio::transcription::VocabularyEntry;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -128,63 +129,26 @@ pub async fn retranscribe_handler(
         }
     }
 
-    // 3. Build alternate STT engine for Qwen3-ASR retranscription
-    let alternate_stt: Option<screenpipe_audio::transcription::stt::AlternateSttEngine> = {
-        #[cfg(feature = "qwen3-asr")]
-        {
-            use screenpipe_audio::core::engine::AudioTranscriptionEngine;
-            if *engine == AudioTranscriptionEngine::Qwen3Asr {
-                match audiopipe::Model::from_pretrained("qwen3-asr-0.6b-ggml") {
-                    Ok(model) => {
-                        info!("loaded qwen3-asr model for retranscription");
-                        Some(std::sync::Arc::new(std::sync::Mutex::new(
-                            Box::new(model)
-                                as Box<
-                                    dyn screenpipe_audio::transcription::stt::AlternateStt + Send,
-                                >,
-                        )))
-                    }
-                    Err(e) => {
-                        error!("failed to load qwen3-asr for retranscription: {}", e);
-                        return error_response(
-                            StatusCode::INTERNAL_SERVER_ERROR,
-                            format!("failed to load qwen3-asr: {}", e),
-                        );
-                    }
-                }
-            } else {
-                None
-            }
-        }
-        #[cfg(not(feature = "qwen3-asr"))]
-        {
-            None
+    // 3. Build unified TranscriptionEngine for this retranscription request
+    let transcription_engine = match TranscriptionEngine::new(
+        engine.clone(),
+        deepgram_api_key,
+        languages,
+        effective_vocabulary,
+    )
+    .await
+    {
+        Ok(e) => e,
+        Err(e) => {
+            error!("failed to create transcription engine for retranscribe: {}", e);
+            return error_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("failed to initialize transcription engine: {}", e),
+            );
         }
     };
 
-    // 4. Get WhisperContext for re-transcription (not needed for Qwen3-ASR)
-    let whisper_ctx = match audio_manager.whisper_context().await {
-        Some(ctx) => ctx,
-        None => {
-            use screenpipe_audio::core::engine::AudioTranscriptionEngine;
-            if *engine == AudioTranscriptionEngine::Qwen3Asr && alternate_stt.is_some() {
-                // Qwen3-ASR doesn't need WhisperContext; create a dummy one won't work,
-                // so we handle this in the loop below
-                // For now, return error if whisper isn't loaded (we still need it for state creation)
-                return error_response(
-                    StatusCode::SERVICE_UNAVAILABLE,
-                    "whisper model not loaded — audio recording may be disabled".into(),
-                );
-            } else {
-                return error_response(
-                    StatusCode::SERVICE_UNAVAILABLE,
-                    "whisper model not loaded — audio recording may be disabled".into(),
-                );
-            }
-        }
-    };
-
-    // 5. Process each chunk
+    // 4. Process each chunk
     let mut results = Vec::new();
     let mut processed = 0;
 
@@ -219,27 +183,19 @@ pub async fn retranscribe_handler(
             continue;
         }
 
-        // Create a new WhisperState per chunk (cheap — reuses loaded model weights)
-        let mut whisper_state = match whisper_ctx.create_state() {
+        // Create a session per chunk
+        let mut session = match transcription_engine.create_session() {
             Ok(s) => s,
             Err(e) => {
-                error!("failed to create whisper state: {}", e);
+                error!("failed to create transcription session: {}", e);
                 continue;
             }
         };
 
-        let transcription = match screenpipe_audio::stt(
-            &samples,
-            sample_rate,
-            chunk.device.as_deref().unwrap_or("unknown"),
-            engine.clone(),
-            deepgram_api_key.clone(),
-            languages.clone(),
-            &mut whisper_state,
-            &effective_vocabulary,
-            alternate_stt.clone(),
-        )
-        .await
+        let device_name = chunk.device.as_deref().unwrap_or("unknown");
+        let transcription = match session
+            .transcribe(&samples, sample_rate, device_name)
+            .await
         {
             Ok(text) => text,
             Err(e) => {
@@ -250,7 +206,6 @@ pub async fn retranscribe_handler(
 
         // Update DB — replace all existing transcription rows for this chunk
         let old_text = chunk.transcription.clone();
-        let device_name = chunk.device.as_deref().unwrap_or("unknown");
         let is_input = chunk.is_input_device.unwrap_or(false);
         let engine_name = engine.to_string();
         let timestamp = chunk.timestamp;
