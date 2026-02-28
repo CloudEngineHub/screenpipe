@@ -595,7 +595,10 @@ fn kill_orphan_pi_processes(managed_alive: bool) {
 }
 
 /// Max time to wait for Pi to emit its first stdout line (readiness handshake).
-const PI_READY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
+/// Pi RPC mode doesn't emit anything until it receives a command, so this is
+/// effectively a "wait for the process to be alive and accepting stdin" timeout.
+/// Keep this short — the process is ready as soon as it starts the readline loop.
+const PI_READY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2);
 
 /// Resolve a model name against the screenpipe cloud models list.
 /// Handles mismatches like "claude-haiku-4-5@20251001" when the list only has
@@ -1648,7 +1651,7 @@ mod tests {
     /// Test PI_READY_TIMEOUT constant is sensible
     #[test]
     fn test_ready_timeout_constant() {
-        assert_eq!(super::PI_READY_TIMEOUT.as_secs(), 15);
+        assert_eq!(super::PI_READY_TIMEOUT.as_secs(), 2);
     }
 
 }
