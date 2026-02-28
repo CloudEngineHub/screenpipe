@@ -92,6 +92,10 @@ impl PiExecutor {
                 "screenpipe-retranscribe",
                 include_str!("../../assets/skills/screenpipe-retranscribe/SKILL.md"),
             ),
+            (
+                "screenpipe-analytics",
+                include_str!("../../assets/skills/screenpipe-analytics/SKILL.md"),
+            ),
         ];
 
         for (name, content) in skills {

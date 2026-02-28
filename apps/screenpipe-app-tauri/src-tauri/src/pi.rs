@@ -342,6 +342,7 @@ fn ensure_screenpipe_skill(project_dir: &str) -> Result<(), String> {
         ("screenpipe-pipe-creator", include_str!("../assets/skills/screenpipe-pipe-creator/SKILL.md")),
         ("screenpipe-media", include_str!("../assets/skills/screenpipe-media/SKILL.md")),
         ("screenpipe-retranscribe", include_str!("../assets/skills/screenpipe-retranscribe/SKILL.md")),
+        ("screenpipe-analytics", include_str!("../assets/skills/screenpipe-analytics/SKILL.md")),
     ];
 
     for (name, content) in skills {
