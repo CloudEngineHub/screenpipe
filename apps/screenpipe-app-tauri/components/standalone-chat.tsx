@@ -195,7 +195,7 @@ function GridDissolveLoader({
   toolName?: string;
   thinkingSecs?: number;
 }) {
-  const ROWS = 4;
+  const ROWS = 3;
   const COLS = 5;
   const TOTAL = ROWS * COLS;
   const tickRef = useRef(0);
@@ -207,36 +207,29 @@ function GridDissolveLoader({
   phaseRef.current = phase;
 
   useEffect(() => {
-    const interval = phaseRef.current === "streaming" ? 200 : 120;
+    const interval = phaseRef.current === "streaming" ? 200 : 100;
     const id = window.setInterval(() => {
       const p = phaseRef.current;
       const tick = tickRef.current++;
-      setCells((prev) => {
-        if (p === "thinking") {
-          // Wave sweep: diagonal band moves across the grid
-          return Array.from({ length: TOTAL }, (_, i) => {
-            const row = Math.floor(i / COLS);
-            const col = i % COLS;
-            const wave = (tick * 1.2) % (ROWS + COLS);
-            const dist = Math.abs(row + col - wave);
-            return dist < 1.8;
-          });
-        }
-        if (p === "tool") {
-          // Columns fill bottom-up like a bar chart loading
-          return Array.from({ length: TOTAL }, (_, i) => {
-            const row = Math.floor(i / COLS);
-            const col = i % COLS;
-            const fillHeight = ((tick + col * 2) % (ROWS + 2));
-            return (ROWS - 1 - row) < fillHeight;
-          });
-        }
-        if (p === "streaming") {
-          // Sparse fade-out: mostly off, a few random cells flicker
-          return Array.from({ length: TOTAL }, () => Math.random() > 0.82);
-        }
-        // "analyzing" — classic random toggle (use prev state for continuity)
-        return prev.map((was) => Math.random() > 0.7 ? !was : was);
+      setCells(() => {
+        // Screen-scan effect: a horizontal scan line sweeps top-to-bottom,
+        // lighting up cells as it passes like scanning a screen
+        const scanRow = tick % (ROWS + 1); // 0..ROWS, wraps
+        return Array.from({ length: TOTAL }, (_, i) => {
+          const row = Math.floor(i / COLS);
+          if (p === "streaming") {
+            // Minimal: only scan line visible
+            return row === scanRow % ROWS;
+          }
+          if (p === "tool") {
+            // Scan line + cells below it stay lit (filling up)
+            const fill = tick % (ROWS + 1);
+            return row <= fill || row === scanRow % ROWS;
+          }
+          // analyzing / thinking: scan line is bright, other cells flicker
+          if (row === scanRow % ROWS) return true;
+          return Math.random() > 0.6;
+        });
       });
     }, interval);
     return () => window.clearInterval(id);
@@ -250,38 +243,32 @@ function GridDissolveLoader({
     "analyzing..."
   );
 
-  // Smaller grid (3x2) during streaming to be less intrusive
-  const gridRows = phase === "streaming" ? 2 : ROWS;
-  const gridCols = phase === "streaming" ? 3 : COLS;
-  const gridCells = phase === "streaming" ? cells.slice(0, 6) : cells;
-
   return (
-    <div className="flex items-center gap-3">
+    <div className="flex items-center gap-2">
       <div
         className="grid shrink-0"
         style={{
-          gridTemplateColumns: `repeat(${gridCols}, ${phase === "streaming" ? 6 : 8}px)`,
-          gridTemplateRows: `repeat(${gridRows}, ${phase === "streaming" ? 6 : 8}px)`,
-          gap: "2px",
+          gridTemplateColumns: `repeat(${COLS}, 5px)`,
+          gridTemplateRows: `repeat(${ROWS}, 5px)`,
+          gap: "1px",
         }}
       >
-        {gridCells.map((on, i) => (
+        {cells.map((on, i) => (
           <div
             key={i}
             className={cn(
-              "border transition-colors",
-              phase === "streaming" ? "duration-[200ms]" : "duration-[120ms]",
+              "transition-colors duration-100",
               on
                 ? phase === "streaming"
-                  ? "bg-foreground/40 border-foreground/40"
-                  : "bg-foreground border-foreground"
-                : "bg-transparent border-border/50"
+                  ? "bg-foreground/40"
+                  : "bg-foreground"
+                : "bg-border/30"
             )}
-            style={{ width: phase === "streaming" ? 6 : 8, height: phase === "streaming" ? 6 : 8 }}
+            style={{ width: 5, height: 5 }}
           />
         ))}
       </div>
-      <span className="text-xs font-mono text-muted-foreground tracking-wide">
+      <span className="text-[11px] font-mono text-muted-foreground tracking-wide">
         {displayLabel}
       </span>
     </div>
@@ -2919,10 +2906,10 @@ export function StandaloneChat({ className }: { className?: string } = {}) {
                 exit={{ opacity: 0, y: -5 }}
                 transition={{ duration: 0.15 }}
                 className={cn(
-                  "w-fit",
+                  "w-fit ml-auto",
                   loaderPhase === "streaming"
-                    ? "px-3 py-1.5"
-                    : "px-4 py-3 border border-border/50"
+                    ? "px-2 py-1"
+                    : "px-3 py-2 border border-border/50"
                 )}
               >
                 <GridDissolveLoader
