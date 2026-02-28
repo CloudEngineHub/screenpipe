@@ -575,7 +575,8 @@ async piNewSession() : Promise<Result<null, string>> {
 }
 },
 /**
- * Update Pi config files without restarting the process.
+ * Update Pi config files (models.json / auth.json) without restarting the process.
+ * Call this when the user changes preset — Pi picks up the new config on next prompt.
  */
 async piUpdateConfig(userToken: string | null, providerConfig: PiProviderConfig | null) : Promise<Result<null, string>> {
     try {
