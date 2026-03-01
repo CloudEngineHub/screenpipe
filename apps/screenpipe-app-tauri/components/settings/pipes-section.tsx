@@ -362,7 +362,6 @@ export function PipesSection() {
   const { settings, updateSettings } = useSettings();
   const team = useTeam();
   const { toast } = useToast();
-  const [pipeSyncing, setPipeSyncing] = useState(false);
   const isTeamAdmin = !!team.team && team.role === "admin";
   const [sharingPipe, setSharingPipe] = useState<string | null>(null);
   const [pipeFilter, setPipeFilter] = useState<"all" | "personal" | "team">("all");
@@ -719,51 +718,6 @@ export function PipesSection() {
             <FolderOpen className="h-4 w-4 mr-1" />
             open folder
           </Button>
-          {settings.user?.cloud_subscribed && (
-            <>
-              <div className="flex items-center gap-1.5 ml-2 pl-2 border-l">
-                <Switch
-                  id="pipe-sync-toggle"
-                  checked={!!settings.pipeSyncEnabled}
-                  onCheckedChange={async (checked) => {
-                    await updateSettings({ pipeSyncEnabled: checked });
-                    toast({
-                      title: checked ? "pipe sync enabled" : "pipe sync disabled",
-                      description: checked
-                        ? "pipes will sync across your devices"
-                        : "pipes will no longer sync",
-                    });
-                  }}
-                />
-                <Label htmlFor="pipe-sync-toggle" className="text-xs text-muted-foreground cursor-pointer">
-                  sync
-                </Label>
-              </div>
-              {settings.pipeSyncEnabled && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  disabled={pipeSyncing}
-                  onClick={async () => {
-                    setPipeSyncing(true);
-                    try {
-                      await fetch("http://localhost:3030/sync/pipes/pull", { method: "POST" });
-                      await fetch("http://localhost:3030/sync/pipes/push", { method: "POST" });
-                      await fetchPipes();
-                      toast({ title: "pipes synced" });
-                    } catch (e: any) {
-                      toast({ title: "sync failed", description: e.message, variant: "destructive" });
-                    } finally {
-                      setPipeSyncing(false);
-                    }
-                  }}
-                >
-                  <RefreshCw className={`h-3 w-3 mr-1 ${pipeSyncing ? "animate-spin" : ""}`} />
-                  sync now
-                </Button>
-              )}
-            </>
-          )}
         </div>
       </div>
 

@@ -11,11 +11,14 @@ import {
   Sparkles,
   Zap,
   Shield,
+  RefreshCw,
 } from "lucide-react";
 import { toast } from "@/components/ui/use-toast";
 import { open as openUrl } from "@tauri-apps/plugin-shell";
 import { commands } from "@/lib/utils/tauri";
 import { Card } from "../ui/card";
+import { Switch } from "@/components/ui/switch";
+import { Label } from "@/components/ui/label";
 import { onOpenUrl } from "@tauri-apps/plugin-deep-link";
 import { PricingToggle } from "./pricing-toggle";
 import { ReferralCard } from "./referral-card";
@@ -25,6 +28,7 @@ import posthog from "posthog-js";
 export function AccountSection() {
   const { settings, updateSettings, loadUser } = useSettings();
   const [isAnnual, setIsAnnual] = useState(true);
+  const [pipeSyncing, setPipeSyncing] = useState(false);
 
   useEffect(() => {
     if (!settings.user?.email) {
@@ -236,6 +240,60 @@ export function AccountSection() {
             </div>
             <div className="flex items-center gap-2">
               <span>✓</span> priority support
+            </div>
+          </div>
+
+          {/* Pipe sync */}
+          <div className="mt-4 pt-4 border-t border-border/50">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium">pipe sync across devices</p>
+                <p className="text-xs text-muted-foreground">
+                  sync your pipes & configs to all devices linked to your account
+                </p>
+              </div>
+              <div className="flex items-center gap-3">
+                <div className="flex items-center gap-1.5">
+                  <Switch
+                    id="pipe-sync-toggle"
+                    checked={!!settings.pipeSyncEnabled}
+                    onCheckedChange={async (checked) => {
+                      await updateSettings({ pipeSyncEnabled: checked });
+                      toast({
+                        title: checked ? "pipe sync enabled" : "pipe sync disabled",
+                        description: checked
+                          ? "pipes will sync across your devices"
+                          : "pipes will no longer sync",
+                      });
+                    }}
+                  />
+                  <Label htmlFor="pipe-sync-toggle" className="text-xs text-muted-foreground cursor-pointer sr-only">
+                    sync
+                  </Label>
+                </div>
+                {settings.pipeSyncEnabled && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={pipeSyncing}
+                    onClick={async () => {
+                      setPipeSyncing(true);
+                      try {
+                        await fetch("http://localhost:3030/sync/pipes/pull", { method: "POST" });
+                        await fetch("http://localhost:3030/sync/pipes/push", { method: "POST" });
+                        toast({ title: "pipes synced" });
+                      } catch (e: any) {
+                        toast({ title: "sync failed", description: e.message, variant: "destructive" });
+                      } finally {
+                        setPipeSyncing(false);
+                      }
+                    }}
+                  >
+                    <RefreshCw className={`h-3 w-3 mr-1 ${pipeSyncing ? "animate-spin" : ""}`} />
+                    sync now
+                  </Button>
+                )}
+              </div>
             </div>
           </div>
         </Card>
