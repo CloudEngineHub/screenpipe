@@ -155,25 +155,36 @@ impl PiExecutor {
             json!({"providers": {}})
         };
 
-        // Use actual token value in apiKey (not env var name) — Pi v0.51.1+ may not
-        // resolve env var names reliably, causing tier=anonymous on the gateway.
-        // Falls back to env var name for backwards compatibility when token is absent.
-        let api_key_value = user_token.unwrap_or("SCREENPIPE_API_KEY");
-        let screenpipe_provider = json!({
-            "baseUrl": api_url,
-            "api": "openai-completions",
-            "apiKey": api_key_value,
-            "authHeader": true,
-            "models": screenpipe_cloud_models()
-        });
+        // Only add screenpipe cloud provider if it's the intended provider
+        // (or no provider specified). If the user explicitly chose ollama/openai/custom,
+        // do NOT write screenpipe into models.json to avoid silent credit drain via fallback.
+        let should_add_screenpipe = match provider {
+            None => true,
+            Some("screenpipe") | Some("screenpipe-cloud") | Some("pi") => true,
+            Some(_) => false,
+        };
 
-        if let Some(providers) = models_config
-            .get_mut("providers")
-            .and_then(|p| p.as_object_mut())
-        {
-            providers.insert("screenpipe".to_string(), screenpipe_provider);
-        } else {
-            models_config = json!({"providers": {"screenpipe": screenpipe_provider}});
+        if should_add_screenpipe {
+            // Use actual token value in apiKey (not env var name) — Pi v0.51.1+ may not
+            // resolve env var names reliably, causing tier=anonymous on the gateway.
+            // Falls back to env var name for backwards compatibility when token is absent.
+            let api_key_value = user_token.unwrap_or("SCREENPIPE_API_KEY");
+            let screenpipe_provider = json!({
+                "baseUrl": api_url,
+                "api": "openai-completions",
+                "apiKey": api_key_value,
+                "authHeader": true,
+                "models": screenpipe_cloud_models()
+            });
+
+            if let Some(providers) = models_config
+                .get_mut("providers")
+                .and_then(|p| p.as_object_mut())
+            {
+                providers.insert("screenpipe".to_string(), screenpipe_provider);
+            } else {
+                models_config = json!({"providers": {"screenpipe": screenpipe_provider}});
+            }
         }
 
         // Add the pipe's own provider (ollama, openai, custom) if specified
@@ -227,29 +238,32 @@ impl PiExecutor {
         std::fs::rename(&models_tmp, &models_path)?;
 
         // -- auth.json: merge screenpipe token, preserve other providers --
-        if let Some(token) = user_token {
-            let auth_path = config_dir.join("auth.json");
-            let mut auth: serde_json::Value = if auth_path.exists() {
-                let content = std::fs::read_to_string(&auth_path).unwrap_or_default();
-                serde_json::from_str(&content).unwrap_or_else(|_| json!({}))
-            } else {
-                json!({})
-            };
+        // Only write screenpipe auth when screenpipe provider is actually being used
+        if should_add_screenpipe {
+            if let Some(token) = user_token {
+                let auth_path = config_dir.join("auth.json");
+                let mut auth: serde_json::Value = if auth_path.exists() {
+                    let content = std::fs::read_to_string(&auth_path).unwrap_or_default();
+                    serde_json::from_str(&content).unwrap_or_else(|_| json!({}))
+                } else {
+                    json!({})
+                };
 
-            if let Some(obj) = auth.as_object_mut() {
-                obj.insert("screenpipe".to_string(), json!(token));
-            }
+                if let Some(obj) = auth.as_object_mut() {
+                    obj.insert("screenpipe".to_string(), json!(token));
+                }
 
-            let auth_tmp = config_dir.join("auth.json.tmp");
-            std::fs::write(&auth_tmp, serde_json::to_string_pretty(&auth)?)?;
-            std::fs::rename(&auth_tmp, &auth_path)?;
+                let auth_tmp = config_dir.join("auth.json.tmp");
+                std::fs::write(&auth_tmp, serde_json::to_string_pretty(&auth)?)?;
+                std::fs::rename(&auth_tmp, &auth_path)?;
 
-            // Set restrictive permissions (user read/write only)
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::PermissionsExt;
-                let perms = std::fs::Permissions::from_mode(0o600);
-                let _ = std::fs::set_permissions(&auth_path, perms);
+                // Set restrictive permissions (user read/write only)
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    let perms = std::fs::Permissions::from_mode(0o600);
+                    let _ = std::fs::set_permissions(&auth_path, perms);
+                }
             }
         }
 

@@ -1368,6 +1368,8 @@ export function StandaloneChat({ className }: { className?: string } = {}) {
   };
 
   useEffect(() => {
+    // Don't overwrite pipe-specific preset when watching a pipe execution
+    if (activePipeExecution) return;
     const defaultPreset = settings.aiPresets?.find((p) => p.defaultPreset);
     setActivePreset(defaultPreset || settings.aiPresets?.[0]);
   }, [settings.aiPresets]);
@@ -2932,6 +2934,11 @@ export function StandaloneChat({ className }: { className?: string } = {}) {
         <div className="p-2 border-b border-border/30">
           <AIPresetsSelector
             onPresetChange={setActivePreset}
+            controlledPresetId={activePipeExecution ? activePreset?.id : undefined}
+            onControlledSelect={activePipeExecution ? (id) => {
+              const match = settings.aiPresets?.find((p) => p.id === id);
+              if (match) setActivePreset(match);
+            } : undefined}
             showLoginCta={false}
           />
         </div>
