@@ -2094,17 +2094,17 @@ impl DatabaseManager {
             ocr_text.text_json,
             frames.timestamp,
             frames.name as frame_name,
-            video_chunks.file_path,
+            COALESCE(frames.snapshot_path, video_chunks.file_path) as file_path,
             frames.offset_index,
             frames.app_name,
             ocr_text.ocr_engine,
             frames.window_name,
-            video_chunks.device_name,
+            COALESCE(video_chunks.device_name, frames.device_name) as device_name,
             GROUP_CONCAT(tags.name, ',') as tags,
             frames.browser_url,
             frames.focused
         FROM frames
-        JOIN video_chunks ON frames.video_chunk_id = video_chunks.id
+        LEFT JOIN video_chunks ON frames.video_chunk_id = video_chunks.id
         JOIN ocr_text ON frames.id = ocr_text.frame_id
         LEFT JOIN vision_tags ON frames.id = vision_tags.vision_id
         LEFT JOIN tags ON vision_tags.tag_id = tags.id
