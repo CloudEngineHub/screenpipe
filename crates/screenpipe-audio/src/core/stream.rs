@@ -395,7 +395,7 @@ impl AudioStream {
     ) -> Result<tokio::task::JoinHandle<()>> {
         let device_name = device.name()?;
         #[cfg(target_os = "macos")]
-        let use_vpio = macos_input_vpio;
+        let mut use_vpio = macos_input_vpio;
         #[cfg(target_os = "windows")]
         let use_aec = windows_input_aec;
 
@@ -518,6 +518,8 @@ impl AudioStream {
                 }
                 #[cfg(target_os = "macos")]
                 Err(primary_err) if macos_input_vpio => {
+                    // Report the backend actually running after fallback.
+                    use_vpio = false;
                     warn!(
                         device = %device_name,
                         rate = config.sample_rate().0,

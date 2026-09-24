@@ -26,7 +26,7 @@ uuid = { workspace = true }
 
 # Cross-platform audio capture. Tracks screenpipe/cpal main, which carries
 # the Windows WASAPI AEC and macOS VoiceProcessingIO patches.
-cpal = { git = "https://github.com/screenpipe/cpal.git", rev = "e7edfa174466e87a467d1a58e3a4aec233ff8a21" }
+cpal = { git = "https://github.com/screenpipe/cpal.git", rev = "aa6b20a265bd1d9e240f11db26824b531546395b" }
 
 # Wav encoding
 hound = { workspace = true }
