@@ -679,7 +679,7 @@ export function AIProviderConfig({
           {{
             create: ui("Choose your AI"),
             edit: ui("Edit AI"),
-            copy: ui("Copy AI"),
+            copy: ui("Duplicate AI"),
           }[mode]}
         </h2>
       </div>
@@ -1437,7 +1437,7 @@ export const AIPresetDialog = ({
             {{
               create: ui("Create New Preset"),
               edit: ui("Edit Preset"),
-              copy: ui("Copy Preset"),
+              copy: ui("Duplicate Preset"),
             }[mode]}
           </DialogTitle>
           <DialogDescription>
@@ -2259,7 +2259,7 @@ export const AIPresetsSelector = ({
                                   variant="ghost"
                                   size="icon"
                                   className="h-6 w-6 shrink-0"
-                                  aria-label={ui("Copy {value1}", { value1: preset.id })}
+                                  aria-label={ui("Duplicate {value1}", { value1: preset.id })}
                                   onClick={(e) => {
                                     e.stopPropagation();
                                     handleDuplicatePreset(preset);

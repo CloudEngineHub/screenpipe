@@ -612,10 +612,10 @@ describe("AIPresetsSelector preset copy", () => {
     render(<AIPresetsSelector compact showModelOnly />);
 
     fireEvent.click(screen.getByRole("combobox"));
-    fireEvent.click(screen.getByRole("button", { name: "Copy screenpipe" }));
+    fireEvent.click(screen.getByRole("button", { name: "Duplicate screenpipe" }));
 
-    const dialog = screen.getByRole("dialog", { name: "Copy Preset" });
-    expect(within(dialog).getByRole("heading", { name: "Copy AI" })).toBeInTheDocument();
+    const dialog = screen.getByRole("dialog", { name: "Duplicate Preset" });
+    expect(within(dialog).getByRole("heading", { name: "Duplicate AI" })).toBeInTheDocument();
     expect(within(dialog).getByDisplayValue("screenpipe 2")).toBeEnabled();
     expect(within(dialog).getByRole("button", { name: "create copy" })).toBeInTheDocument();
     expect(within(dialog).queryByText(/edit/i)).not.toBeInTheDocument();
@@ -630,7 +630,7 @@ describe("AIPresetsSelector preset copy", () => {
     );
 
     fireEvent.click(screen.getByRole("combobox"));
-    fireEvent.click(screen.getByRole("button", { name: "Copy screenpipe" }));
+    fireEvent.click(screen.getByRole("button", { name: "Duplicate screenpipe" }));
     fireEvent.click(screen.getByRole("button", { name: "create copy" }));
 
     await waitFor(() =>
@@ -664,9 +664,9 @@ describe("AIPresetsSelector preset copy", () => {
     render(<AIPresetsSelector compact showModelOnly />);
 
     fireEvent.click(screen.getByRole("combobox"));
-    fireEvent.click(screen.getByRole("button", { name: "Copy screenpipe" }));
+    fireEvent.click(screen.getByRole("button", { name: "Duplicate screenpipe" }));
     fireEvent.click(
-      within(screen.getByRole("dialog", { name: "Copy Preset" })).getByRole("button", {
+      within(screen.getByRole("dialog", { name: "Duplicate Preset" })).getByRole("button", {
         name: "Close",
       }),
     );
