@@ -203,10 +203,10 @@ pub struct AudioManager {
     db: Arc<DatabaseManager>,
     vad_engine: Arc<Mutex<Box<dyn VadEngine + Send>>>,
     recording_handles: Arc<RecordingHandlesMap>,
-    recording_sender: Arc<crossbeam::channel::Sender<AudioInput>>,
-    recording_receiver: Arc<crossbeam::channel::Receiver<AudioInput>>,
-    transcription_receiver: Arc<crossbeam::channel::Receiver<TranscriptionResult>>,
-    transcription_sender: Arc<crossbeam::channel::Sender<TranscriptionResult>>,
+    recording_sender: Arc<flume::Sender<AudioInput>>,
+    recording_receiver: Arc<flume::Receiver<AudioInput>>,
+    transcription_receiver: Arc<flume::Receiver<TranscriptionResult>>,
+    transcription_sender: Arc<flume::Sender<TranscriptionResult>>,
     transcription_receiver_handle: Arc<RwLock<Option<JoinHandle<()>>>>,
     meeting_streaming_handle: Arc<RwLock<Option<JoinHandle<()>>>>,
     recording_receiver_handle: Arc<RwLock<Option<JoinHandle<()>>>>,
@@ -409,9 +409,9 @@ impl AudioManager {
 
         let channel_config = &options.channel_config;
         let (recording_sender, recording_receiver) =
-            crossbeam::channel::bounded(channel_config.recording_capacity);
+            flume::bounded(channel_config.recording_capacity);
         let (transcription_sender, transcription_receiver) =
-            crossbeam::channel::bounded(channel_config.transcription_capacity);
+            flume::bounded(channel_config.transcription_capacity);
 
         let recording_handles = DashMap::new();
 
@@ -720,7 +720,7 @@ impl AudioManager {
 
         // Stop producers FIRST: abort per-device recording tasks and the OS audio streams.
         // This must happen before killing the consumer so any audio already queued in the
-        // crossbeam channel (including the final 30s flush) can still be drained.
+        // audio channel (including the final 30s flush) can still be drained.
         for pair in self.recording_handles.iter() {
             let handle = pair.value();
             handle.lock().await.abort();
@@ -1436,7 +1436,8 @@ impl AudioManager {
             );
             let mut deferral_started: Option<std::time::Instant> = None;
 
-            while let Ok(audio) = whisper_receiver.recv() {
+            // Waiting for capture must yield the worker and remain abortable.
+            while let Ok(audio) = whisper_receiver.recv_async().await {
                 metrics.record_chunk_received();
                 debug!("received audio from device: {:?}", audio.device.name);
 
@@ -2312,7 +2313,7 @@ impl AudioManager {
     /// transcription-receiver) are still alive. If either has finished
     /// (crashed / panicked), restart it using the existing `start_*` helpers.
     ///
-    /// The crossbeam channels are `Arc`-wrapped and survive handler restarts,
+    /// The audio channels are `Arc`-wrapped and survive handler restarts,
     /// so per-device recording tasks keep sending without interruption.
     pub async fn check_and_restart_central_handlers(&self) -> CentralHandlerRestartResult {
         let mut result = CentralHandlerRestartResult::default();
@@ -2568,6 +2569,101 @@ mod tests {
     use tokio::sync::{Barrier, Notify, Semaphore};
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn idle_audio_handlers_cancel_and_restart_without_stealing_queued_capture() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = Arc::new(
+            DatabaseManager::new("sqlite::memory:", Default::default())
+                .await
+                .unwrap(),
+        );
+        let manager = AudioManager::new(
+            AudioManagerOptions {
+                is_disabled: true,
+                output_path: Some(tmp.path().to_path_buf()),
+                transcription_engine: Arc::new(AudioTranscriptionEngine::WhisperTiny),
+                audio_capture_mode: AudioCaptureMode::Always,
+                ..Default::default()
+            },
+            db.clone(),
+        )
+        .await
+        .unwrap();
+        *manager.engine.write().await = Some(
+            crate::transcription::engine::unavailable_whisper_engine_for_test("test unavailable"),
+        );
+
+        // Exercise the real tasks with senders/receivers retained by the manager,
+        // as on pause/restart. Closing the channel must not be needed to abort.
+        for transcription in [false, true] {
+            let mut handler = if transcription {
+                manager
+                    .start_transcription_receiver_handler()
+                    .await
+                    .unwrap()
+            } else {
+                manager.start_audio_receiver_handler().await.unwrap()
+            };
+            tokio::time::sleep(Duration::from_millis(25)).await;
+            handler.abort();
+            let stopped = tokio::time::timeout(Duration::from_secs(1), &mut handler).await;
+            if stopped.is_err() {
+                // Also terminate the old blocking implementation on a regression
+                // so test shutdown cannot hang on its occupied executor worker.
+                drop(manager);
+                let _ = tokio::time::timeout(Duration::from_secs(1), handler).await;
+                panic!("idle handler did not cancel (transcription={transcription})");
+            }
+            assert!(stopped.unwrap().unwrap_err().is_cancelled());
+        }
+
+        manager
+            .recording_sender
+            .send_async(AudioInput {
+                data: Arc::new(vec![0.01; 16_000]),
+                sample_rate: 16_000,
+                channels: 1,
+                device: Arc::new(AudioDevice::new("restart mic".into(), DeviceType::Input)),
+                capture_timestamp: chrono::Utc::now().timestamp() as u64,
+            })
+            .await
+            .unwrap();
+        let mut handler = manager.start_audio_receiver_handler().await.unwrap();
+        let persisted = tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                let path: Option<String> =
+                    sqlx::query_scalar("SELECT file_path FROM audio_chunks LIMIT 1")
+                        .fetch_optional(&db.pool)
+                        .await
+                        .unwrap();
+                if let Some(path) = path {
+                    break path;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await;
+        handler.abort();
+        let stopped = tokio::time::timeout(Duration::from_secs(1), &mut handler).await;
+        drop(manager);
+        if stopped.is_err() {
+            let _ = handler.await;
+        }
+        let path = persisted.expect("replacement handler must persist queued audio");
+        assert!(Path::new(&path).is_file());
+        assert_eq!(
+            db.count_audio_transcriptions(db.find_audio_chunk_id(&path).await.unwrap().unwrap())
+                .await
+                .unwrap(),
+            0
+        );
+        assert!(
+            stopped.is_ok(),
+            "replacement must also remain abortable after persistence"
+        );
+        db.close().await;
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn unavailable_whisper_receiver_persists_audio_for_reconciliation_after_reopen() {
         let tmp = tempfile::tempdir().expect("temp output");
         let db_path = tmp.path().join("db.sqlite").to_string_lossy().into_owned();
@@ -2632,7 +2728,7 @@ mod tests {
         assert_eq!(transcript_count, 0);
 
         drop(sender);
-        drop(manager); // drops the final recording sender, allowing blocking recv to end
+        drop(manager); // drops the final recording sender, allowing the async receiver to end
         handler
             .await
             .expect("receiver shutdown after all senders closed");
@@ -2658,6 +2754,203 @@ mod tests {
             transcript_count, 0,
             "row remains an untranscribed reconciliation candidate"
         );
+        reopened.close().await;
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn bounded_capture_backlog_survives_writer_contention_handler_restart_and_reopen() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("db.sqlite");
+        let db = Arc::new(
+            DatabaseManager::new(db_path.to_str().unwrap(), Default::default())
+                .await
+                .unwrap(),
+        );
+        let mut options = AudioManagerOptions {
+            is_disabled: true,
+            output_path: Some(dir.path().to_path_buf()),
+            transcription_engine: Arc::new(AudioTranscriptionEngine::WhisperTiny),
+            audio_capture_mode: AudioCaptureMode::Always,
+            ..Default::default()
+        };
+        options.channel_config.recording_capacity = 2;
+        let manager = AudioManager::new(options, db.clone()).await.unwrap();
+        *manager.engine.write().await = Some(
+            crate::transcription::engine::unavailable_whisper_engine_for_test(
+                "test model unavailable",
+            ),
+        );
+        let captured = chrono::Utc::now().timestamp() - 300;
+        let make_chunk = |index: u64| AudioInput {
+            data: Arc::new(
+                (0..16_000)
+                    .map(|sample| {
+                        let frequency = 440.0 + index as f32 * 80.0;
+                        0.25 * (sample as f32 * std::f32::consts::TAU * frequency / 16_000.0).sin()
+                    })
+                    .collect(),
+            ),
+            sample_rate: 16_000,
+            channels: 1,
+            device: Arc::new(AudioDevice::new(
+                if index.is_multiple_of(2) {
+                    "backlog mic"
+                } else {
+                    "backlog output"
+                }
+                .into(),
+                if index.is_multiple_of(2) {
+                    DeviceType::Input
+                } else {
+                    DeviceType::Output
+                },
+            )),
+            capture_timestamp: (captured + index as i64 * 30) as u64,
+        };
+
+        for generation in 0..2_u64 {
+            manager.options.write().await.transcription_mode = if generation == 0 {
+                TranscriptionMode::Realtime
+            } else {
+                TranscriptionMode::Batch
+            };
+            // Hold the real writer while a bounded recording queue fills. No
+            // simulated DB admission and no sleeps used to guess task readiness.
+            let writer = db.begin_immediate_with_retry().await.unwrap();
+            let base = generation * 4;
+            manager.recording_sender.try_send(make_chunk(base)).unwrap();
+            manager
+                .recording_sender
+                .try_send(make_chunk(base + 1))
+                .unwrap();
+            let sender = manager.recording_sender.clone();
+            let third = make_chunk(base + 2);
+            let fourth = make_chunk(base + 3);
+            let mut producer = tokio::spawn(async move {
+                sender.send_async(third).await.unwrap();
+                sender.send_async(fourth).await.unwrap();
+            });
+            let mut handler = manager.start_audio_receiver_handler().await.unwrap();
+            let queued = tokio::time::timeout(Duration::from_secs(5), async {
+                loop {
+                    if manager.metrics.snapshot().chunks_received == base + 1
+                        && manager.recording_receiver.len() == 2
+                    {
+                        break;
+                    }
+                    tokio::task::yield_now().await;
+                }
+            })
+            .await;
+            let producer_waiting = !producer.is_finished();
+            // Release the writer even if the readiness check failed.
+            writer.commit().await.unwrap();
+            let drained = tokio::time::timeout(Duration::from_secs(5), async {
+                (&mut producer).await.unwrap();
+                loop {
+                    let count: i64 = sqlx::query_scalar("SELECT count(*) FROM audio_chunks")
+                        .fetch_one(&db.pool)
+                        .await
+                        .unwrap();
+                    if count == (base + 4) as i64 {
+                        break;
+                    }
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+            })
+            .await;
+            producer.abort();
+            handler.abort();
+            let stopped = tokio::time::timeout(Duration::from_secs(1), &mut handler).await;
+            if stopped.is_err() {
+                drop(manager);
+                let _ = handler.await;
+                panic!("handler must stop before its replacement starts");
+            }
+            queued.expect("consumer and producer must reach bounded backpressure");
+            assert!(
+                producer_waiting,
+                "full queue must retain the unsent capture"
+            );
+            drained.expect("all captures must persist once the writer is available");
+            assert!(stopped.unwrap().unwrap_err().is_cancelled());
+        }
+        drop(manager);
+        db.close().await;
+        drop(db);
+
+        let reopened = DatabaseManager::new(db_path.to_str().unwrap(), Default::default())
+            .await
+            .unwrap();
+        let chunks = reopened
+            .get_reconciliation_candidate_chunks(
+                chrono::DateTime::from_timestamp(captured - 1, 0).unwrap(),
+                chrono::Utc::now(),
+                20,
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            chunks.len(),
+            8,
+            "failed STT must leave every capture recoverable"
+        );
+        let mut timestamps: Vec<_> = chunks
+            .iter()
+            .map(|chunk| chunk.timestamp.timestamp())
+            .collect();
+        timestamps.sort_unstable();
+        assert_eq!(
+            timestamps,
+            (0..8)
+                .map(|index| captured + index * 30)
+                .collect::<Vec<_>>()
+        );
+        for chunk in chunks {
+            let index = (chunk.timestamp.timestamp() - captured) / 30;
+            let expected_device = if index % 2 == 0 {
+                "backlog mic"
+            } else {
+                "backlog output"
+            };
+            assert!(
+                chunk.file_path.contains(expected_device),
+                "device identity must survive restart"
+            );
+            let (samples, sample_rate) = crate::pcm_decode(&chunk.file_path).unwrap();
+            assert_eq!(sample_rate, 16_000);
+            assert!(
+                samples.len() >= 16_000,
+                "capture must contain decodable audio"
+            );
+            let rms = (samples.iter().map(|sample| sample * sample).sum::<f32>()
+                / samples.len() as f32)
+                .sqrt();
+            assert!(
+                rms > 0.1,
+                "persisted capture must retain the fixture signal"
+            );
+            // Each chunk has its own tone. Check its magnitude independent of
+            // AAC delay/phase, so duplicated or swapped files cannot pass by
+            // merely having nonzero samples and the expected timestamps.
+            let frequency = 440.0 + index as f64 * 80.0;
+            let (real, imaginary) = samples.iter().enumerate().fold(
+                (0.0_f64, 0.0_f64),
+                |(real, imaginary), (sample, value)| {
+                    let phase =
+                        sample as f64 * std::f64::consts::TAU * frequency / sample_rate as f64;
+                    (
+                        real + *value as f64 * phase.cos(),
+                        imaginary + *value as f64 * phase.sin(),
+                    )
+                },
+            );
+            let amplitude = 2.0 * real.hypot(imaginary) / samples.len() as f64;
+            assert!(
+                amplitude > 0.15,
+                "chunk {index} lost its original signal: {amplitude}"
+            );
+        }
         reopened.close().await;
     }
 
