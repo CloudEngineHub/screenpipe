@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "suite": "screenpipe-app-coding-agent-regressions",
-  "dataset_version": "2026-09-25.3",
+  "dataset_version": "2026-09-25.4",
   "suite_type": "regression",
   "owner": "screenpipe engineering",
   "policy": {
@@ -3341,6 +3341,53 @@
         ],
         "command": "cd packages/ai-gateway && \"${BUN_BIN:-bun}\" test src/test/eval-standing-http.test.ts"
       }
+    },
+    {
+      "id": "app-attachment-owner-handoff",
+      "name": "Keep asynchronous file attachments with their initiating chat",
+      "source": {
+        "kind": "git_regression",
+        "fix_commit": "f1bcd5bbbb9d838e471cb73e3ec0e88316ef89e7"
+      },
+      "base_ref": "1f35d982415a6ebb5509dcbd8243772cd8a128b9",
+      "oracle_ref": "f1bcd5bbbb9d838e471cb73e3ec0e88316ef89e7",
+      "tags": [
+        "regression",
+        "escaped-failure",
+        "chat",
+        "attachments",
+        "ownership"
+      ],
+      "prompt": "File attachments can disappear or reach the wrong chat when file reads finish after a pane closes or the foreground chat changes. Fix the attachment hook so a secondary pane file completion remains in its initiating session draft after unmount. A pending foreground read must complete in its original chat, clear its pending entry, and leave the newly selected chat and its local attachment list untouched. Window-level drops must reach only the pane under their pointer, using physical coordinates and device pixel ratio; keep every file in a multiple-file foreground drop. Cancelled pickers must perform no file read or draft creation. Failed reads must clear pending work without adding an attachment or disturbing another draft. Late completion must not recreate a deleted or hidden chat draft. Keep ordinary successful attachment handling working. Checks exercise the actual hook and in-memory chat store with synthetic native dialog/file/document-extraction and locale ports. Native webview delivery, disk persistence, and rendered composer integration are outside this task. Add or update focused tests as needed.",
+      "agent_timeout_seconds": 900,
+      "grader": {
+        "timeout_seconds": 60,
+        "fixtures": [
+          {
+            "local_path": "graders/attachment-owner.fixture.tsx.txt",
+            "destination_path": "apps/screenpipe-app-tauri/components/chat/standalone/hooks/eval-attachment-owner.test.tsx"
+          },
+          {
+            "local_path": "graders/attachment-owner.config.mjs",
+            "destination_path": "apps/screenpipe-app-tauri/eval-attachment-owner.config.mjs"
+          },
+          {
+            "local_path": "graders/attachment-owner-locale.ts.txt",
+            "destination_path": "apps/screenpipe-app-tauri/eval-attachment-locale.ts"
+          }
+        ],
+        "command": "cd apps/screenpipe-app-tauri && bun x --no-install vitest run --config eval-attachment-owner.config.mjs"
+      },
+      "oracle_paths": [
+        "apps/screenpipe-app-tauri/components/chat/standalone/hooks/use-chat-attachments.ts",
+        "apps/screenpipe-app-tauri/components/chat/standalone/hooks/use-session-draft-field.ts"
+      ],
+      "grader_dependency_links": [
+        {
+          "source_path": "apps/screenpipe-app-tauri/node_modules",
+          "destination_path": "apps/screenpipe-app-tauri/node_modules"
+        }
+      ]
     }
   ]
 }

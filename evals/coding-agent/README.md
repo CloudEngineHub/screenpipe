@@ -931,3 +931,7 @@ Run `bun test evals/coding-agent/calibrate-account-standing.test.js` for the
 known-broken/correct, unused fix, permissive admission, blanket refusal, equivalent
 private field and missing-source controls. Dependency setup errors are separate
 from intended behavior failures. Use the shared runner's `--verify` for the case.
+
+### Attachment owner handoff
+
+`app-attachment-owner-handoff` exercises the actual attachment hook and in-memory chat store across delayed file reads, pane unmount, foreground navigation, pointer-scoped drops, cancellation and read failure. Hidden/deleted owners stay absent and ordinary multiple-file attachment survives. Native file/dialog/extraction and locale ports are synthetic; this does not establish native delivery, disk persistence or full composer integration. Run `bun test evals/coding-agent/calibrate-attachment-owner.test.js` with the desktop test dependencies available. Historical verification and mutation calibration are not model trials or an isolation claim.
