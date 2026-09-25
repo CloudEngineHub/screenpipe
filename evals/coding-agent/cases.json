@@ -3400,7 +3400,8 @@
       "oracle_ref": "1c0a271403a4128a2238c355e5820b7f18c98eac",
       "oracle_paths": [
         "packages/ai-gateway/src/handlers/chat.ts",
-        "packages/ai-gateway/src/services/background-limit-fallback.ts"
+        "packages/ai-gateway/src/services/background-limit-fallback.ts",
+        "packages/ai-gateway/src/index.ts"
       ],
       "gate": "advisory",
       "tags": [
