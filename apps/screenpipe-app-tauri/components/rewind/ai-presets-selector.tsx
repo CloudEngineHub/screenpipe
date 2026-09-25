@@ -160,6 +160,8 @@ interface AIProviderConfigProps {
   onSubmit: (data: AIPreset) => void;
   defaultPreset?: AIPreset;
   showLoginCta?: boolean;
+  /** `defaultPreset` seeds a new copy instead of the preset being edited. */
+  isCopy?: boolean;
 }
 
 interface OpenAIModel {
@@ -238,6 +240,7 @@ export function AIProviderConfig({
   onSubmit,
   defaultPreset,
   showLoginCta = true,
+  isCopy = false,
 }: AIProviderConfigProps) {
 
   const ui = useGT();
@@ -670,7 +673,11 @@ export function AIProviderConfig({
     <div className="w-full space-y-3 rounded-lg bg-card p-4">
       <div>
         <h2 className="text-base font-semibold">
-          {defaultPreset?.id ? ui("Edit AI") : ui("Choose your AI")}
+          {isCopy
+            ? ui("Copy AI")
+            : defaultPreset?.id
+              ? ui("Edit AI")
+              : ui("Choose your AI")}
         </h2>
       </div>
 
@@ -1307,7 +1314,11 @@ export function AIProviderConfig({
           {isLoading ? (
             <Icons.spinner className="mr-2 h-3 w-3 animate-spin" />
           ) : null}
-          {defaultPreset ? ui("save changes") : ui("continue")}
+          {isCopy
+            ? ui("create copy")
+            : defaultPreset
+              ? ui("save changes")
+              : ui("continue")}
         </Button>
       </form>
     </div>
@@ -1320,6 +1331,7 @@ interface AIPresetDialogProps {
   onSave: (preset: Partial<AIPreset>) => void;
   preset?: AIPreset;
   showLoginCta?: boolean;
+  isCopy?: boolean;
 }
 
 interface AIPresetsSelectorProps {
@@ -1362,6 +1374,7 @@ export const AIPresetDialog = ({
   onSave,
   preset,
   showLoginCta = true,
+  isCopy = false,
 }: AIPresetDialogProps) => {
   const ui = useGT();
   const handleProviderSubmit = (providerData: any) => {
@@ -1418,18 +1431,25 @@ export const AIPresetDialog = ({
       <DialogContent className="w-full max-w-md sm:max-w-lg max-h-[80vh] overflow-y-auto p-0">
         <DialogHeader className="sr-only">
           <DialogTitle>
-            {preset ? ui("Edit Preset") : ui("Create New Preset")}
+            {isCopy
+              ? ui("Copy Preset")
+              : preset
+                ? ui("Edit Preset")
+                : ui("Create New Preset")}
           </DialogTitle>
           <DialogDescription>
-            {preset
-              ? ui("Modify your AI preset settings here. Click save when you're done.")
-              : ui("Configure your AI preset settings here. Click continue when you're done.")}
+            {isCopy
+              ? ui("Create a new preset from these settings. The original stays unchanged.")
+              : preset
+                ? ui("Modify your AI preset settings here. Click save when you're done.")
+                : ui("Configure your AI preset settings here. Click continue when you're done.")}
           </DialogDescription>
         </DialogHeader>
         <AIProviderConfig
           onSubmit={handleProviderSubmit}
           defaultPreset={defaultPreset}
           showLoginCta={showLoginCta}
+          isCopy={isCopy}
         />
       </DialogContent>
     </Dialog>
@@ -1463,6 +1483,7 @@ export const AIPresetsSelector = ({
   const [selectedPresetToEdit, setSelectedPresetToEdit] = useState<
     AIPreset | undefined
   >();
+  const [isCopyingPreset, setIsCopyingPreset] = useState(false);
   const isControlled = onControlledSelect !== undefined;
   const { isManagedDeployment, policy: enterprisePolicy } = useManagedPolicy();
   const aiPresetPolicy = enterprisePolicy.aiPresetPolicy ?? DEFAULT_ENTERPRISE_AI_PRESET_POLICY;
@@ -1599,9 +1620,9 @@ export const AIPresetsSelector = ({
 
     // If we're editing an existing preset
     if (selectedPresetToEdit) {
-      // If this is a copy/duplicate operation, treat it as a new preset
+      // A copy (or a preset that no longer exists) is saved as a new preset
       if (
-        preset.id !== selectedPresetToEdit.id ||
+        isCopyingPreset ||
         !settings.aiPresets.some((p) => p.id === preset.id)
       ) {
         // Check for duplicate ID
@@ -1751,6 +1772,7 @@ export const AIPresetsSelector = ({
       id: newName,
       defaultPreset: false,
     });
+    setIsCopyingPreset(true);
     setDialogOpen(true);
   };
 
@@ -1765,6 +1787,7 @@ export const AIPresetsSelector = ({
     }
 
     setSelectedPresetToEdit(preset);
+    setIsCopyingPreset(false);
     setDialogOpen(true);
   };
 
@@ -2107,6 +2130,7 @@ export const AIPresetsSelector = ({
                                     defaultPreset: false,
                                   } as AIPreset;
                                   setSelectedPresetToEdit(fullPreset);
+                                  setIsCopyingPreset(true);
                                   setDialogOpen(true);
                                 }}
                               >
@@ -2220,6 +2244,7 @@ export const AIPresetsSelector = ({
                                   variant="ghost"
                                   size="icon"
                                   className="h-6 w-6 shrink-0"
+                                  aria-label={ui("Edit {value1}", { value1: preset.id })}
                                   onClick={(e) => {
                                     e.stopPropagation();
                                     handleEditPreset(preset);
@@ -2231,6 +2256,7 @@ export const AIPresetsSelector = ({
                                   variant="ghost"
                                   size="icon"
                                   className="h-6 w-6 shrink-0"
+                                  aria-label={ui("Copy {value1}", { value1: preset.id })}
                                   onClick={(e) => {
                                     e.stopPropagation();
                                     handleDuplicatePreset(preset);
@@ -2280,6 +2306,7 @@ export const AIPresetsSelector = ({
                       onSelect={() => {
                         handleOpenChange(false);
                         setSelectedPresetToEdit(undefined);
+                        setIsCopyingPreset(false);
                         setDialogOpen(true);
                       }}
                     >
@@ -2308,6 +2335,7 @@ export const AIPresetsSelector = ({
         onSave={handleSavePreset}
         preset={selectedPresetToEdit}
         showLoginCta={showLoginCta}
+        isCopy={isCopyingPreset}
       />
     </>
   );
