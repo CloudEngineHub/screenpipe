@@ -156,12 +156,15 @@ type RecommendedPreset = BaseRecommendedPreset &
       }
   );
 
+/** Whether the preset dialog creates, edits, or copies a preset. */
+type PresetDialogMode = "create" | "edit" | "copy";
+
 interface AIProviderConfigProps {
   onSubmit: (data: AIPreset) => void;
   defaultPreset?: AIPreset;
   showLoginCta?: boolean;
-  /** `defaultPreset` seeds a new copy instead of the preset being edited. */
-  isCopy?: boolean;
+  /** Defaults to "edit" when `defaultPreset` is set, otherwise "create". */
+  mode?: PresetDialogMode;
 }
 
 interface OpenAIModel {
@@ -240,7 +243,7 @@ export function AIProviderConfig({
   onSubmit,
   defaultPreset,
   showLoginCta = true,
-  isCopy = false,
+  mode = defaultPreset?.id ? "edit" : "create",
 }: AIProviderConfigProps) {
 
   const ui = useGT();
@@ -673,11 +676,11 @@ export function AIProviderConfig({
     <div className="w-full space-y-3 rounded-lg bg-card p-4">
       <div>
         <h2 className="text-base font-semibold">
-          {isCopy
-            ? ui("Copy AI")
-            : defaultPreset?.id
-              ? ui("Edit AI")
-              : ui("Choose your AI")}
+          {{
+            create: ui("Choose your AI"),
+            edit: ui("Edit AI"),
+            copy: ui("Copy AI"),
+          }[mode]}
         </h2>
       </div>
 
@@ -1314,11 +1317,11 @@ export function AIProviderConfig({
           {isLoading ? (
             <Icons.spinner className="mr-2 h-3 w-3 animate-spin" />
           ) : null}
-          {isCopy
-            ? ui("create copy")
-            : defaultPreset
-              ? ui("save changes")
-              : ui("continue")}
+          {{
+            create: ui("continue"),
+            edit: ui("save changes"),
+            copy: ui("create copy"),
+          }[mode]}
         </Button>
       </form>
     </div>
@@ -1331,7 +1334,7 @@ interface AIPresetDialogProps {
   onSave: (preset: Partial<AIPreset>) => void;
   preset?: AIPreset;
   showLoginCta?: boolean;
-  isCopy?: boolean;
+  mode: PresetDialogMode;
 }
 
 interface AIPresetsSelectorProps {
@@ -1374,7 +1377,7 @@ export const AIPresetDialog = ({
   onSave,
   preset,
   showLoginCta = true,
-  isCopy = false,
+  mode,
 }: AIPresetDialogProps) => {
   const ui = useGT();
   const handleProviderSubmit = (providerData: any) => {
@@ -1431,25 +1434,25 @@ export const AIPresetDialog = ({
       <DialogContent className="w-full max-w-md sm:max-w-lg max-h-[80vh] overflow-y-auto p-0">
         <DialogHeader className="sr-only">
           <DialogTitle>
-            {isCopy
-              ? ui("Copy Preset")
-              : preset
-                ? ui("Edit Preset")
-                : ui("Create New Preset")}
+            {{
+              create: ui("Create New Preset"),
+              edit: ui("Edit Preset"),
+              copy: ui("Copy Preset"),
+            }[mode]}
           </DialogTitle>
           <DialogDescription>
-            {isCopy
-              ? ui("Create a new preset from these settings. The original stays unchanged.")
-              : preset
-                ? ui("Modify your AI preset settings here. Click save when you're done.")
-                : ui("Configure your AI preset settings here. Click continue when you're done.")}
+            {{
+              create: ui("Configure your AI preset settings here. Click continue when you're done."),
+              edit: ui("Modify your AI preset settings here. Click save when you're done."),
+              copy: ui("Create a new preset from these settings. The original stays unchanged."),
+            }[mode]}
           </DialogDescription>
         </DialogHeader>
         <AIProviderConfig
           onSubmit={handleProviderSubmit}
           defaultPreset={defaultPreset}
           showLoginCta={showLoginCta}
-          isCopy={isCopy}
+          mode={mode}
         />
       </DialogContent>
     </Dialog>
@@ -1483,7 +1486,7 @@ export const AIPresetsSelector = ({
   const [selectedPresetToEdit, setSelectedPresetToEdit] = useState<
     AIPreset | undefined
   >();
-  const [isCopyingPreset, setIsCopyingPreset] = useState(false);
+  const [dialogMode, setDialogMode] = useState<PresetDialogMode>("create");
   const isControlled = onControlledSelect !== undefined;
   const { isManagedDeployment, policy: enterprisePolicy } = useManagedPolicy();
   const aiPresetPolicy = enterprisePolicy.aiPresetPolicy ?? DEFAULT_ENTERPRISE_AI_PRESET_POLICY;
@@ -1622,7 +1625,7 @@ export const AIPresetsSelector = ({
     if (selectedPresetToEdit) {
       // A copy (or a preset that no longer exists) is saved as a new preset
       if (
-        isCopyingPreset ||
+        dialogMode === "copy" ||
         !settings.aiPresets.some((p) => p.id === preset.id)
       ) {
         // Check for duplicate ID
@@ -1772,7 +1775,7 @@ export const AIPresetsSelector = ({
       id: newName,
       defaultPreset: false,
     });
-    setIsCopyingPreset(true);
+    setDialogMode("copy");
     setDialogOpen(true);
   };
 
@@ -1787,7 +1790,7 @@ export const AIPresetsSelector = ({
     }
 
     setSelectedPresetToEdit(preset);
-    setIsCopyingPreset(false);
+    setDialogMode("edit");
     setDialogOpen(true);
   };
 
@@ -2130,7 +2133,7 @@ export const AIPresetsSelector = ({
                                     defaultPreset: false,
                                   } as AIPreset;
                                   setSelectedPresetToEdit(fullPreset);
-                                  setIsCopyingPreset(true);
+                                  setDialogMode("copy");
                                   setDialogOpen(true);
                                 }}
                               >
@@ -2306,7 +2309,7 @@ export const AIPresetsSelector = ({
                       onSelect={() => {
                         handleOpenChange(false);
                         setSelectedPresetToEdit(undefined);
-                        setIsCopyingPreset(false);
+                        setDialogMode("create");
                         setDialogOpen(true);
                       }}
                     >
@@ -2335,7 +2338,7 @@ export const AIPresetsSelector = ({
         onSave={handleSavePreset}
         preset={selectedPresetToEdit}
         showLoginCta={showLoginCta}
-        isCopy={isCopyingPreset}
+        mode={dialogMode}
       />
     </>
   );

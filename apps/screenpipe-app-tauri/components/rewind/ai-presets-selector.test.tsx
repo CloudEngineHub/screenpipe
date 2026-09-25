@@ -659,4 +659,22 @@ describe("AIPresetsSelector preset copy", () => {
     expect(within(dialog).getByDisplayValue("screenpipe")).toBeDisabled();
     expect(within(dialog).getByRole("button", { name: "save changes" })).toBeInTheDocument();
   });
+
+  it("opens edit as an edit after a copy was cancelled", () => {
+    render(<AIPresetsSelector compact showModelOnly />);
+
+    fireEvent.click(screen.getByRole("combobox"));
+    fireEvent.click(screen.getByRole("button", { name: "Copy screenpipe" }));
+    fireEvent.click(
+      within(screen.getByRole("dialog", { name: "Copy Preset" })).getByRole("button", {
+        name: "Close",
+      }),
+    );
+
+    fireEvent.click(screen.getByRole("combobox"));
+    fireEvent.click(screen.getByRole("button", { name: "Edit screenpipe" }));
+
+    const dialog = screen.getByRole("dialog", { name: "Edit Preset" });
+    expect(within(dialog).getByRole("button", { name: "save changes" })).toBeInTheDocument();
+  });
 });
