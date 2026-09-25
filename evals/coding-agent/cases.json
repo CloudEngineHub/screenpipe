@@ -3300,6 +3300,47 @@
         ],
         "command": "bun test ./evals/coding-agent/graders/free-evidence.test.ts"
       }
+    },
+    {
+      "id": "ai-gateway-account-standing-provenance",
+      "name": "Keep temporary sign-in locks and stale account IDs distinct from revocation",
+      "source": {
+        "kind": "git_regression",
+        "fix_commit": "e8732d64bb543cd17b7cd798e74027fcf168573c"
+      },
+      "base_ref": "a9ddc64913d5a0cee60de9a582cb5293298f6ec7",
+      "oracle_ref": "e8732d64bb543cd17b7cd798e74027fcf168573c",
+      "oracle_paths": [
+        "packages/ai-gateway/src/utils/auth.ts",
+        "packages/ai-gateway/src/utils/clerk-standing.ts",
+        "packages/ai-gateway/src/utils/rate-limiter.ts",
+        "packages/ai-gateway/src/types.ts"
+      ],
+      "gate": "advisory",
+      "tags": [
+        "regression",
+        "authentication",
+        "account-standing",
+        "gateway"
+      ],
+      "prompt": "The gateway can refuse an otherwise entitled account because its identity provider temporarily locks new sign-ins, and can treat a stale database account ID as proof of permanent deletion. Repair actual HTTP admission for paid accounts. On GET /anthropic/v1/models, both good and temporarily locked accounts must return 200 with the provider's nonempty model list and exactly one model-list provider call. On that route and POST /v1/chat/completions, a banned account must receive 403 with account_not_in_good_standing and reason banned. A deleted subject verified from this request's signed credential must receive the same 403 error with reason deleted. A provider 404 for a subject obtained only from the website account row must instead return retryable 503 with account_status_unavailable. Preserve the established JSON error envelope. Refused requests must not reach the model provider. Exercise both request-verified and website-row identity paths through the real router, authentication and durable-object admission logic. Identity verification, entitlement/standing responses, provider model listing and durable storage are synthetic ports; other network traffic is refused. Any implementation achieving these outcomes is acceptable, without requiring particular private field names. This case does not cover cryptographic verification, cache migration, live provider behavior, native transcription retries, concurrent admission, model quality or agent isolation.",
+      "agent_timeout_seconds": 900,
+      "grader_dependency_links": [
+        {
+          "source_path": "packages/ai-gateway/node_modules",
+          "destination_path": "packages/ai-gateway/node_modules"
+        }
+      ],
+      "grader": {
+        "timeout_seconds": 60,
+        "fixtures": [
+          {
+            "local_path": "graders/account-standing.fixture.ts.txt",
+            "destination_path": "packages/ai-gateway/src/test/eval-standing-http.test.ts"
+          }
+        ],
+        "command": "cd packages/ai-gateway && \"${BUN_BIN:-bun}\" test src/test/eval-standing-http.test.ts"
+      }
     }
   ]
 }

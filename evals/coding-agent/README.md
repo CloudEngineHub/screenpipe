@@ -915,3 +915,19 @@ a setup error. Only URL configuration is mocked. The companion paid-plan-label
 case covers a separate omission invariant. Fixtures are installed at grading;
 no UI/native recording, live provider verification, agent isolation or model
 improvement is established.
+
+## Account-standing provenance
+
+`ai-gateway-account-standing-provenance` exercises the real gateway HTTP router,
+authentication and durable-object admission logic. Twelve synthetic scenarios
+cover temporary sign-in locks, proven deletion versus a stale website account ID,
+banned accounts, preserved model discovery and refusal before provider work.
+With explicit denial reason checks, the historical parent fails ten complete
+outcomes and preserves two; the reference
+passes all twelve. This does not establish live identity verification, cache
+migration, native retry behavior, concurrency safety or model improvement.
+
+Run `bun test evals/coding-agent/calibrate-account-standing.test.js` for the
+known-broken/correct, unused fix, permissive admission, blanket refusal, equivalent
+private field and missing-source controls. Dependency setup errors are separate
+from intended behavior failures. Use the shared runner's `--verify` for the case.
