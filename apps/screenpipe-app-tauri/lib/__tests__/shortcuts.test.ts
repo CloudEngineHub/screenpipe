@@ -23,6 +23,18 @@ describe("in-app shortcut registry", () => {
     expect(inAppShortcutLabel("next_recent_chat", false)).toBe("Ctrl+Tab");
   });
 
+  it("matches the right sidebar chord even when macOS Option changes the key", () => {
+    const mac = keyEvent({ key: "∫", code: "KeyB", metaKey: true, altKey: true });
+    expect(matchesInAppShortcut(mac, "toggle_right_sidebar", true)).toBe(true);
+    expect(matchesInAppShortcut(mac, "toggle_sidebar", true)).toBe(false);
+    expect(matchesInAppShortcut(mac, "toggle_right_sidebar", false)).toBe(false);
+    expect(inAppShortcutLabel("toggle_right_sidebar", true)).toBe("⌥⌘B");
+    expect(inAppShortcutLabel("toggle_right_sidebar", false)).toBe("Ctrl+Alt+B");
+    expect(matchesInAppShortcut(keyEvent({ key: "b", ctrlKey: true, altKey: true }), "toggle_right_sidebar", false)).toBe(true);
+    expect(matchesInAppShortcut(keyEvent({ key: "b", metaKey: true }), "toggle_right_sidebar", true)).toBe(false);
+    expect(matchesInAppShortcut(keyEvent({ key: "b", metaKey: true, altKey: true, shiftKey: true }), "toggle_right_sidebar", true)).toBe(false);
+  });
+
   it("matches Cmd+W on macOS and Ctrl+W elsewhere", () => {
     expect(
       matchesInAppShortcut(

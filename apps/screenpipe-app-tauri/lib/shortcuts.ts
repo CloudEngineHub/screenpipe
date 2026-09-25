@@ -14,6 +14,7 @@ export type InAppShortcutId =
   | "command_menu"
   | "shortcut_guide"
   | "toggle_sidebar"
+  | "toggle_right_sidebar"
   | "next_recent_chat"
   | "previous_recent_chat";
 
@@ -62,6 +63,12 @@ export const IN_APP_SHORTCUTS: readonly InAppShortcutDefinition[] = [
     section: "app",
     label: msg("Toggle sidebar", {}),
     description: msg("Show or hide the durable chat index", {}),
+  },
+  {
+    id: "toggle_right_sidebar",
+    section: "app",
+    label: msg("Toggle right sidebar", {}),
+    description: msg("Show or hide the browser and file preview panel", {}),
   },
   {
     id: "command_menu",
@@ -132,6 +139,8 @@ export function inAppShortcutLabel(
       return `${primary}/`;
     case "toggle_sidebar":
       return `${primary}B`;
+    case "toggle_right_sidebar":
+      return isMac ? "⌥⌘B" : "Ctrl+Alt+B";
     case "next_recent_chat":
       return isMac ? "⌃Tab" : "Ctrl+Tab";
     case "previous_recent_chat":
@@ -168,6 +177,8 @@ function specFor(id: InAppShortcutId, isMac: boolean): ShortcutSpec {
       return { ...primary, key: "/", code: "Slash" };
     case "toggle_sidebar":
       return { ...primary, key: "b", code: "KeyB" };
+    case "toggle_right_sidebar":
+      return { ...primary, alt: true, key: "b", code: "KeyB" };
     case "next_recent_chat":
       return { key: "Tab", meta: false, ctrl: true, shift: false, alt: false };
     case "previous_recent_chat":

@@ -10,6 +10,11 @@ import { deleteConversationFile } from "@/lib/chat-storage";
 import { writeActiveAiPresetId } from "@/lib/active-ai-preset";
 import { useSettings } from "@/lib/hooks/use-settings";
 import { cn } from "@/lib/utils";
+import {
+  hasOpenShortcutBlockingLayer,
+  inAppShortcutLabel,
+  matchesInAppShortcut,
+} from "@/lib/shortcuts";
 import { PanelRightClose, PanelRightOpen } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { SchedulePromptDialog } from "@/components/chat/schedule-prompt-dialog";
@@ -808,8 +813,25 @@ export function StandaloneChat({
           detail: { action: "toggle" },
         }),
       );
+    } else {
+      window.dispatchEvent(new CustomEvent("screenpipe:browser-sidebar-new-tab"));
     }
   }, [sidePanelHasContent]);
+
+  useEffect(() => {
+    if (!chatShortcutsEnabled) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (
+        event.defaultPrevented || event.repeat || event.isComposing ||
+        event.getModifierState?.("AltGraph") || hasOpenShortcutBlockingLayer()
+      ) return;
+      if (!matchesInAppShortcut(event, "toggle_right_sidebar", isMac)) return;
+      event.preventDefault();
+      toggleBrowserPanel();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [chatShortcutsEnabled, isMac, toggleBrowserPanel]);
 
   const handlePanelStateChange = useCallback(
     (nextState: { hasUrl: boolean; open: boolean }) => {
@@ -2250,19 +2272,14 @@ export function StandaloneChat({
                 onMouseDown={(e) => e.stopPropagation()}
                 onClick={(e) => {
                   e.stopPropagation();
-                  if (sidePanelHasContent) {
-                    toggleBrowserPanel();
-                  } else {
-                    window.dispatchEvent(
-                      new CustomEvent("screenpipe:browser-sidebar-new-tab"),
-                    );
-                  }
+                  toggleBrowserPanel();
                 }}
                 className={cn(
                   "h-7 w-7",
                   sidePanelOpen && "bg-muted ring-2 ring-primary ring-offset-1 ring-offset-background",
                 )}
-                title={sidePanelHasContent ? ui("Toggle side panel") : ui("Open browser tab")}
+                title={`${sidePanelHasContent ? ui("Toggle side panel") : ui("Open browser tab")} (${inAppShortcutLabel("toggle_right_sidebar", isMac)})`}
+                aria-keyshortcuts={isMac ? "Alt+Meta+B" : "Control+Alt+B"}
                 aria-label={sidePanelHasContent ? ui("Toggle side panel") : ui("Open browser tab")}
                 aria-pressed={sidePanelOpen}
               >
