@@ -95,10 +95,15 @@ public func shortcutSetHealthState(_ statePtr: UnsafePointer<CChar>?) -> Int32 {
     return -2
 }
 
+func starredMinutesLeft(until: Int64, now: TimeInterval) -> Int {
+    max(0, Int(ceil((Double(until) / 1000 - now) / 60)))
+}
+
 // MARK: - Metrics data pushed from Rust
 
 final class OverlayMetrics: ObservableObject {
     @Published var starredActive: Bool = false
+    @Published var starredMinutesRemaining: Int = 0
     @Published var audioActive: Bool = false
     @Published var speechRatio: Double = 0
     @Published var meetingActive: Bool = false
@@ -828,7 +833,9 @@ func disclosureContent(
 ) -> (String, String?)? {
     switch control {
     case "brand": return ("screenpipe", uiText("right-click"))
-    case "star": return (uiText(metrics.starredActive ? "Starred session in progress" : "star work session"), starShortcut)
+    case "star": return (metrics.starredActive
+        ? uiText("{minutes} min left · click to end", ["minutes": String(metrics.starredMinutesRemaining)])
+        : uiText("star work session"), starShortcut)
     case "timeline": return (uiText("timeline"), overlayShortcut)
     case "chat": return (uiText("ask chat"), chatShortcut)
     case "search": return (uiText("search"), searchShortcut)
@@ -1188,10 +1195,10 @@ struct ShortcutReminderView: View {
             DockIconButton(icon: "bubble.left.fill", active: metrics.hoveredControl == "chat", scale: scale) {
                 onAction("open_chat")
             }
-            DockIconButton(icon: metrics.starredActive ? "star.fill" : "star", active: metrics.hoveredControl == "star", scale: scale) {
+            DockIconButton(icon: metrics.starredActive ? "star.fill" : "star", active: metrics.hoveredControl == "star", scale: scale, caption: metrics.starredActive ? "\(metrics.starredMinutesRemaining)m" : nil) {
                 onAction("open_starred_sessions")
             }
-            .accessibilityLabel(metrics.starredActive ? "Stop starred session" : "Star a work session")
+            .accessibilityLabel(metrics.starredActive ? uiText("{minutes} min left · click to end", ["minutes": String(metrics.starredMinutesRemaining)]) : uiText("Star a work session"))
             DockIconButton(icon: "rectangle.split.1x2", active: metrics.hoveredControl == "timeline", scale: scale) {
                 onAction("open_timeline")
             }
@@ -1465,12 +1472,22 @@ private struct DockIconButton: View {
     let icon: String
     let active: Bool
     let scale: CGFloat
+    var caption: String? = nil
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
-            Image(systemName: icon)
-                .font(.system(size: 10 * scale, weight: .medium))
+            VStack(spacing: 1 * scale) {
+                Image(systemName: icon)
+                    .font(.system(size: (caption == nil ? 10 : 9) * scale, weight: .medium))
+                if let caption {
+                    Text(caption)
+                        .font(Brand.swiftUIMonoFont(size: 7 * scale, weight: .medium))
+                        .monospacedDigit()
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
+                }
+            }
                 .foregroundColor(.white.opacity(active ? 1 : 0.68))
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(active ? Color.white.opacity(0.14) : Color.clear)
@@ -2182,20 +2199,26 @@ class ShortcutReminderController: NSObject, NSWindowDelegate {
         DispatchQueue.main.async { [self] in
             guard until != starredUntil else { return }
             starredUntil = until
-            starredExpiry?.cancel()
-            let seconds = Double(until) / 1000 - Date().timeIntervalSince1970
-            metrics.starredActive = seconds > 0
-            refreshActiveDisclosure()
-            if seconds > 0 {
-                let expiry = DispatchWorkItem { [weak self] in
-                    guard let self, self.starredUntil == until else { return }
-                    self.metrics.starredActive = false
-                    self.refreshActiveDisclosure()
-                }
-                starredExpiry = expiry
-                DispatchQueue.main.asyncAfter(deadline: .now() + seconds, execute: expiry)
-            }
+            refreshStarredCountdown()
         }
+    }
+
+    private func refreshStarredCountdown() {
+        starredExpiry?.cancel()
+        let until = starredUntil
+        let seconds = Double(until) / 1000 - Date().timeIntervalSince1970
+        let minutes = starredMinutesLeft(until: until, now: Date().timeIntervalSince1970)
+        metrics.starredActive = minutes > 0
+        metrics.starredMinutesRemaining = minutes
+        refreshActiveDisclosure()
+        guard minutes > 0 else { return }
+        // Wake only at the next displayed-minute boundary, including expiry.
+        let tick = DispatchWorkItem { [weak self] in
+            guard let self, self.starredUntil == until else { return }
+            self.refreshStarredCountdown()
+        }
+        starredExpiry = tick
+        DispatchQueue.main.asyncAfter(deadline: .now() + max(0.05, seconds - Double(minutes - 1) * 60), execute: tick)
     }
 
     /// Apply a recording-health state pushed from Rust. Kept even while the
