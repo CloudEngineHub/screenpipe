@@ -142,7 +142,7 @@ private func testExpandedBrandCellAtRight() {
         horizontal: .center,
         scale: 1
     )
-    expect(topBrand?.0 == "brand" && topBrand?.1 == 4, "brand should be last in top dock")
+    expect(topBrand?.0 == "brand" && topBrand?.1 == 5, "brand should be last in top dock")
 
     let search = dockControl(
         at: NSPoint(x: 15, y: 47),
@@ -520,7 +520,7 @@ private func testClampWithoutDisplaysIsIdentity() {
 
 /// Selecting a UI locale must translate labels and leave shortcut tokens intact.
 private func testLocalizedDisclosure() {
-    let sources = ["right-click", "star work session", "Starred session in progress", "timeline", "ask chat", "search", "mic capture", "live", "idle", "settings"]
+    let sources = ["right-click", "star work session", "{minutes} min left · click to end", "timeline", "ask chat", "search", "mic capture", "live", "idle", "settings"]
     let translations = Dictionary(uniqueKeysWithValues: sources.map { source in
         (SHA256.hash(data: Data(source.utf8)).prefix(8).map { String(format: "%02x", $0) }.joined(), "localized " + source)
     })
@@ -535,8 +535,9 @@ private func testLocalizedDisclosure() {
         if control == "timeline" { expect(content?.1 == "⌥Space", "shortcut was translated") }
     }
     metrics.starredActive = true
+    metrics.starredMinutesRemaining = 42
     let activeStar = disclosureContent(for: "star", overlayShortcut: "", chatShortcut: "", searchShortcut: "", starShortcut: "⌥B", metrics: metrics)
-    expect(activeStar?.0 == "localized Starred session in progress", "active session status must replace the start hint")
+    expect(activeStar?.0 == "localized 42 min left · click to end", "active session status must replace the start hint")
     expect(activeStar?.1 == "⌥B", "active session preserves its stop shortcut")
     metrics.starredActive = false
     let disabledStar = disclosureContent(for: "star", overlayShortcut: "", chatShortcut: "", searchShortcut: "", starShortcut: "", metrics: metrics)
@@ -549,6 +550,12 @@ private func testLocalizedDisclosure() {
 @main
 struct ShortcutReminderTests {
     static func main() {
+        expect(starredMinutesLeft(until: 3_600_000, now: 0) == 60, "new hour starts at 60 minutes")
+        expect(starredMinutesLeft(until: 3_600_000, now: 59.9) == 60, "round up partial minute")
+        expect(starredMinutesLeft(until: 3_600_000, now: 60) == 59, "minute boundary ticks down")
+        expect(starredMinutesLeft(until: 3_600_000, now: 3599.9) == 1, "last fraction stays active")
+        expect(starredMinutesLeft(until: 3_600_000, now: 3600) == 0, "expiry clears active state")
+        expect(starredMinutesLeft(until: 0, now: 3601) == 0, "ended session cannot be negative")
         testAnchorPlacement()
         testMarginScales()
         testExpandedBrandCellAtRight()
