@@ -7,4 +7,4 @@ Before is recreated from `acc1e7ba0`. After is from `df81001e94fe8216dfee3ade2fd
 - React desktop viewport: 1280 pixels wide. The before/after images use matching 1280×500 crops. The narrow dark capture uses a 375×700 iframe viewport.
 - These are isolated component renders, not screenshots of a running packaged desktop app. They do not prove native focus, Spaces, or compositor behavior. Temporary capture routes and fixtures are outside the patch.
 
-Verification: 66 focused React tests, 190 Swift checks, three queued native Rust session tests, TypeScript. The repository-wide coverage inventory check reports a pre-existing stale database reader count; no database files changed.
+Verification: 66 focused React tests, 190 Swift checks, three queued native Rust session tests, TypeScript. The generated coverage inventories were refreshed for a pre-existing stale database reader count, and coverage:all:check passes. No database code changed.
