@@ -1528,7 +1528,7 @@ calibration or baseline/reference verification.
 
 `app-openai-stream-tool-choice` executes the historical OpenAI provider with a synthetic SDK transport. The broken parent loses explicit tool choices on four streams and the unsupported-usage retry; seven neighboring outcomes still pass. The provider-only historical repair and current source pass all twelve checks.
 
-The grader checks caller-selected policy, tool schemas, model/messages, input preservation, retry behavior, native tool fragments, content, usage and stream termination. Eleven calibration controls include equivalent code, an unused repair, forced policies, lost schemas/fragments and a missing-source setup error.
+The grader checks caller-selected policy, tool schemas, model/messages, input preservation, retry behavior, native tool fragments, content, usage and stream termination. Fourteen calibration controls include equivalent code, an unused repair, forced policies, lost schemas/fragments, premature completion before content/finish/usage and a missing-source setup error. The grader requires the completion terminator to follow all response data, so content after it cannot satisfy preserved-output checks.
 
 ```sh
 bun test evals/coding-agent/calibrate-openai-tool-choice.test.js
