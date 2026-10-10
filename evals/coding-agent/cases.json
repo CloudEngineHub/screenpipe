@@ -6056,6 +6056,41 @@
         ],
         "command": "cd apps/screenpipe-app-tauri && node node_modules/vitest/vitest.mjs run --config manual-grant.config.mjs"
       }
+    },
+    {
+      "id": "ai-gateway-vertex-string-tool-calls",
+      "name": "Preserve tool-call history across Vertex message content shapes",
+      "source": {
+        "kind": "git_regression",
+        "fix_commit": "85b0f37c6e7efbcdde83bfeea21b601f8da79ca7"
+      },
+      "base_ref": "9371579352e01a088bc153d287323d54601a954f",
+      "oracle_ref": "85b0f37c6e7efbcdde83bfeea21b601f8da79ca7",
+      "oracle_paths": [
+        "packages/ai-gateway/src/providers/vertex-maas.ts"
+      ],
+      "gate": "advisory",
+      "trigger_paths": [
+        "packages/ai-gateway/src/providers/vertex-maas.ts"
+      ],
+      "tags": [
+        "regression",
+        "escaped-failure",
+        "tool-calling",
+        "provider-compatibility"
+      ],
+      "prompt": "Valid tool conversations sent through Vertex MaaS fail after an assistant response whose content is a string, even though it includes tool calls and the following tool outputs reference those calls. Preserve every valid call identifier, function name, serialized arguments and matching tool result in outbound JSON and streaming requests. Support empty, whitespace, null and nonempty assistant content; preserve nonempty text and accept either empty-string or null representation for absent text. Preserve array text with top-level calls, ordinary system/user/assistant text and image messages, request tools and tool choice, zero temperature and token limits, and returned response content. Preserve the existing model endpoint, POST method and bearer authentication header, and send one completion request on ordinary success. Tool outputs appearing before their matching call, or with missing, empty or unknown identifiers, must still be filtered when no missing-id call can be repaired. Preserve valid neighboring pairs and do not mutate the caller message array or nested calls. Exercise the existing public completion methods. No particular private helper or implementation is required. Use synthetic transport and credentials only; do not call a live model, change authentication policy or publish releases.",
+      "agent_timeout_seconds": 900,
+      "grader": {
+        "timeout_seconds": 60,
+        "fixtures": [
+          {
+            "local_path": "graders/vertex-tool-content.fixture.ts.txt",
+            "destination_path": "packages/ai-gateway/eval-vertex-tool-content.test.ts"
+          }
+        ],
+        "command": "bun --no-env-file test packages/ai-gateway/eval-vertex-tool-content.test.ts"
+      }
     }
   ]
 }

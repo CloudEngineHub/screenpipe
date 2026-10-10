@@ -1,5 +1,17 @@
 # Coding-agent regression evals
 
+`ai-gateway-vertex-string-tool-calls` executes the complete Vertex MaaS provider
+through its JSON and streaming completion methods with synthetic authentication
+and HTTP replies. Twelve outcomes preserve tool calls and matching results across
+string, null and array content, ordinary text/images, orphan filtering, request
+options and caller input. The parent fails eight content-shape outcomes and
+preserves four; the reference and current provider pass all twelve. Run
+`bun test evals/coding-agent/calibrate-vertex-tool-content.test.js` for nine
+controls, including equivalent code, unused correct code, lost results/images,
+input mutation and missing-source classification. The hidden fixture appears
+only at grading and uses no dependency links. This does not execute a live model,
+HTTP gateway admission, billing, agent isolation or model trials.
+
 `ai-gateway-null-model-accounting` executes the complete accounting module's
 existing exports without provider or database calls. Thirteen outcomes cover
 absent model names and preserved unknown-string, measured/estimated token,
@@ -91,7 +103,7 @@ The hidden fixture appears only at grading and uses no dependency links.
 This does not establish native recording continuity, real authentication,
 account-switch race safety, browser integration, isolation or model performance.
 
-The current app corpus contains 142 git-mined regressions. See
+The current app corpus contains 146 git-mined regressions. See
 [DESIGN.md](./DESIGN.md) for the Anthropic guidance, source contract, and
 history-mining workflow. The companion website manifest uses this same harness.
 
