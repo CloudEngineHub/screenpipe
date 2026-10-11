@@ -6091,6 +6091,47 @@
         ],
         "command": "bun --no-env-file test packages/ai-gateway/eval-vertex-tool-content.test.ts"
       }
+    },
+    {
+      "id": "app-mcp-session-lifecycle",
+      "name": "Preserve HTTP MCP sessions and explicit deletion",
+      "source": {
+        "kind": "git_regression",
+        "fix_commit": "5e0b1bdbe72f1628bd9b0a82acb63c3d79aba136"
+      },
+      "base_ref": "5aa887630cb04307c4734366b18b9d8ddccca45a",
+      "oracle_ref": "5e0b1bdbe72f1628bd9b0a82acb63c3d79aba136",
+      "oracle_paths": [
+        "packages/screenpipe-mcp/src/http-server.ts"
+      ],
+      "gate": "advisory",
+      "trigger_paths": [
+        "packages/screenpipe-mcp/src/http-server.ts"
+      ],
+      "tags": [
+        "regression",
+        "mcp",
+        "sessions",
+        "lifecycle"
+      ],
+      "prompt": "HTTP MCP clients initialize successfully but cannot reliably reuse or delete their sessions. Repair the public HTTP session lifecycle. Initialization must return a nonempty session ID; repeated tools/list requests using it must succeed and include search_content. Independently initialized clients need distinct IDs and must remain usable independently. The unauthenticated health endpoint must report status ok and the accurate number of active initialized sessions, beginning at zero. An explicit DELETE of an initialized session succeeds, removes it from the active count and makes that ID unusable without disturbing other sessions. Closing every session returns the count to zero; a later initialization gets a fresh usable identity. Unknown or deleted session IDs must receive an HTTP error instead of tools, without entering the active count. Preserve unauthenticated loopback access, HTTP 404 for unknown routes and HTTP 204 for OPTIONS. Exercise synthetic loopback requests only; no actual screen recordings, credentials, live services or particular helper/storage implementation is required. This task checks public responses, active-session accounting and logical invalidation, not heap reclamation, dropped TCP connections, LAN authentication, stdio or concurrency guarantees.",
+      "agent_timeout_seconds": 900,
+      "grader_dependency_links": [
+        {
+          "source_path": "packages/screenpipe-mcp/node_modules",
+          "destination_path": "packages/screenpipe-mcp/node_modules"
+        }
+      ],
+      "grader": {
+        "timeout_seconds": 60,
+        "fixtures": [
+          {
+            "local_path": "graders/mcp-session-lifecycle.fixture.ts.txt",
+            "destination_path": "packages/screenpipe-mcp/src/eval-session.test.ts"
+          }
+        ],
+        "command": "cd packages/screenpipe-mcp && SCREENPIPE_DISABLE_TELEMETRY=1 SCREENPIPE_MCP_TELEMETRY_DISABLED=1 DO_NOT_TRACK=1 node node_modules/vitest/vitest.mjs run src/eval-session.test.ts"
+      }
     }
   ]
 }
