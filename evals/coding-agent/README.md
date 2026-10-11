@@ -103,7 +103,7 @@ The hidden fixture appears only at grading and uses no dependency links.
 This does not establish native recording continuity, real authentication,
 account-switch race safety, browser integration, isolation or model performance.
 
-The current app corpus contains 146 git-mined regressions. See
+The current app corpus contains 147 git-mined regressions. See
 [DESIGN.md](./DESIGN.md) for the Anthropic guidance, source contract, and
 history-mining workflow. The companion website manifest uses this same harness.
 
@@ -1840,3 +1840,18 @@ Run `bun test evals/coding-agent/calibrate-mcp-search-evidence.test.js` to check
 ## Fixed-term manual grants
 
 `app-manual-grant-payment-prompts` executes the actual trial and contextual-card eligibility functions with synthetic accounts and a frozen clock. The parent fails four grant outcomes and preserves eighteen; the source-only reference and current source pass all twenty-two. Signup trials, ordinary payers, enterprise accounts, expired/invalid evidence and eligibility refusals remain covered. Run `bun test evals/coding-agent/calibrate-manual-grant.test.js` for correct, broken, equivalent, disconnected-caller, blanket-exemption and missing-source controls. Fixtures and dependencies appear only at grading. This does not establish rendered UI, native recording, live billing, identity-provider verification, enforced agent isolation or model performance.
+
+## HTTP MCP session lifecycle
+
+`app-mcp-session-lifecycle` exercises actual HTTP initialization, repeated tool
+listing, independent sessions, explicit deletion, later reinitialization and
+health accounting. Six outcomes preserve unknown-session refusal, route and
+preflight behavior. The parent fails four outcomes and preserves two; the fix
+and current server pass all six. The existing search-evidence case catches
+missing registration but accepts an omitted cleanup callback; this case checks
+that distinct deletion/accounting gap. Run
+`bun test evals/coding-agent/calibrate-mcp-session-lifecycle.test.js`.
+The hidden fixture and runtime link appear only at grading. Synthetic loopback
+responses establish logical invalidation and active-session accounting, not heap
+reclamation, disconnect cleanup, LAN authentication, concurrency, agent isolation
+or model performance.
