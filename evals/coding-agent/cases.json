@@ -7085,6 +7085,41 @@
           "destination_path": "node_modules"
         }
       ]
+    },
+    {
+      "id": "app-orphan-guard-one-shot-stdin",
+      "name": "Keep one-shot work alive after prompt stdin closes",
+      "source": {
+        "kind": "git_regression",
+        "fix_commit": "686a2c9058f702ae9f6acfbf97c306281272d7b8"
+      },
+      "base_ref": "3aea8df68f66d3a20e19093be47432b3bee476cf",
+      "oracle_ref": "686a2c9058f702ae9f6acfbf97c306281272d7b8",
+      "oracle_paths": [
+        "crates/screenpipe-core/assets/extensions/orphan-guard.ts"
+      ],
+      "gate": "advisory",
+      "trigger_paths": [
+        "crates/screenpipe-core/assets/extensions/orphan-guard.ts"
+      ],
+      "prompt": "One-shot pipe runs terminate before producing work when their prompt input closes. Preserve one-shot work after stdin end or close. RPC sessions must still exit when their stdin ends or closes. In both modes preserve work while the original parent remains healthy, and exit when the parent PID changes or the parent no longer exists.",
+      "grader": {
+        "timeout_seconds": 60,
+        "fixtures": [
+          {
+            "local_path": "graders/orphan-guard-stdin.test.ts.txt",
+            "destination_path": "eval-hidden-orphan.test.ts"
+          }
+        ],
+        "command": "bun test ./eval-hidden-orphan.test.ts"
+      },
+      "tags": [
+        "regression",
+        "escaped-failure",
+        "pipes",
+        "lifecycle",
+        "stdin"
+      ]
     }
   ]
 }

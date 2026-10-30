@@ -2145,3 +2145,16 @@ eleven correct/broken/bypass/preserved/equivalent controls. Third-party dependen
 and the hidden fixture appear only at grading. These checks exclude live model
 quality, provider availability, billing settlement, deployment, enforced agent
 isolation and model performance.
+
+### One-shot pipe stdin lifecycle
+
+`app-orphan-guard-one-shot-stdin` executes the actual orphan-guard extension
+with synthetic process, event and timer ports. Eight outcomes preserve one-shot
+work after stdin closes, RPC stdin termination, healthy-parent work and
+changed/missing-parent termination. Parent: six pass and two intended failures;
+reference and current source: eight pass. Run
+`bun test evals/coding-agent/calibrate-orphan-guard-stdin.test.js` for ten
+controls including unused fixes, no-op behavior, missing safeguards and equivalent
+implementations. The fixture appears only at grading, with no dependency links.
+This does not prove real Pi startup, OS process death, enforced agent isolation
+or model performance. Timer reference counting is outside these checks.
