@@ -1111,7 +1111,6 @@ pub(crate) async fn resume_enterprise_recording(app: &tauri::AppHandle) {
         let state = app.state::<RecordingState>();
         let allowed = || {
             state.authorization_recovery.is_current(generation)
-                && state.capture_intended()
                 && crate::enterprise_policy::recording_authorized()
                 && !crate::process_exit::QUIT_REQUESTED.load(Ordering::SeqCst)
                 && !crate::db_relaunch::manual_recovery_required()
@@ -1132,7 +1131,7 @@ pub(crate) async fn resume_enterprise_recording(app: &tauri::AppHandle) {
                             crate::enterprise::managed_settings::apply(&app).await?;
                             authorized_start::attempt(
                                 &state.server_lifecycle,
-                                allowed,
+                                || allowed() && state.capture_intended(),
                                 || async {
                                     // Drop each slot guard before acquiring the other;
                                     // capture teardown can itself need the server slot.
