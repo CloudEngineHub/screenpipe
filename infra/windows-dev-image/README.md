@@ -69,7 +69,7 @@ Defaults target West US 2 and `Standard_D16s_v5`. Override
 
 ## GitHub delivery identity
 
-The worker uses the `screenpipe-windows-worker` GitHub App, never a personal
+The worker uses the organization-owned `screenpipe-windows-development` GitHub App, never a personal
 access token or personal fork. Install it only on the required repositories,
 with contents and pull requests write access (and mandatory metadata read).
 
